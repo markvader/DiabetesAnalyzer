@@ -1,5 +1,13 @@
-import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
+import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import TensorFlowAIService from './tensorFlowAIService';
+
+// Interface for custom glucose range settings
+export interface CustomGlucoseRanges {
+  lowThreshold: number;
+  highThreshold: number;
+  targetMin: number;
+  targetMax: number;
+}
 
 class AIService {
   providers: any[] = [];
@@ -141,7 +149,7 @@ class AIService {
   }
 
   // Analyze glucose patterns - API Primary, TensorFlow Fallback
-  async analyzeGlucosePatterns(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }) {
+  async analyzeGlucosePatterns(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }, customGlucoseRanges?: CustomGlucoseRanges) {
     console.log('🔍 Glucose Pattern Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       hasTimeInRange: !!timeInRange 
@@ -305,7 +313,7 @@ class AIService {
   }
 
   // Generate management plan
-  async generateManagementPlan(readings: any[], treatments: any[], glucoseContext?: any) {
+  async generateManagementPlan(readings: any[], treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
     // If no API providers are available, use fallback
     if (this.providers.length === 0) {
       return this.getFallbackManagementPlan(glucoseContext);
@@ -317,7 +325,7 @@ class AIService {
     
     // Calculate basic stats for the prompt
     const stats = this.calculateBasicStats(readings);
-    const timeInRange = this.calculateTimeInRange(readings);
+    const timeInRange = this.calculateTimeInRange(readings, customGlucoseRanges);
     
     // Format values based on context
     const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
@@ -1228,18 +1236,23 @@ class AIService {
     };
   }
 
-  private calculateTimeInRange(readings: any[]) {
+  private calculateTimeInRange(readings: any[], customRanges?: CustomGlucoseRanges) {
     if (!readings || readings.length === 0) {
       return { inRange: 0, high: 0, low: 0 };
     }
+    
+    // Get glucose thresholds based on custom ranges or defaults
+    const thresholds = customRanges 
+      ? getGlucoseRanges('mmol', customRanges)
+      : GLUCOSE_RANGES;
     
     let inRange = 0, high = 0, low = 0;
     
     readings.forEach(reading => {
       const mmol = toMmol(reading.sgv);
-      if (mmol >= GLUCOSE_RANGES.TARGET_MIN && mmol <= GLUCOSE_RANGES.TARGET_MAX) {
+      if (mmol >= thresholds.TARGET_MIN && mmol <= thresholds.TARGET_MAX) {
         inRange++;
-      } else if (mmol > GLUCOSE_RANGES.TARGET_MAX) {
+      } else if (mmol > thresholds.TARGET_MAX) {
         high++;
       } else {
         low++;

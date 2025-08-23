@@ -7,6 +7,7 @@ import { InsulinPumpProvider } from './contexts/InsulinPumpContext';
 import { TimeFormatProvider } from './contexts/TimeFormatContext';
 import { TensorFlowProvider } from './contexts/TensorFlowContext';
 import { DashboardDisplayProvider } from './contexts/DashboardDisplayContext';
+import { TimeInRangeProvider } from './contexts/TimeInRangeContext';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -48,11 +49,12 @@ function App() {
     <ThemeProvider>
       <TimeFormatProvider>
         <GlucoseUnitsProvider>
-          <InsulinPumpProvider>
-            <TensorFlowProvider>
-              <DashboardDisplayProvider>
-                <NightscoutProvider>
-                  <SubscriptionProvider>
+          <TimeInRangeProvider>
+            <InsulinPumpProvider>
+              <TensorFlowProvider>
+                <DashboardDisplayProvider>
+                  <NightscoutProvider>
+                    <SubscriptionProvider>
               <Router>
                 <Layout>
                   <ErrorBoundary>
@@ -99,6 +101,7 @@ function App() {
       </DashboardDisplayProvider>
     </TensorFlowProvider>
   </InsulinPumpProvider>
+  </TimeInRangeProvider>
   </GlucoseUnitsProvider>
   </TimeFormatProvider>
   </ThemeProvider>

@@ -28,6 +28,13 @@ interface Profile {
   sens: TimeSegment[]; // ISF
 }
 
+interface CustomGlucoseRanges {
+  lowThreshold: number;
+  highThreshold: number;
+  targetMin: number;
+  targetMax: number;
+}
+
 interface AnalysisResults {
   basalSuggestions: TimeSegment[];
   isfSuggestions: TimeSegment[];
@@ -49,10 +56,15 @@ interface AnalysisResults {
 }
 
 // Constants for analysis - MUCH MORE CONSERVATIVE
-const TARGET_BG_MIN = GLUCOSE_RANGES.TARGET_MIN;
-const TARGET_BG_MAX = GLUCOSE_RANGES.TARGET_MAX;
-const HIGH_BG_THRESHOLD = GLUCOSE_RANGES.HIGH_THRESHOLD;
-const LOW_BG_THRESHOLD = GLUCOSE_RANGES.LOW_THRESHOLD;
+// Default to GLUCOSE_RANGES but allow custom settings to override
+function getGlucoseThresholds(customRanges?: CustomGlucoseRanges) {
+  return {
+    TARGET_BG_MIN: customRanges?.targetMin ?? GLUCOSE_RANGES.TARGET_MIN,
+    TARGET_BG_MAX: customRanges?.targetMax ?? GLUCOSE_RANGES.TARGET_MAX,
+    HIGH_BG_THRESHOLD: customRanges?.highThreshold ?? GLUCOSE_RANGES.HIGH_THRESHOLD,
+    LOW_BG_THRESHOLD: customRanges?.lowThreshold ?? GLUCOSE_RANGES.LOW_THRESHOLD
+  };
+}
 
 // ULTRA-CONSERVATIVE adjustment factors (reduced from previous values)
 const ADJUSTMENT_FACTOR_BASAL = 0.05; // Reduced from 0.1 to 0.05 (5% max adjustment)
@@ -83,17 +95,19 @@ function groupReadingsByTimeOfDay(readings: BGReading[]) {
   return timeGroups;
 }
 
-// Calculate time in range percentage
-function calculateTimeInRange(readings: BGReading[]) {
+// Calculate time in range percentage with custom glucose ranges
+function calculateTimeInRange(readings: BGReading[], customRanges?: CustomGlucoseRanges) {
   if (!readings.length) return { inRange: 0, high: 0, low: 0 };
+  
+  const thresholds = getGlucoseThresholds(customRanges);
   
   const inRange = readings.filter(r => {
     const mmol = toMmol(r.sgv);
-    return mmol >= TARGET_BG_MIN && mmol <= TARGET_BG_MAX;
+    return mmol >= thresholds.TARGET_BG_MIN && mmol <= thresholds.TARGET_BG_MAX;
   }).length;
   
-  const high = readings.filter(r => toMmol(r.sgv) > TARGET_BG_MAX).length;
-  const low = readings.filter(r => toMmol(r.sgv) < TARGET_BG_MIN).length;
+  const high = readings.filter(r => toMmol(r.sgv) > thresholds.TARGET_BG_MAX).length;
+  const low = readings.filter(r => toMmol(r.sgv) < thresholds.TARGET_BG_MIN).length;
   
   return {
     inRange: (inRange / readings.length) * 100,
@@ -359,7 +373,11 @@ function average(numbers: number[]): number {
 }
 
 // Main analysis function with AI enhancement
-export async function analyzeData(data: any, pumpId?: string): Promise<AnalysisResults | null> {
+export async function analyzeData(
+  data: any, 
+  pumpId?: string, 
+  customGlucoseRanges?: CustomGlucoseRanges
+): Promise<AnalysisResults | null> {
   if (!data || !data.entries || !data.profile || !data.treatments) {
     return null;
   }
@@ -388,7 +406,7 @@ export async function analyzeData(data: any, pumpId?: string): Promise<AnalysisR
     ? roundToDecimal(readings.reduce((sum, r) => sum + r.sgv, 0) / readings.length, 0)
     : 0;
   
-  const timeInRangeStats = calculateTimeInRange(readings);
+  const timeInRangeStats = calculateTimeInRange(readings, customGlucoseRanges);
   
   // Check for critical safety issues
   if (timeInRangeStats.low > 4) {

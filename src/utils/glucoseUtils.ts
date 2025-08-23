@@ -13,30 +13,52 @@ export const toMgdl = (mmol: number): number => {
   return Math.round(mmol / MGDL_TO_MMOL);
 };
 
-// Get glucose ranges in the specified unit
-export const getGlucoseRanges = (unit: 'mmol' | 'mgdl') => {
+// Get glucose ranges in the specified unit with optional custom settings
+export const getGlucoseRanges = (unit: 'mmol' | 'mgdl', customSettings?: {
+  lowThreshold: number;
+  highThreshold: number;
+  targetMin: number;
+  targetMax: number;
+}) => {
+  // Use custom settings if provided, otherwise use defaults
+  const baseRanges = customSettings ? {
+    LOW_THRESHOLD: customSettings.lowThreshold,
+    HIGH_THRESHOLD: customSettings.highThreshold,
+    TARGET_MIN: customSettings.targetMin,
+    TARGET_MAX: customSettings.targetMax,
+    DISPLAY_MIN: GLUCOSE_RANGES.DISPLAY_MIN,
+    DISPLAY_MAX: GLUCOSE_RANGES.DISPLAY_MAX,
+    COLORS: GLUCOSE_RANGES.COLORS
+  } : GLUCOSE_RANGES;
+
   if (unit === 'mgdl') {
     return {
-      LOW_THRESHOLD: toMgdl(GLUCOSE_RANGES.LOW_THRESHOLD),
-      HIGH_THRESHOLD: toMgdl(GLUCOSE_RANGES.HIGH_THRESHOLD),
-      TARGET_MIN: toMgdl(GLUCOSE_RANGES.TARGET_MIN),
-      TARGET_MAX: toMgdl(GLUCOSE_RANGES.TARGET_MAX),
-      DISPLAY_MIN: toMgdl(GLUCOSE_RANGES.DISPLAY_MIN),
-      DISPLAY_MAX: toMgdl(GLUCOSE_RANGES.DISPLAY_MAX),
-      COLORS: GLUCOSE_RANGES.COLORS
+      LOW_THRESHOLD: toMgdl(baseRanges.LOW_THRESHOLD),
+      HIGH_THRESHOLD: toMgdl(baseRanges.HIGH_THRESHOLD),
+      TARGET_MIN: toMgdl(baseRanges.TARGET_MIN),
+      TARGET_MAX: toMgdl(baseRanges.TARGET_MAX),
+      DISPLAY_MIN: toMgdl(baseRanges.DISPLAY_MIN),
+      DISPLAY_MAX: toMgdl(baseRanges.DISPLAY_MAX),
+      COLORS: baseRanges.COLORS
     };
   }
-  return GLUCOSE_RANGES;
+  return baseRanges;
 };
 
-// Get color based on glucose value (expects value in mmol/L)
-export const getGlucoseColor = (value: number, unit: 'mmol' | 'mgdl' = 'mmol'): string => {
+// Get color based on glucose value with optional custom thresholds
+export const getGlucoseColor = (value: number, unit: 'mmol' | 'mgdl' = 'mmol', customSettings?: {
+  lowThreshold: number;
+  highThreshold: number;
+}): string => {
   const valueInMmol = unit === 'mgdl' ? toMmol(value) : value;
   
-  if (valueInMmol > GLUCOSE_RANGES.HIGH_THRESHOLD) {
+  const lowThreshold = customSettings?.lowThreshold ?? GLUCOSE_RANGES.LOW_THRESHOLD;
+  const highThreshold = customSettings?.highThreshold ?? GLUCOSE_RANGES.HIGH_THRESHOLD;
+  
+  if (valueInMmol > highThreshold) {
     return 'text-orange-600 dark:text-orange-400';
   }
-  if (valueInMmol < GLUCOSE_RANGES.LOW_THRESHOLD) {
+  if (valueInMmol < lowThreshold) {
     return 'text-red-600 dark:text-red-400';
   }
   return 'text-green-600 dark:text-green-400';

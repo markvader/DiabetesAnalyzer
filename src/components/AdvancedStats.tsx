@@ -269,6 +269,7 @@ const computeStatsAsync = (readings: GlucoseReading[], convertToCurrentUnit: (va
 const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
   const { theme } = useTheme();
   const { getCurrentGlucoseRanges, formatGlucoseValue, getUnitLabel, convertToCurrentUnit } = useGlucoseFormatting();
+  const ranges = getCurrentGlucoseRanges();
   const isDark = theme === 'dark';
   const [stats, setStats] = useState<StatsResult | null>(null);
   const [computing, setComputing] = useState(false);
@@ -515,7 +516,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div className="space-y-4">
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-sm text-gray-700 dark:text-gray-300">Very High (&gt;{formatGlucoseValue(13.9, 'mmol', false)} {getUnitLabel()})</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Very High (&gt;{formatGlucoseValue(ranges.HIGH_THRESHOLD, 'mmol', false)} {getUnitLabel()})</span>
               <span className="text-sm text-red-600 dark:text-red-400">{stats.timeInRanges.veryHigh.toFixed(1)}%</span>
             </div>
             <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full">
@@ -528,7 +529,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-sm text-gray-700 dark:text-gray-300">High ({formatGlucoseValue(10.0, 'mmol', false)}-{formatGlucoseValue(13.9, 'mmol', false)} {getUnitLabel()})</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">High ({formatGlucoseValue(ranges.TARGET_MAX, 'mmol', false)}-{formatGlucoseValue(ranges.HIGH_THRESHOLD, 'mmol', false)} {getUnitLabel()})</span>
               <span className="text-sm text-orange-600 dark:text-orange-400">{stats.timeInRanges.high.toFixed(1)}%</span>
             </div>
             <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full">
@@ -541,7 +542,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-sm text-gray-700 dark:text-gray-300">Target Range ({formatGlucoseValue(3.9, 'mmol', false)}-{formatGlucoseValue(10.0, 'mmol', false)} {getUnitLabel()})</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Target Range ({formatGlucoseValue(ranges.TARGET_MIN, 'mmol', false)}-{formatGlucoseValue(ranges.TARGET_MAX, 'mmol', false)} {getUnitLabel()})</span>
               <span className="text-sm text-green-600 dark:text-green-400">{stats.timeInRanges.inRange.toFixed(1)}%</span>
             </div>
             <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full">
@@ -554,7 +555,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-sm text-gray-700 dark:text-gray-300">Low ({formatGlucoseValue(3.0, 'mmol', false)}-{formatGlucoseValue(3.9, 'mmol', false)} {getUnitLabel()})</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Low ({formatGlucoseValue(ranges.LOW_THRESHOLD, 'mmol', false)}-{formatGlucoseValue(ranges.TARGET_MIN, 'mmol', false)} {getUnitLabel()})</span>
               <span className="text-sm text-blue-600 dark:text-blue-400">{stats.timeInRanges.low.toFixed(1)}%</span>
             </div>
             <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full">
@@ -567,7 +568,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
           <div>
             <div className="flex justify-between mb-1">
-              <span className="text-sm text-gray-700 dark:text-gray-300">Very Low (&lt;{formatGlucoseValue(3.0, 'mmol', false)} {getUnitLabel()})</span>
+              <span className="text-sm text-gray-700 dark:text-gray-300">Very Low (&lt;{formatGlucoseValue(ranges.LOW_THRESHOLD, 'mmol', false)} {getUnitLabel()})</span>
               <span className="text-sm text-purple-600 dark:text-purple-400">{stats.timeInRanges.veryLow.toFixed(1)}%</span>
             </div>
             <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full">

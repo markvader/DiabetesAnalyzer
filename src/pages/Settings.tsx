@@ -5,11 +5,13 @@ import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
+import { useTimeInRange } from '../contexts/TimeInRangeContext';
 import { INSULIN_PUMPS, InsulinPumpProfile, getPumpsByCategory, getAAPSSupportedPumps } from '../constants/insulinPumps';
 import { format } from 'date-fns';
 import { testConnection } from '../services/nightscoutService';
-import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu, Target } from 'lucide-react';
 import { aiService } from '../services/aiService';
+import TimeInRangeSettings from '../components/TimeInRangeSettings';
 
 const Settings = () => {
   const { 
@@ -41,6 +43,13 @@ const Settings = () => {
     reinitialize: reinitializeTensorFlow
   } = useTensorFlow();
   const { showDeviceStatus, setShowDeviceStatus } = useDashboardDisplay();
+  const { 
+    settings: timeInRangeSettings, 
+    updateSettings: updateTimeInRangeSettings, 
+    resetToDefaults: resetTimeInRangeToDefaults,
+    getSettingsInUnit,
+    setSettingsFromUnit
+  } = useTimeInRange();
   const [newUrl, setNewUrl] = useState(url);
   const [newToken, setNewToken] = useState(token);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -874,6 +883,39 @@ const Settings = () => {
               <Info className="h-4 w-4 inline mr-2" />
               Currently using: <strong>{getUnitLabel()}</strong>. 
               Changes will be applied immediately throughout the application.
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Time in Range Settings */}
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden transition-colors duration-200 mb-6">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <Target className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Time in Range Settings</h3>
+            </div>
+            <button
+              onClick={resetTimeInRangeToDefaults}
+              className="px-3 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors duration-200"
+            >
+              Reset to Defaults
+            </button>
+          </div>
+          
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
+            Customize your target glucose ranges. These settings affect Time in Range calculations, glucose color coding, and analysis throughout the application.
+          </p>
+          
+          <TimeInRangeSettings />
+          
+          <div className="mt-4 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+            <p className="text-sm text-purple-800 dark:text-purple-200">
+              <Info className="h-4 w-4 inline mr-2" />
+              <strong>Current targets:</strong> {getSettingsInUnit(unit).targetMin.toFixed(1)} - {getSettingsInUnit(unit).targetMax.toFixed(1)} {getUnitLabel()}
+              <br />
+              <strong>Alert thresholds:</strong> Low &lt; {getSettingsInUnit(unit).lowThreshold.toFixed(1)} {getUnitLabel()}, High &gt; {getSettingsInUnit(unit).highThreshold.toFixed(1)} {getUnitLabel()}
             </p>
           </div>
         </div>

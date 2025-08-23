@@ -1,7 +1,15 @@
 // AI-Enhanced Analysis for Basal, ISF, and Carb Ratios
 import { roundToDecimal } from '../utils/mathUtils';
-import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
+import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import { aiAnalysisService } from './aiAnalysisService';
+
+// Interface for custom glucose range settings
+export interface CustomGlucoseRanges {
+  lowThreshold: number;
+  highThreshold: number;
+  targetMin: number;
+  targetMax: number;
+}
 
 interface TimeSegment {
   time: string;
@@ -25,7 +33,8 @@ interface AIEnhancedSuggestions {
 export const analyzeWithAI = async (
   readings: any[],
   treatments: any[],
-  currentProfile: any
+  currentProfile: any,
+  customGlucoseRanges?: CustomGlucoseRanges
 ): Promise<AIEnhancedSuggestions> => {
   
   // Get AI analysis
@@ -43,7 +52,7 @@ export const analyzeWithAI = async (
   }
 
   // Calculate safety metrics
-  const safetyScore = calculateSafetyScore(readings, treatments);
+  const safetyScore = calculateSafetyScore(readings, treatments, customGlucoseRanges);
   const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
   
   // Generate ultra-conservative suggestions
@@ -61,8 +70,8 @@ export const analyzeWithAI = async (
   };
 };
 
-function calculateSafetyScore(readings: any[], treatments: any[]): number {
-  const timeInRange = calculateTimeInRange(readings);
+function calculateSafetyScore(readings: any[], treatments: any[], customRanges?: CustomGlucoseRanges): number {
+  const timeInRange = calculateTimeInRange(readings, customRanges);
   const variability = calculateVariability(readings);
   const hypoglycemiaEpisodes = readings.filter(r => toMmol(r.sgv) < 3.9).length;
   
@@ -292,16 +301,21 @@ function groupReadingsByTimeOfDay(readings: any[]) {
   return timeGroups;
 }
 
-function calculateTimeInRange(readings: any[]) {
+function calculateTimeInRange(readings: any[], customRanges?: CustomGlucoseRanges) {
   if (!readings.length) return { inRange: 0, high: 0, low: 0 };
+  
+  // Get glucose thresholds based on custom ranges or defaults
+  const thresholds = customRanges 
+    ? getGlucoseRanges('mmol', customRanges)
+    : GLUCOSE_RANGES;
   
   let inRange = 0, high = 0, low = 0;
   
   readings.forEach(reading => {
     const mmol = toMmol(reading.sgv);
-    if (mmol >= GLUCOSE_RANGES.TARGET_MIN && mmol <= GLUCOSE_RANGES.TARGET_MAX) {
+    if (mmol >= thresholds.TARGET_MIN && mmol <= thresholds.TARGET_MAX) {
       inRange++;
-    } else if (mmol > GLUCOSE_RANGES.TARGET_MAX) {
+    } else if (mmol > thresholds.TARGET_MAX) {
       high++;
     } else {
       low++;

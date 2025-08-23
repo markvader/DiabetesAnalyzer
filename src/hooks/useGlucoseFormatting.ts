@@ -1,17 +1,22 @@
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
+import { useTimeInRange } from '../contexts/TimeInRangeContext';
 import { getGlucoseColor, getGlucoseRanges, toMmol, toMgdl } from '../utils/glucoseUtils';
 
 export const useGlucoseFormatting = () => {
   const { unit, formatGlucose, convertGlucose, getUnitLabel } = useGlucoseUnits();
+  const { settings: timeInRangeSettings } = useTimeInRange();
 
-  // Get color based on glucose value in current units
+  // Get color based on glucose value in current units using custom settings
   const getGlucoseColorForValue = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl'): string => {
-    return getGlucoseColor(value, fromUnit);
+    return getGlucoseColor(value, fromUnit, {
+      lowThreshold: timeInRangeSettings.lowThreshold,
+      highThreshold: timeInRangeSettings.highThreshold
+    });
   };
 
-  // Get glucose ranges in current unit
+  // Get glucose ranges in current unit using custom settings
   const getCurrentGlucoseRanges = () => {
-    return getGlucoseRanges(unit);
+    return getGlucoseRanges(unit, timeInRangeSettings);
   };
 
   // Convert glucose value to current unit and format it
