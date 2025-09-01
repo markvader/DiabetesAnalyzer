@@ -1,5 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
-import { toMmol } from '../utils/glucoseUtils';
+import { toMmol, formatGlucoseWithUnit } from '../utils/glucoseUtils';
 
 interface GlucoseReading {
   date: string;
@@ -436,8 +436,8 @@ class TensorFlowAIService {
       // Generate reasoning
       const reasoning = [
         `Time in range analysis: ${timeInRange.inRange}% in target range`,
-        `Glucose variability: ${Math.round(variability)}mg/dL standard deviation`,
-        `Average glucose: ${Math.round(avgGlucose)}mg/dL (${Math.round(toMmol(avgGlucose) * 10) / 10}mmol/L)`,
+        `Glucose variability: ${formatGlucoseWithUnit(variability, 'mgdl', true)} standard deviation`,
+        `Average glucose: ${formatGlucoseWithUnit(avgGlucose, 'mgdl', true)}`,
         `Risk assessment based on TensorFlow pattern analysis`
       ];
 
@@ -466,7 +466,7 @@ class TensorFlowAIService {
   }
 
   // Fallback analysis when TensorFlow is not available
-  private getFallbackAnalysis(readings: GlucoseReading[], treatments: Treatment[]): TensorFlowAnalysisResult {
+  private getFallbackAnalysis(readings: GlucoseReading[], _treatments: Treatment[]): TensorFlowAnalysisResult {
     try {
       const timeInRange = this.calculateTimeInRange(readings);
       const variability = this.calculateVariability(readings);
@@ -481,7 +481,12 @@ class TensorFlowAIService {
         ],
         riskAssessment: 'medium',
         confidence: 50,
-        reasoning: ['TensorFlow analysis failed, using fallback assessment'],
+        reasoning: [
+          `Time in range: ${timeInRange.inRange}% (fallback analysis)`,
+          `Average glucose: ${formatGlucoseWithUnit(avgGlucose, 'mgdl', true)}`,
+          `Glucose variability: ${formatGlucoseWithUnit(variability, 'mgdl', true)} standard deviation`,
+          'TensorFlow analysis failed, using basic assessment'
+        ],
         safetyWarnings: ['Analysis system temporarily unavailable - monitor closely']
       };
     } catch (error) {
@@ -552,7 +557,7 @@ class TensorFlowAIService {
       },
       insights: [
         `Time in range: ${timeInRange.inRange}%`,
-        `Average glucose: ${avgGlucose}mg/dL`,
+        `Average glucose: ${formatGlucoseWithUnit(avgGlucose, 'mgdl', true)}`,
         `Glucose variability: ${variability > 80 ? 'High' : variability > 40 ? 'Moderate' : 'Low'}`
       ]
     };

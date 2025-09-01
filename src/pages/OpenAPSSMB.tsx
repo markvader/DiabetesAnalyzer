@@ -3,6 +3,7 @@ import { useNightscout } from '../contexts/NightscoutContext';
 import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { Zap, Activity, TrendingUp, AlertTriangle, Clock, Target, CheckCircle, Settings, Shield, Brain, Cookie, RefreshCw, Calendar } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import AIOpenAPSOptimizer from '../components/AIOpenAPSOptimizer';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { analyzeUltraSafeOpenAPS } from '../services/ultraSafeOpenAPSAnalysis';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -21,10 +22,11 @@ interface SMBEvent {
 const OpenAPSSMB = () => {
   const { data, loading, error } = useNightscout();
   const { selectedPump } = useInsulinPump();
-  const { formatGlucoseValue } = useGlucoseFormatting();
+  const { formatGlucoseValue, convertToCurrentUnit } = useGlucoseFormatting();
   const [smbEvents, setSmbEvents] = useState<SMBEvent[]>([]);
   const [smbStats, setSmbStats] = useState<any>(null);
   const [openapsAnalysis, setOpenapsAnalysis] = useState<any>(null);
+  const [aiOptimization, setAiOptimization] = useState<any>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
@@ -443,6 +445,19 @@ const OpenAPSSMB = () => {
         </div>
       </div>
 
+      {/* AI OpenAPS Optimizer */}
+      {filteredData && (
+        <AIOpenAPSOptimizer 
+          readings={filteredData.entries} 
+          treatments={filteredData.treatments}
+          analysisDays={isCustomRange ? 
+            Math.ceil((new Date(customDateRange.endDate).getTime() - new Date(customDateRange.startDate).getTime()) / (1000 * 60 * 60 * 24)) :
+            Math.ceil(timeWindow / 24)
+          }
+          onOptimizationComplete={setAiOptimization}
+        />
+      )}
+
       {/* AI Analysis Summary */}
       {openapsAnalysis && (
         <div className="bg-gradient-to-r from-purple-900 to-blue-900 p-6 rounded-lg shadow-md text-white">
@@ -624,17 +639,56 @@ const OpenAPSSMB = () => {
         <div className="space-y-6">
           {/* Emergency-Safe Settings */}
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-l-4 border-red-500">
-            <div className="flex items-center mb-4">
-              <Shield className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                Emergency-Safe Settings (ALWAYS START HERE)
-              </h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <Shield className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                  Emergency-Safe Settings (ALWAYS START HERE)
+                </h3>
+              </div>
+              {aiOptimization && (
+                <div className="flex items-center text-sm text-purple-600 dark:text-purple-400">
+                  <Brain className="h-4 w-4 mr-1" />
+                  AI Enhanced
+                </div>
+              )}
             </div>
             
             <p className="text-gray-600 dark:text-gray-400 mb-6">
               <strong>MANDATORY STARTING POINT:</strong> These emergency-safe settings prioritize preventing hypoglycemia 
               above all else. Use for at least 72+ hours while monitoring closely before considering any increases.
             </p>
+
+            {/* AI Emergency-Safe Analysis */}
+            {aiOptimization && (
+              <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-700">
+                <div className="flex items-center mb-3">
+                  <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
+                  <h4 className="font-medium text-purple-900 dark:text-purple-100">AI Emergency-Safe Analysis</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-purple-800 dark:text-purple-200 mb-2">
+                      <strong>Safety Assessment:</strong> {aiOptimization.riskAssessment.overallRisk} risk level
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Hypo Risk:</strong> {aiOptimization.riskAssessment.hypoglycemiaRisk}%
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Recommended Duration:</strong> {aiOptimization.riskAssessment.overallRisk === 'high' ? '7+ days' : '3-5 days'} monitoring
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-purple-700 dark:text-purple-300 mb-2">
+                      <strong>AI Adjustment:</strong> Emergency settings are {Math.round((aiOptimization.optimizedSettings.maxTempBasal / openapsAnalysis.ultraConservativeMaxTempBasal - 1) * 100)}% more conservative than standard
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Key Focus:</strong> {aiOptimization.recommendations.immediate.length > 0 ? aiOptimization.recommendations.immediate[0].split('.')[0] : 'Monitor for hypoglycemia patterns'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
@@ -686,17 +740,56 @@ const OpenAPSSMB = () => {
 
           {/* Conservative Settings */}
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-l-4 border-yellow-500">
-            <div className="flex items-center mb-4">
-              <CheckCircle className="h-6 w-6 text-yellow-600 dark:text-yellow-400 mr-2" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                Conservative Settings (ONLY after 7+ days Emergency-Safe stability)
-              </h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <CheckCircle className="h-6 w-6 text-yellow-600 dark:text-yellow-400 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                  Conservative Settings (ONLY after 7+ days Emergency-Safe stability)
+                </h3>
+              </div>
+              {aiOptimization && (
+                <div className="flex items-center text-sm text-purple-600 dark:text-purple-400">
+                  <Brain className="h-4 w-4 mr-1" />
+                  AI Enhanced
+                </div>
+              )}
             </div>
             
             <p className="text-gray-600 dark:text-gray-400 mb-6">
               <strong>ONLY after 72+ hours of stable control with Emergency-Safe settings:</strong> 
               Consider these conservative values if no hypoglycemia has occurred.
             </p>
+
+            {/* AI Conservative Analysis */}
+            {aiOptimization && (
+              <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-700">
+                <div className="flex items-center mb-3">
+                  <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
+                  <h4 className="font-medium text-purple-900 dark:text-purple-100">AI Conservative Analysis</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-purple-800 dark:text-purple-200 mb-2">
+                      <strong>Glucose Control:</strong> {Math.round(aiOptimization.currentPerformance.timeInRange)}% Time in Range
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Stability Score:</strong> {aiOptimization.riskAssessment.overallRisk === 'low' ? 'Excellent' : aiOptimization.riskAssessment.overallRisk === 'medium' ? 'Good' : 'Needs Improvement'}
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Ready for Conservative:</strong> {aiOptimization.riskAssessment.overallRisk === 'low' ? 'Yes' : 'Continue Emergency-Safe'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-purple-700 dark:text-purple-300 mb-2">
+                      <strong>Projected Improvement:</strong> +{Math.round((openapsAnalysis.maxTempBasal - openapsAnalysis.ultraConservativeMaxTempBasal) / openapsAnalysis.ultraConservativeMaxTempBasal * 100)}% more aggressive
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Monitoring Focus:</strong> IOB patterns and overnight stability
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
@@ -748,17 +841,56 @@ const OpenAPSSMB = () => {
 
           {/* Standard Settings (NEW) */}
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border-l-4 border-green-500">
-            <div className="flex items-center mb-4">
-              <Target className="h-6 w-6 text-green-600 dark:text-green-400 mr-2" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
-                Standard Settings (For optimal glucose control)
-              </h3>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <Target className="h-6 w-6 text-green-600 dark:text-green-400 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                  Standard Settings (For optimal glucose control)
+                </h3>
+              </div>
+              {aiOptimization && (
+                <div className="flex items-center text-sm text-purple-600 dark:text-purple-400">
+                  <Brain className="h-4 w-4 mr-1" />
+                  AI Enhanced
+                </div>
+              )}
             </div>
             
             <p className="text-gray-600 dark:text-gray-400 mb-6">
               <strong>ONLY after 7+ days of stable control with Conservative settings:</strong> 
               These more aggressive settings help maintain glucose in range when high blood glucose is prevalent.
             </p>
+
+            {/* AI Standard Analysis */}
+            {aiOptimization && (
+              <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-700">
+                <div className="flex items-center mb-3">
+                  <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
+                  <h4 className="font-medium text-purple-900 dark:text-purple-100">AI Standard Settings Analysis</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-purple-800 dark:text-purple-200 mb-2">
+                      <strong>Optimization Potential:</strong> {convertToCurrentUnit(aiOptimization.currentPerformance.avgGlucose, 'mgdl') > convertToCurrentUnit(140, 'mgdl') ? 'High - Many highs detected' : 'Moderate - Good control'}
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>High BG Episodes:</strong> {Math.round(aiOptimization.currentPerformance.timeAbove180)}% above {formatGlucoseValue(180, 'mgdl', true)}
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Ready for Standard:</strong> {aiOptimization.riskAssessment.overallRisk === 'low' && aiOptimization.currentPerformance.timeInRange > 70 ? 'Yes' : 'Continue Conservative'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-purple-700 dark:text-purple-300 mb-2">
+                      <strong>AI Recommended IOB:</strong> {aiOptimization.optimizedSettings.maximumIOB}U vs Standard {openapsAnalysis.standardMaximumIOB}U
+                    </p>
+                    <p className="text-purple-700 dark:text-purple-300">
+                      <strong>Safety Margin:</strong> {aiOptimization.riskAssessment.hypoglycemiaRisk < 10 ? 'Sufficient' : 'Requires caution'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
@@ -807,6 +939,120 @@ const OpenAPSSMB = () => {
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* AI Tier Recommendation */}
+      {aiOptimization && openapsAnalysis && (
+        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 p-6 rounded-lg shadow-md border border-purple-200 dark:border-purple-700">
+          <div className="flex items-center mb-4">
+            <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI Safety Tier Recommendation</h3>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Current Risk Assessment */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+              <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Current Status</h4>
+              <div className="space-y-2 text-sm">
+                <p className="text-gray-700 dark:text-gray-300">
+                  <strong>Risk Level:</strong> <span className={`px-2 py-1 rounded text-xs ${
+                    aiOptimization.riskAssessment.overallRisk === 'low' ? 'bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300' :
+                    aiOptimization.riskAssessment.overallRisk === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-800 dark:text-yellow-300' :
+                    'bg-red-100 text-red-700 dark:bg-red-800 dark:text-red-300'
+                  }`}>
+                    {aiOptimization.riskAssessment.overallRisk.toUpperCase()}
+                  </span>
+                </p>
+                <p className="text-gray-700 dark:text-gray-300">
+                  <strong>Time in Range:</strong> {Math.round(aiOptimization.currentPerformance.timeInRange)}%
+                </p>
+                <p className="text-gray-700 dark:text-gray-300">
+                  <strong>Avg Glucose:</strong> {formatGlucoseValue(Math.round(aiOptimization.currentPerformance.avgGlucose), 'mgdl', true)}
+                </p>
+                <p className="text-gray-700 dark:text-gray-300">
+                  <strong>Hypo Risk:</strong> {aiOptimization.riskAssessment.hypoglycemiaRisk}%
+                </p>
+              </div>
+            </div>
+
+            {/* AI Recommendation */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+              <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">AI Recommendation</h4>
+              <div className="text-center">
+                {(() => {
+                  if (aiOptimization.riskAssessment.overallRisk === 'high' || aiOptimization.riskAssessment.hypoglycemiaRisk > 15) {
+                    return (
+                      <div>
+                        <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Shield className="h-8 w-8 text-red-600 dark:text-red-400" />
+                        </div>
+                        <p className="text-red-700 dark:text-red-300 font-medium">Emergency-Safe Only</p>
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">Continue for 7+ days</p>
+                      </div>
+                    );
+                  } else if (aiOptimization.currentPerformance.timeInRange < 70 || aiOptimization.riskAssessment.hypoglycemiaRisk > 10) {
+                    return (
+                      <div>
+                        <div className="w-16 h-16 bg-yellow-100 dark:bg-yellow-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <CheckCircle className="h-8 w-8 text-yellow-600 dark:text-yellow-400" />
+                        </div>
+                        <p className="text-yellow-700 dark:text-yellow-300 font-medium">Conservative Settings</p>
+                        <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">Ready to advance cautiously</p>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div>
+                        <div className="w-16 h-16 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Target className="h-8 w-8 text-green-600 dark:text-green-400" />
+                        </div>
+                        <p className="text-green-700 dark:text-green-300 font-medium">Standard Settings</p>
+                        <p className="text-xs text-green-600 dark:text-green-400 mt-1">Excellent control achieved</p>
+                      </div>
+                    );
+                  }
+                })()}
+              </div>
+            </div>
+
+            {/* Next Steps */}
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-600">
+              <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Next Steps</h4>
+              <div className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                {aiOptimization.riskAssessment.overallRisk === 'high' ? (
+                  <>
+                    <p>• Continue Emergency-Safe settings</p>
+                    <p>• Monitor for hypoglycemia patterns</p>
+                    <p>• Review basal rates with endocrinologist</p>
+                    <p>• Wait minimum 7 days before advancing</p>
+                  </>
+                ) : aiOptimization.currentPerformance.timeInRange < 70 ? (
+                  <>
+                    <p>• Advance to Conservative settings</p>
+                    <p>• Monitor closely for 48 hours</p>
+                    <p>• Check overnight stability</p>
+                    <p>• Document glucose patterns</p>
+                  </>
+                ) : (
+                  <>
+                    <p>• Consider Standard settings</p>
+                    <p>• Focus on meal bolus optimization</p>
+                    <p>• Fine-tune DynamicISF factor</p>
+                    <p>• Maintain excellent control</p>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+            <div className="mt-6 p-4 bg-purple-100 dark:bg-purple-800/30 rounded-lg border border-purple-200 dark:border-purple-700">
+              <p className="text-purple-800 dark:text-purple-200 text-sm">
+                🤖 <strong>AI Analysis:</strong> Based on {aiOptimization.analysisPeriod.dataPoints} glucose readings over {aiOptimization.analysisPeriod.days} days. 
+                <strong> Updated for aggressive optimization</strong> - settings now target real-world effectiveness while maintaining safety. 
+                Always consult your healthcare provider before making significant changes.
+              </p>
+            </div>
         </div>
       )}
 

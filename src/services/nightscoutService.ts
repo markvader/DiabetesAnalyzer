@@ -639,19 +639,104 @@ export const fetchData = async (
       const startTimestamp = new Date(startDate).getTime();
       const endTimestamp = new Date(endDate).getTime();
       
-      const v3EntriesPath = `/api/v3/entries?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${countLimit}&sort=-date`;
-      const v3TreatmentsPath = `/api/v3/treatments?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${Math.min(countLimit, 5000)}&sort=-date`;
-      const v3ProfilePath = '/api/v3/profile/current'; // Use current profile endpoint for v3
+      // API v3 has stricter limits - use chunked requests for large datasets
+      const maxV3Limit = 1000; // Safe limit for API v3
+      const entriesLimit = Math.min(countLimit, maxV3Limit);
+      const treatmentsLimit = Math.min(Math.min(countLimit, 5000), maxV3Limit);
+      
+      console.log(`📅 API v3 date range: ${startTimestamp} to ${endTimestamp}`);
+      console.log(`📊 API v3 limits: entries=${entriesLimit}, treatments=${treatmentsLimit}`);
+      
+      if (countLimit > maxV3Limit) {
+        console.log(`🔄 Large dataset requested (${countLimit} items). Using pagination to stay within API v3 limits.`);
+      }
+
+      // For large datasets, we need to implement pagination
+      const fetchV3DataPaginated = async (endpoint: string, dataType: string) => {
+        let allData: any[] = [];
+        let currentTimestamp = endTimestamp; // Start from most recent
+        let hasMore = true;
+        let pageCount = 0;
+        const maxPages = Math.ceil(countLimit / maxV3Limit);
+        
+        console.log(`🔄 Starting paginated fetch for ${dataType}, max pages: ${maxPages}`);
+        
+        while (hasMore && pageCount < maxPages && allData.length < countLimit) {
+          const remainingCount = countLimit - allData.length;
+          const currentLimit = Math.min(maxV3Limit, remainingCount);
+          
+          const paginatedPath = `${endpoint}&filter[date][$lte]=${currentTimestamp}&limit=${currentLimit}&sort=-date`;
+          console.log(`📄 Page ${pageCount + 1} for ${dataType}: ${paginatedPath}`);
+          
+          try {
+            const pageData = await makeProxyRequestWithFallback(url, paginatedPath, token, signal, 'v3');
+            
+            if (Array.isArray(pageData) && pageData.length > 0) {
+              allData = allData.concat(pageData);
+              
+              // Update timestamp for next page (oldest item from this page)
+              const oldestItem = pageData[pageData.length - 1];
+              const oldestTimestamp = oldestItem.date || oldestItem.created_at;
+              
+              if (oldestTimestamp && oldestTimestamp > startTimestamp) {
+                currentTimestamp = oldestTimestamp - 1; // Subtract 1ms to avoid duplicates
+                hasMore = pageData.length === currentLimit; // Continue if we got a full page
+                pageCount++;
+              } else {
+                hasMore = false; // Reached the start date
+              }
+            } else {
+              hasMore = false; // No more data
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to fetch page ${pageCount + 1} for ${dataType}:`, error);
+            hasMore = false; // Stop pagination on error
+          }
+          
+          // Safety check to prevent infinite loops
+          if (pageCount >= 50) {
+            console.warn(`⚠️ Stopping pagination for ${dataType} after 50 pages`);
+            break;
+          }
+        }
+        
+        console.log(`✅ Completed paginated fetch for ${dataType}: ${allData.length} items in ${pageCount} pages`);
+        return allData;
+      };
+
+      // Fetch entries with pagination if needed
+      let entries: any[];
+      if (countLimit <= maxV3Limit) {
+        // Single request for smaller datasets
+        const v3EntriesPath = `/api/v3/entries?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${entriesLimit}&sort=-date`;
+        console.log(`🔗 API v3 entries endpoint (single): ${v3EntriesPath}`);
+        entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
+      } else {
+        // Paginated requests for larger datasets
+        const baseEntriesPath = `/api/v3/entries?filter[date][$gte]=${startTimestamp}`;
+        entries = await fetchV3DataPaginated(baseEntriesPath, 'entries');
+      }
+
+      // Fetch treatments with pagination if needed
+      let treatments: any[];
+      if (Math.min(countLimit, 5000) <= maxV3Limit) {
+        // Single request for smaller datasets
+        const v3TreatmentsPath = `/api/v3/treatments?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${treatmentsLimit}&sort=-date`;
+        treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
+      } else {
+        // Paginated requests for larger datasets
+        const baseTreatmentsPath = `/api/v3/treatments?filter[date][$gte]=${startTimestamp}`;
+        treatments = await fetchV3DataPaginated(baseTreatmentsPath, 'treatments');
+      }
+
+      // Fetch profile and device status (these are typically small)
+      const v3ProfilePath = '/api/v3/profile/current';
       const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort=-date';
 
-      console.log(`📅 API v3 date range: ${startTimestamp} to ${endTimestamp}`);
-      console.log(`🔗 API v3 entries endpoint: ${v3EntriesPath}`);
-
-      entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
-      treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
-      profiles = await makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3');
+      const profiles = await makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3');
       const deviceStatus = await makeProxyRequestWithFallback(url, v3DeviceStatusPath, token, signal, 'v3');
-      console.log('✅ Successfully fetched data using API v3');
+      
+      console.log('✅ Successfully fetched data using API v3 with pagination');
       
       // Return the detected API version along with the data
       result = {
@@ -695,12 +780,18 @@ export const fetchData = async (
     console.error('Data fetch failed:', error);
     
     // Provide specific guidance for API v3 issues
-    if (preferredApiVersion === 'v3' && (
-      errorMessage.includes('401') || 
-      errorMessage.includes('403') || 
-      errorMessage.includes('404')
-    )) {
-      throw new Error(`Failed to fetch Nightscout data using API v3: ${errorMessage}
+    if (preferredApiVersion === 'v3') {
+      if (errorMessage.includes('Parameter limit out of tolerance')) {
+        throw new Error(`Failed to fetch Nightscout data using API v3: Parameter limit exceeded.
+
+The pagination system should have prevented this error. This might indicate:
+• Your Nightscout server has very strict API v3 limits
+• There was an issue with the automatic pagination
+• Suggestion: Try reducing the time range or switching to API v1 in Settings
+
+Technical details: ${errorMessage}`);
+      } else if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('404')) {
+        throw new Error(`Failed to fetch Nightscout data using API v3: ${errorMessage}
 
 Common API v3 issues:
 • Authentication: Ensure your Bearer token has required permissions (api:entries:read, api:treatments:read, api:profile:read, api:devicestatus:read)
@@ -708,6 +799,7 @@ Common API v3 issues:
 • Suggestion: Try switching to API v1 in Settings if you have an older Nightscout version
 
 If you continue having issues, please try switching to API v1 in the Settings page.`);
+      }
     }
     
     throw new Error(`Failed to fetch Nightscout data: ${errorMessage}`);

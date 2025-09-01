@@ -238,6 +238,7 @@ const Dashboard = () => {
   
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [timeWindow, setTimeWindow] = useState(24);
+  const [showInsulinDelivery, setShowInsulinDelivery] = useState(true);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showRefreshSettings, setShowRefreshSettings] = useState(false);
   const [customDateRange, setCustomDateRange] = useState<{
@@ -1524,7 +1525,12 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <GlucoseChart 
               readings={chartReadings}
+              treatments={data?.treatments?.filter(treatment => {
+                const treatmentTime = new Date(treatment.created_at).getTime();
+                return (Date.now() - treatmentTime) <= timeWindow * 60 * 60 * 1000;
+              }) || []}
               title={`Blood Glucose - ${getChartTimeWindowLabel()}`}
+              showInsulinDelivery={showInsulinDelivery}
             />
             {filteredStats.totalReadings > 0 && (
               <TimeInRangeChart 

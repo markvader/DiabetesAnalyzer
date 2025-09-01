@@ -14,6 +14,7 @@
     "@tensorflow/tfjs-vis": "^1.5.1",
     "axios": "^1.6.2",
     "chart.js": "^4.4.0",
+    "chartjs-adapter-date-fns": "^3.0.0",
     "date-fns": "^2.30.0",
     "howler": "^2.2.4",
     "jspdf": "^2.5.1",

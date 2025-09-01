@@ -1,17 +1,19 @@
 import React from 'react';
-import { Line } from 'react-chartjs-2';
+import { Chart } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
+  TimeScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
   ChartOptions
 } from 'chart.js';
-import { format } from 'date-fns';
+import 'chartjs-adapter-date-fns';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTheme } from '../contexts/ThemeContext';
@@ -19,8 +21,10 @@ import { useTheme } from '../contexts/ThemeContext';
 ChartJS.register(
   CategoryScale,
   LinearScale,
+  TimeScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend
@@ -29,150 +33,267 @@ ChartJS.register(
 interface GlucoseReading {
   sgv: number;
   date: number;
-  dateString: string;
+  direction?: string;
+}
+
+interface Treatment {
+  created_at: string;
+  eventType?: string;
+  insulin?: number;
+  carbs?: number;
+  notes?: string;
+  enteredBy?: string;
+  absolute?: number;
+  rate?: number;
+  duration?: number;
+  percent?: number;
+  [key: string]: any;
 }
 
 interface GlucoseChartProps {
   readings: GlucoseReading[];
+  treatments?: Treatment[];
+  showInsulinDelivery?: boolean;
   title?: string;
 }
 
-const GlucoseChart: React.FC<GlucoseChartProps> = ({ readings, title = 'Glucose Readings' }) => {
+const GlucoseChart: React.FC<GlucoseChartProps> = ({ 
+  readings, 
+  treatments = [], 
+  showInsulinDelivery = false,
+  title = 'Glucose Readings' 
+}) => {
   const { theme } = useTheme();
   const { getCurrentGlucoseRanges, convertToCurrentUnit, unit } = useGlucoseFormatting();
   const isDark = theme === 'dark';
 
   const colors = isDark ? GLUCOSE_RANGES.COLORS.DARK : GLUCOSE_RANGES.COLORS;
 
+  const processTreatmentOverlays = React.useCallback(() => {
+    if (!showInsulinDelivery || !treatments || treatments.length === 0) {
+      return [];
+    }
+
+    const overlayDatasets = [];
+    const ranges = getCurrentGlucoseRanges();
+
+    // SMBs as small green dots positioned at glucose line level
+    const smbData: { x: number; y: number; treatment?: Treatment }[] = [];
+    const insulinBoluses: { x: number; y: number; treatment?: Treatment }[] = [];
+    const carbBoluses: { x: number; y: number; treatment?: Treatment }[] = [];
+
+    treatments.forEach(t => {
+      const treatmentTime = new Date(t.created_at).getTime();
+      
+      // Check for any insulin delivery (be flexible about field names)
+      const insulinValue = t.insulin || (t as any).units || (t as any).amount;
+      if (insulinValue && insulinValue > 0) {
+        // For SMBs, find closest glucose reading for positioning
+        const isSMB = t.notes?.includes('SMB') || 
+                      t.enteredBy?.includes('openaps') || 
+                      t.eventType === 'Correction Bolus' ||
+                      t.eventType === 'SMB' ||
+                      (insulinValue < 1.5 && (t.eventType?.includes('Bolus') || t.eventType?.includes('Correction')));
+        
+        if (isSMB) {
+          const glucoseReading = readings?.find(r => 
+            Math.abs(r.date - treatmentTime) < 15 * 60 * 1000
+          );
+          const yPosition = glucoseReading ? convertToCurrentUnit(glucoseReading.sgv) : ranges.TARGET_MIN + 1;
+          
+          smbData.push({
+            x: treatmentTime,
+            y: yPosition,
+            treatment: t
+          });
+        } else {
+          // Regular boluses as compact blue bars
+          insulinBoluses.push({
+            x: treatmentTime,
+            y: Math.max(insulinValue * 5, 5),
+            treatment: t
+          });
+        }
+      }
+      
+      // Check for carbs (be flexible about field names)
+      const carbValue = t.carbs || (t as any).carbohydrates || (t as any).glucose;
+      if (carbValue && carbValue > 0) {
+        carbBoluses.push({
+          x: treatmentTime,
+          y: Math.max(carbValue, 5),
+          treatment: t
+        });
+      }
+    });
+
+    // SMBs as small green dots
+    if (smbData.length > 0) {
+      overlayDatasets.push({
+        type: 'scatter' as const,
+        label: 'SMBs',
+        data: smbData,
+        backgroundColor: '#22c55e',
+        borderColor: '#22c55e',
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        showLine: false,
+        yAxisID: 'y'
+      });
+    }
+
+    // Insulin boluses as compact blue bars
+    if (insulinBoluses.length > 0) {
+      overlayDatasets.push({
+        type: 'bar' as const,
+        label: 'Insulin',
+        data: insulinBoluses,
+        backgroundColor: '#3b82f6',
+        borderColor: '#3b82f6',
+        borderWidth: 1,
+        barThickness: 8,
+        maxBarThickness: 12,
+        yAxisID: 'y3'
+      });
+    }
+
+    // Carbs as compact orange bars
+    if (carbBoluses.length > 0) {
+      overlayDatasets.push({
+        type: 'bar' as const,
+        label: 'Carbs',
+        data: carbBoluses,
+        backgroundColor: '#f59e0b',
+        borderColor: '#f59e0b',
+        borderWidth: 1,
+        barThickness: 8,
+        maxBarThickness: 12,
+        yAxisID: 'y4'
+      });
+    }
+
+    // Temporary basal rates as very small purple markers
+    const tempBasalData = treatments
+      .filter(t => {
+        const isBasal = t.eventType === 'Temp Basal' || 
+                       t.eventType?.includes('basal') || 
+                       t.eventType?.includes('Basal') ||
+                       (t.absolute !== undefined || t.rate !== undefined);
+        return isBasal;
+      })
+      .map(t => ({
+        x: new Date(t.created_at).getTime(),
+        y: ranges.LOW_THRESHOLD * 0.98,
+        treatment: t
+      }));
+
+    if (tempBasalData.length > 0) {
+      overlayDatasets.push({
+        type: 'scatter' as const,
+        label: 'Temp Basals',
+        data: tempBasalData,
+        backgroundColor: '#8b5cf6',
+        borderColor: '#8b5cf6',
+        pointRadius: 1,
+        pointHoverRadius: 3,
+        pointStyle: 'rect',
+        showLine: false,
+        yAxisID: 'y'
+      });
+    }
+    
+    return overlayDatasets;
+  }, [treatments, showInsulinDelivery, readings, getCurrentGlucoseRanges, convertToCurrentUnit]);
+
   const processedData = React.useMemo(() => {
     if (!readings || readings.length === 0) {
       return {
-        labels: [],
         datasets: []
       };
     }
     
     const sortedReadings = [...readings].sort((a, b) => a.date - b.date);
-    
-    const labels = sortedReadings.map(reading => 
-      format(new Date(reading.date), 'dd.MM. HH:mm')
-    );
-    
-    const glucoseValues = sortedReadings.map(reading => convertToCurrentUnit(reading.sgv, 'mgdl'));
     const ranges = getCurrentGlucoseRanges();
 
-    // Create continuous segments for each range
-    const segments = {
-      inRange: [] as { start: number; data: number[] }[],
-      high: [] as { start: number; data: number[] }[],
-      low: [] as { start: number; data: number[] }[]
-    };
-
-    let currentSegment = {
-      type: null as 'inRange' | 'high' | 'low' | null,
-      start: 0,
-      data: [] as number[]
-    };
-
-    glucoseValues.forEach((value, index) => {
-      let type: 'inRange' | 'high' | 'low';
-      
-      if (value > ranges.HIGH_THRESHOLD) {
-        type = 'high';
-      } else if (value < ranges.LOW_THRESHOLD) {
-        type = 'low';
-      } else {
-        type = 'inRange';
-      }
-
-      if (type !== currentSegment.type) {
-        if (currentSegment.type) {
-          segments[currentSegment.type].push({
-            start: currentSegment.start,
-            data: currentSegment.data
-          });
-        }
-        currentSegment = {
-          type,
-          start: index,
-          data: []
-        };
-      }
-      currentSegment.data.push(value);
-    });
-
-    // Add the last segment
-    if (currentSegment.type) {
-      segments[currentSegment.type].push({
-        start: currentSegment.start,
-        data: currentSegment.data
-      });
-    }
-
-    // Create datasets for each segment
     const datasets: any[] = [];
 
-    // Process in-range segments
-    segments.inRange.forEach((segment, i) => {
-      const data = new Array(segment.start).fill(null).concat(segment.data);
-      if (data.length < labels.length) {
-        data.push(...new Array(labels.length - data.length).fill(null));
-      }
+    // Create continuous segments for each range
+    let currentSegment: { type: 'inRange' | 'high' | 'low' | null; data: { x: number; y: number }[] } = {
+      type: null,
+      data: []
+    };
+
+    const segmentCounts = { inRange: 0, high: 0, low: 0 };
+
+    const addSegmentDataset = (segment: typeof currentSegment, segmentIndex: number = 0) => {
+      if (segment.data.length === 0) return;
+
+      const colors_map = {
+        inRange: { border: colors.IN_RANGE, bg: colors.IN_RANGE_BG, label: 'In Range' },
+        high: { border: colors.HIGH, bg: colors.HIGH_BG, label: 'High' },
+        low: { border: colors.LOW, bg: colors.LOW_BG, label: 'Low' }
+      };
+
+      const colorConfig = colors_map[segment.type!];
+      const label = segmentIndex === 0 ? colorConfig.label : `${colorConfig.label} (continued)`;
+      
       datasets.push({
-        label: i === 0 ? 'In Range' : 'In Range (continued)',
-        data,
-        borderColor: colors.IN_RANGE,
-        backgroundColor: colors.IN_RANGE_BG,
+        type: 'line' as const,
+        label: label,
+        data: segment.data,
+        borderColor: colorConfig.border,
+        backgroundColor: colorConfig.bg,
         pointRadius: 2,
         tension: 0.1,
         fill: false,
-        showLine: true
+        showLine: true,
+        yAxisID: 'y'
       });
+    };
+
+    sortedReadings.forEach((reading) => {
+      const value = convertToCurrentUnit(reading.sgv, 'mgdl');
+      const dataPoint = { x: reading.date, y: value };
+      
+      let rangeType: 'inRange' | 'high' | 'low';
+      if (value > ranges.HIGH_THRESHOLD) {
+        rangeType = 'high';
+      } else if (value < ranges.LOW_THRESHOLD) {
+        rangeType = 'low';
+      } else {
+        rangeType = 'inRange';
+      }
+
+      // If range type changed, save current segment and start new one
+      if (rangeType !== currentSegment.type) {
+        if (currentSegment.type) {
+          addSegmentDataset(currentSegment, segmentCounts[currentSegment.type]);
+          segmentCounts[currentSegment.type]++;
+        }
+        currentSegment = {
+          type: rangeType,
+          data: [dataPoint]
+        };
+      } else {
+        currentSegment.data.push(dataPoint);
+      }
     });
 
-    // Process high segments
-    segments.high.forEach((segment, i) => {
-      const data = new Array(segment.start).fill(null).concat(segment.data);
-      if (data.length < labels.length) {
-        data.push(...new Array(labels.length - data.length).fill(null));
-      }
-      datasets.push({
-        label: i === 0 ? 'High' : 'High (continued)',
-        data,
-        borderColor: colors.HIGH,
-        backgroundColor: colors.HIGH_BG,
-        pointRadius: 2,
-        tension: 0.1,
-        fill: false,
-        showLine: true
-      });
-    });
-
-    // Process low segments
-    segments.low.forEach((segment, i) => {
-      const data = new Array(segment.start).fill(null).concat(segment.data);
-      if (data.length < labels.length) {
-        data.push(...new Array(labels.length - data.length).fill(null));
-      }
-      datasets.push({
-        label: i === 0 ? 'Low' : 'Low (continued)',
-        data,
-        borderColor: colors.LOW,
-        backgroundColor: colors.LOW_BG,
-        pointRadius: 2,
-        tension: 0.1,
-        fill: false,
-        showLine: true
-      });
-    });
+    // Add the final segment
+    if (currentSegment.type) {
+      addSegmentDataset(currentSegment, segmentCounts[currentSegment.type]);
+    }
+    
+    // Add treatment overlays if enabled
+    const treatmentDatasets = processTreatmentOverlays();
+    datasets.push(...treatmentDatasets);
     
     return {
-      labels,
       datasets
     };
-  }, [readings, colors, getCurrentGlucoseRanges, convertToCurrentUnit, unit]);
+  }, [readings, colors, getCurrentGlucoseRanges, convertToCurrentUnit, processTreatmentOverlays]);
   
-  const options: ChartOptions<'line'> = React.useMemo(() => {
+  const options: ChartOptions<'line' | 'bar' | 'scatter'> = React.useMemo(() => {
     const ranges = getCurrentGlucoseRanges();
     
     return {
@@ -197,8 +318,48 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({ readings, title = 'Glucose 
           callbacks: {
             label: function(context: any) {
               const value = context.parsed.y;
-              const formattedValue = unit === 'mmol' ? value.toFixed(1) : Math.round(value);
-              return `${context.dataset.label}: ${formattedValue} ${unit === 'mmol' ? 'mmol/L' : 'mg/dL'}`;
+              const dataPoint = context.dataset.data[context.dataIndex];
+              const treatment = dataPoint?.treatment;
+
+              if (context.dataset.label === 'SMBs') {
+                const insulinAmount = treatment?.insulin || treatment?.units || treatment?.amount || 0;
+                const eventType = treatment?.eventType || 'SMB';
+                const enteredBy = treatment?.enteredBy ? ` (${treatment.enteredBy})` : '';
+                const notes = treatment?.notes ? ` - ${treatment.notes}` : '';
+                return `${eventType}: ${insulinAmount.toFixed(2)}U (at ${value?.toFixed(1)} ${unit})${enteredBy}${notes}`;
+              } else if (context.dataset.label === 'Insulin') {
+                const insulinAmount = treatment?.insulin || treatment?.units || treatment?.amount || 0;
+                const eventType = treatment?.eventType || 'Bolus';
+                const notes = treatment?.notes ? ` - ${treatment.notes}` : '';
+                return `${eventType}: ${insulinAmount.toFixed(2)}U${notes}`;
+              } else if (context.dataset.label === 'Carbs') {
+                const carbAmount = treatment?.carbs || treatment?.carbohydrates || 0;
+                const eventType = treatment?.eventType || 'Meal';
+                return `${eventType}: ${carbAmount}g carbs`;
+              } else if (context.dataset.label === 'Temp Basals') {
+                const rate = treatment?.rate || treatment?.absolute;
+                const percent = treatment?.percent;
+                const duration = treatment?.duration;
+                const eventType = treatment?.eventType || 'Temp Basal';
+                
+                let rateInfo = '';
+                if (rate !== undefined) {
+                  rateInfo = `${rate.toFixed(2)}U/h`;
+                } else if (percent !== undefined) {
+                  rateInfo = `${percent}% of basal`;
+                } else {
+                  rateInfo = 'Rate unknown';
+                }
+                
+                if (duration) {
+                  rateInfo += ` for ${duration}min`;
+                }
+                
+                return `${eventType}: ${rateInfo}`;
+              } else {
+                const formattedValue = unit === 'mmol' ? value.toFixed(1) : Math.round(value);
+                return `${context.dataset.label}: ${formattedValue} ${unit === 'mmol' ? 'mmol/L' : 'mg/dL'}`;
+              }
             }
           }
         }
@@ -218,14 +379,42 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({ readings, title = 'Glucose 
           }
         },
         x: {
+          type: 'time',
+          time: {
+            displayFormats: {
+              hour: 'HH:mm',
+              day: 'dd.MM'
+            },
+            tooltipFormat: 'dd.MM.yyyy HH:mm'
+          },
           grid: {
-            display: false
+            color: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'
           },
           ticks: {
             maxRotation: 45,
             minRotation: 45,
             maxTicksLimit: 12,
             color: isDark ? '#e5e7eb' : '#111827'
+          }
+        },
+        y3: {
+          type: 'linear',
+          display: false,
+          position: 'right',
+          min: 0,
+          max: 50,
+          grid: {
+            drawOnChartArea: false
+          }
+        },
+        y4: {
+          type: 'linear',
+          display: false,
+          position: 'right',
+          min: 0,
+          max: 150,
+          grid: {
+            drawOnChartArea: false
           }
         }
       },
@@ -263,7 +452,8 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({ readings, title = 'Glucose 
     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200">
       <div className="h-64 sm:h-80">
         {readings && readings.length > 0 ? (
-          <Line 
+          <Chart 
+            type="line"
             data={processedData} 
             options={options} 
             plugins={[targetRangePlugin]}

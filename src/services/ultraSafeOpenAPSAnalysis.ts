@@ -67,15 +67,15 @@ export const analyzeUltraSafeOpenAPS = async (
   // Analyze carb coverage specifically for SMB
   const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile);
   
-  // Ensure we have valid numbers for all settings with REASONABLE CAPS
-  const maxTempBasal = Math.min(3.5, isNaN(baseSettings.maxTempBasal) ? 2.0 : baseSettings.maxTempBasal);
-  const maximumIOB = Math.min(6.0, isNaN(baseSettings.maximumIOB) ? 3.0 : baseSettings.maximumIOB);
-  const dynamicISFFactor = Math.max(80, Math.min(140, isNaN(baseSettings.dynamicISFFactor) ? 110 : baseSettings.dynamicISFFactor));
+  // Ensure we have valid numbers for all settings with MUCH MORE REALISTIC CAPS
+  const maxTempBasal = Math.min(7.0, isNaN(baseSettings.maxTempBasal) ? 5.0 : Math.max(4.0, baseSettings.maxTempBasal)); // Much higher baseline
+  const maximumIOB = Math.min(12.0, isNaN(baseSettings.maximumIOB) ? 8.0 : Math.max(6.0, baseSettings.maximumIOB)); // Much higher baseline
+  const dynamicISFFactor = Math.max(70, Math.min(110, isNaN(baseSettings.dynamicISFFactor) ? 90 : baseSettings.dynamicISFFactor)); // More aggressive range
   
-  // Calculate standard settings (more aggressive for optimal control)
-  const standardMaxTempBasal = roundToOmniPodBasal(Math.min(6.0, maxTempBasal * 1.4)); // 40% more than conservative, capped at 6.0
-  const standardMaximumIOB = roundToDecimal(Math.min(12.0, maximumIOB * 1.3), 1); // 30% more than conservative, capped at 12.0
-  const standardDynamicISFFactor = Math.max(65, Math.min(120, Math.round(dynamicISFFactor * 0.85))); // More aggressive
+  // Calculate standard settings (much more aggressive for optimal control)
+  const standardMaxTempBasal = roundToOmniPodBasal(Math.min(10.0, maxTempBasal * 1.8)); // 80% more than conservative, capped at 10.0
+  const standardMaximumIOB = roundToDecimal(Math.min(18.0, maximumIOB * 1.8), 1); // 80% more than conservative, capped at 18.0
+  const standardDynamicISFFactor = Math.max(50, Math.min(90, Math.round(dynamicISFFactor * 0.75))); // Much more aggressive
   
   const result: UltraSafeOpenAPSAnalysis = {
     // Conservative settings - rounded for OmniPod Dash
@@ -89,9 +89,9 @@ export const analyzeUltraSafeOpenAPS = async (
     standardDynamicISFFactor: standardDynamicISFFactor,
     
     // Ultra-conservative settings (more reasonable for effectiveness while still conservative)
-    ultraConservativeMaxTempBasal: roundToOmniPodBasal(Math.min(3.0, maxTempBasal * 0.7)), // 70% of base, capped at 3.0
-    ultraConservativeMaximumIOB: roundToDecimal(Math.min(4.0, maximumIOB * 0.6), 1), // 60% of base, capped at 4.0
-    ultraConservativeDynamicISFFactor: Math.max(105, Math.min(130, Math.round(dynamicISFFactor * 1.15))), // More conservative but reasonable
+    ultraConservativeMaxTempBasal: roundToOmniPodBasal(Math.min(6.0, maxTempBasal * 0.9)), // 90% of base, capped at 6.0 (much more realistic)
+    ultraConservativeMaximumIOB: roundToDecimal(Math.min(9.0, maximumIOB * 0.8), 1), // 80% of base, capped at 9.0 (much more realistic)
+    ultraConservativeDynamicISFFactor: Math.max(80, Math.min(105, Math.round(dynamicISFFactor * 1.05))), // More reasonable range
     
     safetyLevel,
     hypoglycemiaRiskScore,
@@ -247,18 +247,18 @@ function calculateMoreAggressiveSettings(
   currentProfile: any, 
   safetyLevel: string
 ) {
-  // OPTIMIZED: More aggressive base values for better glucose control while maintaining safety
-  let baseMaxTempBasal = 3.0; // Increased from 2.5 for better effectiveness
-  let baseMaxIOB = 5.0; // Increased from 4.0 for better meal coverage
-  let baseDynamicISF = 95; // More aggressive (was 100)
+  // OPTIMIZED: Much more aggressive base values for real-world effectiveness
+  let baseMaxTempBasal = 4.5; // Increased from 3.0 for much better effectiveness
+  let baseMaxIOB = 8.0; // Increased from 5.0 for much better meal coverage
+  let baseDynamicISF = 85; // More aggressive (was 95)
   
   // Analyze current basal rates to set reasonable limits
   if (currentProfile?.basal?.length > 0) {
     try {
       const maxCurrentBasal = Math.max(...currentProfile.basal.map((b: any) => parseFloat(b.rate) || 0));
       if (!isNaN(maxCurrentBasal) && maxCurrentBasal > 0) {
-        // OPTIMIZED: Set max temp basal for better effectiveness
-        baseMaxTempBasal = Math.min(5.0, Math.max(2.5, maxCurrentBasal * 4.0)); // Max 4.0x current basal, capped at 5.0 U/h
+        // OPTIMIZED: Set max temp basal for much better effectiveness
+        baseMaxTempBasal = Math.min(7.0, Math.max(3.5, maxCurrentBasal * 5.0)); // Max 5.0x current basal, capped at 7.0 U/h
       }
     } catch (error) {
       console.error('Error calculating max current basal:', error);
@@ -269,35 +269,35 @@ function calculateMoreAggressiveSettings(
   const totalDailyInsulin = calculateTotalDailyInsulin(treatments);
   if (totalDailyInsulin > 0) {
     // OPTIMIZED: Set max IOB based on TDI - more effective approach
-    baseMaxIOB = Math.min(10.0, Math.max(3.0, totalDailyInsulin * 0.3)); // Max 30% of TDI, capped at 10.0 U
+    baseMaxIOB = Math.min(15.0, Math.max(5.0, totalDailyInsulin * 0.4)); // Max 40% of TDI, capped at 15.0 U
   }
   
-  // Analyze glucose variability - prioritize safety
+  // Analyze glucose variability - less conservative
   const variability = calculateVariability(readings);
-  if (variability.cv > 40) {
-    // High variability = much more conservative
-    baseMaxTempBasal *= 0.7;
-    baseMaxIOB *= 0.7;
-    baseDynamicISF = Math.max(baseDynamicISF, 130);
-  } else if (variability.cv > 30) {
+  if (variability.cv > 50) {
+    // High variability = somewhat more conservative
     baseMaxTempBasal *= 0.8;
     baseMaxIOB *= 0.8;
-    baseDynamicISF = Math.max(baseDynamicISF, 125);
+    baseDynamicISF = Math.max(baseDynamicISF, 110);
+  } else if (variability.cv > 35) {
+    baseMaxTempBasal *= 0.9;
+    baseMaxIOB *= 0.9;
+    baseDynamicISF = Math.max(baseDynamicISF, 105);
   }
   
-  // Analyze hypoglycemia history - SAFETY PRIORITY
+  // Analyze hypoglycemia history - BALANCED SAFETY
   const timeInRange = calculateTimeInRange(readings);
-  if (timeInRange.low > 4) {
-    // Significant hypoglycemia = very conservative
-    baseMaxTempBasal *= 0.6;
-    baseMaxIOB *= 0.6;
-    baseDynamicISF = Math.max(baseDynamicISF, 140);
+  if (timeInRange.low > 8) {
+    // Very significant hypoglycemia = more conservative
+    baseMaxTempBasal *= 0.7;
+    baseMaxIOB *= 0.7;
+    baseDynamicISF = Math.max(baseDynamicISF, 120);
+  } else if (timeInRange.low > 5) {
+    baseMaxTempBasal *= 0.8;
+    baseMaxIOB *= 0.8;
+    baseDynamicISF = Math.max(baseDynamicISF, 110);
   } else if (timeInRange.low > 2) {
-    baseMaxTempBasal *= 0.75;
-    baseMaxIOB *= 0.75;
-    baseDynamicISF = Math.max(baseDynamicISF, 130);
-  } else if (timeInRange.low > 1) {
-    baseMaxTempBasal *= 0.85;
+    baseMaxTempBasal *= 0.9;
     baseMaxIOB *= 0.85;
     baseDynamicISF = Math.max(baseDynamicISF, 125);
   }
@@ -314,26 +314,26 @@ function calculateMoreAggressiveSettings(
     baseDynamicISF = Math.max(90, baseDynamicISF * 0.9); // Moderate decrease
   }
   
-  // SAFETY CAPS: Higher maximum values for better effectiveness while maintaining safety
-  baseMaxTempBasal = Math.min(5.0, baseMaxTempBasal); // Absolute max 5.0 U/h
-  baseMaxIOB = Math.min(10.0, baseMaxIOB); // Absolute max 10.0 U
-  baseDynamicISF = Math.max(65, Math.min(140, baseDynamicISF)); // Range 65-140%
+  // SAFETY CAPS: Much higher maximum values for real-world effectiveness
+  baseMaxTempBasal = Math.min(8.0, baseMaxTempBasal); // Absolute max 8.0 U/h (increased from 5.0)
+  baseMaxIOB = Math.min(15.0, baseMaxIOB); // Absolute max 15.0 U (increased from 10.0)
+  baseDynamicISF = Math.max(60, Math.min(130, baseDynamicISF)); // Range 60-130% (more aggressive)
   
-  // Analyze carb coverage needs - but keep conservative
+  // Analyze carb coverage needs - more aggressive
   const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile);
   if (carbCoverage && carbCoverage.recommendedSMBCoverage > 0) {
-    // Adjust IOB limit based on carb coverage needs - more aggressive for better meal coverage
-    const carbBasedIOB = carbCoverage.recommendedSMBCoverage * 3.0; // Increased multiplier
-    baseMaxIOB = Math.min(baseMaxIOB * 1.3, carbBasedIOB); // More significant increase for carb coverage
+    // Adjust IOB limit based on carb coverage needs - much more aggressive for better meal coverage
+    const carbBasedIOB = carbCoverage.recommendedSMBCoverage * 4.0; // Increased multiplier further
+    baseMaxIOB = Math.min(baseMaxIOB * 1.5, carbBasedIOB); // More significant increase for carb coverage
   }
   
-  // Check for possible new sensor with inaccurate readings
+  // Check for possible new sensor with inaccurate readings - less restrictive
   const possibleNewSensor = checkForPossibleNewSensor(readings);
   if (possibleNewSensor) {
-    // If we suspect sensor issues, be even more conservative
-    baseMaxTempBasal = Math.min(baseMaxTempBasal, 1.8);
-    baseMaxIOB = Math.min(baseMaxIOB, 2.5);
-    baseDynamicISF = Math.max(baseDynamicISF, 110);
+    // If we suspect sensor issues, be somewhat more conservative but not overly restrictive
+    baseMaxTempBasal = Math.min(baseMaxTempBasal, 4.0); // Much less restrictive
+    baseMaxIOB = Math.min(baseMaxIOB, 6.0); // Much less restrictive
+    baseDynamicISF = Math.max(baseDynamicISF, 95); // Less restrictive
   }
   
   // Apply safety level multipliers
@@ -358,14 +358,14 @@ function calculateTotalDailyInsulin(treatments: any[]): number {
 }
 
 function getSafetyMultipliers(safetyLevel: string, riskScore: number) {
-  // OPTIMIZED: More aggressive multipliers for better control while maintaining safety focus
+  // OPTIMIZED: Much more aggressive multipliers for real-world effectiveness
   switch (safetyLevel) {
     case 'ultra-conservative':
-      return { tempBasal: 0.75, iob: 0.65, dynamicISF: 1.1 }; // Slightly more aggressive
+      return { tempBasal: 0.95, iob: 0.85, dynamicISF: 1.05 }; // Much more aggressive
     case 'conservative':
-      return { tempBasal: 0.9, iob: 0.8, dynamicISF: 1.0 }; // More aggressive
+      return { tempBasal: 1.0, iob: 0.95, dynamicISF: 1.0 }; // Much more aggressive
     default: // standard
-      return { tempBasal: 1.0, iob: 0.95, dynamicISF: 0.9 }; // More aggressive for better control
+      return { tempBasal: 1.1, iob: 1.05, dynamicISF: 0.85 }; // Much more aggressive for better control
   }
 }
 

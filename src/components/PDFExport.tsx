@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
-import { FileText, Download, Calendar, Activity, Shield, Brain, Target, BarChart2, Zap, AlertTriangle } from 'lucide-react';
+import { FileText, Download, Calendar, Activity, Shield, Brain, Target, BarChart2, Zap, AlertTriangle, RefreshCw } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay, differenceInDays } from 'date-fns';
 import jsPDF from 'jspdf';
 import { toMmol } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useNightscout } from '../contexts/NightscoutContext';
 
 interface PDFExportProps {
   data: any;
 }
 
 const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
-  const { formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges, convertToCurrentUnit } = useGlucoseFormatting();
+  const { formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges, convertToCurrentUnit, unit } = useGlucoseFormatting();
+  const { fetchDataForDays, analysisPeriod } = useNightscout();
   const [timeWindow, setTimeWindow] = useState(168); // Default to 7 days
   const [isCustomRange, setIsCustomRange] = useState(false);
   const [customDateRange, setCustomDateRange] = useState({
@@ -19,9 +21,13 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
   });
   const [showCalendar, setShowCalendar] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [fetchingMoreData, setFetchingMoreData] = useState(false);
   const [includeAdvancedStats, setIncludeAdvancedStats] = useState(true);
   const [includeTreatments, setIncludeTreatments] = useState(true);
   const [includeRecommendations, setIncludeRecommendations] = useState(true);
+  const [includeDistributionChart, setIncludeDistributionChart] = useState(true);
+  const [includePersonalizedInsights, setIncludePersonalizedInsights] = useState(true);
+  const [reportTheme, setReportTheme] = useState<'professional' | 'clinical' | 'personal'>('professional');
 
   // Get filtered readings based on time selection
   const filteredReadings = React.useMemo(() => {
@@ -96,7 +102,34 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       };
     }
 
-    const glucoseValues = filteredReadings.map(r => r.sgv);
+    const glucoseValues = filteredReadings.map(r => r.sgv).filter(val => !isNaN(val) && val > 0);
+    
+    if (glucoseValues.length === 0) {
+      console.warn('No valid glucose values found in filtered readings');
+      return {
+        totalReadings: filteredReadings.length,
+        averageGlucose: 0,
+        timeInRange: 0,
+        highPercentage: 0,
+        lowPercentage: 0,
+        standardDeviation: 0,
+        cv: 0,
+        estimatedA1C: 0,
+        veryHighPercentage: 0,
+        veryLowPercentage: 0,
+        highLowRatio: 0,
+        dailyReadings: 0,
+        readingGaps: 0,
+        longestGap: 0,
+        timeAbove250: 0,
+        timeBelow54: 0,
+        avgDailyHighs: 0,
+        avgDailyLows: 0,
+        dayNightVariation: 0,
+        glucoseManagementIndicator: 0
+      };
+    }
+
     const mean = glucoseValues.reduce((a, b) => a + b, 0) / glucoseValues.length;
     
     // Get current glucose ranges for calculations
@@ -218,25 +251,25 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
 
     return {
       totalReadings: filteredReadings.length,
-      averageGlucose: mean,
-      timeInRange: (inRangeCount / filteredReadings.length) * 100,
-      highPercentage: (highCount / filteredReadings.length) * 100,
-      lowPercentage: (lowCount / filteredReadings.length) * 100,
-      standardDeviation,
-      cv,
-      estimatedA1C,
-      veryHighPercentage: (veryHighCount / filteredReadings.length) * 100,
-      veryLowPercentage: (veryLowCount / filteredReadings.length) * 100,
-      highLowRatio,
-      dailyReadings,
+      averageGlucose: isNaN(mean) ? 0 : mean,
+      timeInRange: glucoseValues.length > 0 ? (inRangeCount / glucoseValues.length) * 100 : 0,
+      highPercentage: glucoseValues.length > 0 ? (highCount / glucoseValues.length) * 100 : 0,
+      lowPercentage: glucoseValues.length > 0 ? (lowCount / glucoseValues.length) * 100 : 0,
+      standardDeviation: isNaN(standardDeviation) ? 0 : standardDeviation,
+      cv: isNaN(cv) ? 0 : cv,
+      estimatedA1C: isNaN(estimatedA1C) ? 0 : estimatedA1C,
+      veryHighPercentage: glucoseValues.length > 0 ? (veryHighCount / glucoseValues.length) * 100 : 0,
+      veryLowPercentage: glucoseValues.length > 0 ? (veryLowCount / glucoseValues.length) * 100 : 0,
+      highLowRatio: isNaN(highLowRatio) ? 0 : highLowRatio,
+      dailyReadings: isNaN(dailyReadings) ? 0 : dailyReadings,
       readingGaps: gaps,
-      longestGap,
-      timeAbove250: (above250Count / filteredReadings.length) * 100,
-      timeBelow54: (below54Count / filteredReadings.length) * 100,
-      avgDailyHighs,
-      avgDailyLows,
-      dayNightVariation,
-      glucoseManagementIndicator
+      longestGap: isNaN(longestGap) ? 0 : longestGap,
+      timeAbove250: glucoseValues.length > 0 ? (above250Count / glucoseValues.length) * 100 : 0,
+      timeBelow54: glucoseValues.length > 0 ? (below54Count / glucoseValues.length) * 100 : 0,
+      avgDailyHighs: isNaN(avgDailyHighs) ? 0 : avgDailyHighs,
+      avgDailyLows: isNaN(avgDailyLows) ? 0 : avgDailyLows,
+      dayNightVariation: isNaN(dayNightVariation) ? 0 : dayNightVariation,
+      glucoseManagementIndicator: isNaN(glucoseManagementIndicator) ? 0 : glucoseManagementIndicator
     };
   };
 
@@ -310,14 +343,29 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
     return getTimeWindowLabel(timeWindow);
   };
 
-  const handleTimeWindowChange = (value: string) => {
+  const handleTimeWindowChange = async (value: string) => {
     if (value === 'custom') {
       setIsCustomRange(true);
       setShowCalendar(true);
     } else {
       setIsCustomRange(false);
-      setTimeWindow(parseInt(value));
+      const newTimeWindow = parseInt(value);
+      setTimeWindow(newTimeWindow);
       setShowCalendar(false);
+      
+      // Check if we need to fetch more data
+      const requestedDays = Math.ceil(newTimeWindow / 24);
+      if (requestedDays > analysisPeriod && dataSpanInfo && requestedDays > dataSpanInfo.spanDays) {
+        // Show loading and fetch more data
+        setFetchingMoreData(true);
+        try {
+          await fetchDataForDays(requestedDays);
+        } catch (error) {
+          console.error('Failed to fetch more data:', error);
+        } finally {
+          setFetchingMoreData(false);
+        }
+      }
     }
   };
 
@@ -340,7 +388,31 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
   };
 
   const getAllTimeWindows = () => {
-    return [
+    return getAvailableTimeWindows();
+  };
+
+  // Calculate available data span
+  const dataSpanInfo = React.useMemo(() => {
+    if (!data?.entries?.length) return null;
+    
+    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
+    const oldestEntry = sortedEntries[0];
+    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
+    const spanHours = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60));
+    
+    return {
+      oldestDate: new Date(oldestEntry.date),
+      newestDate: new Date(newestEntry.date),
+      spanDays,
+      spanHours,
+      totalReadings: data.entries.length
+    };
+  }, [data?.entries]);
+
+  // Get available time windows based on actual data
+  const getAvailableTimeWindows = () => {
+    const allWindows = [
       { value: 24, label: '24 hours' },
       { value: 48, label: '2 days' },
       { value: 72, label: '3 days' },
@@ -354,24 +426,33 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       { value: 1440, label: '2 months' },
       { value: 2160, label: '3 months' }
     ];
-  };
 
-  // Calculate available data span
-  const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
-    
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
-    const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
-    
-    return {
-      oldestDate: new Date(oldestEntry.date),
-      newestDate: new Date(newestEntry.date),
-      spanDays,
-      totalReadings: data.entries.length
-    };
-  }, [data?.entries]);
+    if (!dataSpanInfo) return allWindows;
+
+    // Add availability indicators and fetch suggestions
+    return allWindows.map(window => {
+      const hasEnoughData = dataSpanInfo.spanHours >= window.value;
+      const requestedDays = Math.ceil(window.value / 24);
+      
+      if (hasEnoughData) {
+        return { ...window, hasEnoughData: true };
+      } else if (requestedDays <= 90) { // We can fetch up to 3 months
+        return {
+          ...window,
+          label: `${window.label} (will fetch more data)`,
+          hasEnoughData: false,
+          canFetch: true
+        };
+      } else {
+        return {
+          ...window,
+          label: `${window.label} (limited data available)`,
+          hasEnoughData: false,
+          canFetch: false
+        };
+      }
+    });
+  };
 
   const generatePDF = async () => {
     if (filteredReadings.length === 0) {
@@ -385,41 +466,92 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       const stats = calculateStats();
       // Treatment stats calculated but not used in current PDF generation
       
-      // Create PDF document
+      // Create PDF document with theme-based styling
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4'
       });
       
-      // Set up fonts and colors
+      // Set up fonts and colors based on theme
       pdf.setFont('helvetica');
+      const themeColors = {
+        professional: { primary: [41, 82, 163], secondary: [46, 184, 89], accent: [243, 156, 18] },
+        clinical: { primary: [34, 139, 34], secondary: [70, 130, 180], accent: [220, 20, 60] },
+        personal: { primary: [106, 90, 205], secondary: [255, 140, 0], accent: [50, 205, 50] }
+      };
+      const colors = themeColors[reportTheme];
       
-      // Add background color to header
-      pdf.setFillColor(41, 82, 163); // Dark blue header
-      pdf.rect(0, 0, 210, 40, 'F');
+      // Add professional header with logo area
+      pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+      pdf.rect(0, 0, 210, 45, 'F');
       
-      // Add header text
+      // Add header text with better typography
       pdf.setTextColor(255, 255, 255);
-      pdf.setFontSize(24);
+      pdf.setFontSize(28);
       pdf.setFont('helvetica', 'bold');
-      pdf.text('Diabetes Management Report', 15, 20);
+      pdf.text('Diabetes Management Report', 15, 22);
+      
+      pdf.setFontSize(14);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`Generated on ${format(new Date(), 'EEEE, dd MMMM yyyy \'at\' HH:mm')}`, 15, 34);
+      
+      // Add report type indicator
+      const reportTypeLabels = {
+        professional: 'Professional Clinical Report',
+        clinical: 'Clinical Summary Report',
+        personal: 'Personal Diabetes Summary'
+      };
+      pdf.setFontSize(10);
+      pdf.text(reportTypeLabels[reportTheme], 150, 40);
+      
+      // Add modern report period banner
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFillColor(248, 249, 250);
+      pdf.setDrawColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+      pdf.setLineWidth(1);
+      pdf.roundedRect(0, 45, 210, 15, 0, 0, 'FD');
       
       pdf.setFontSize(12);
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(`Generated on ${format(new Date(), 'dd.MM.yyyy HH:mm')}`, 15, 30);
-      
-      // Add report period
-      pdf.setTextColor(0, 0, 0);
-      pdf.setFillColor(240, 240, 240); // Light gray background
-      pdf.rect(0, 40, 210, 12, 'F');
-      
-      pdf.setFontSize(11);
       pdf.setFont('helvetica', 'bold');
-      pdf.text(`Report Period: ${getDisplayLabel()} | ${stats.totalReadings.toLocaleString()} readings`, 15, 48);
+      const periodText = `Analysis Period: ${getDisplayLabel()} | ${stats.totalReadings.toLocaleString()} glucose readings`;
+      pdf.text(periodText, 15, 55);
+      
+      // Add footer function with enhanced styling and correct positioning
+      const addFooter = (pageNum: number, totalPages: number) => {
+        // Footer line
+        pdf.setDrawColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setLineWidth(0.8);
+        pdf.line(15, 280, 195, 280);
+        
+        // Footer text with better formatting and positioning
+        pdf.setFontSize(8);
+        pdf.setTextColor(120, 120, 120);
+        pdf.text('This report is for informational purposes only.', 15, 288);
+        pdf.text(`Page ${pageNum} of ${totalPages}`, 185, 288, { align: 'right' });
+        pdf.text('Generated by Diabetes Analyzer', 105, 294, { align: 'center' });
+      };
+      
+      // Function to check if we need a new page (improved spacing)
+      const checkPageBreak = (requiredSpace: number) => {
+        if (yPos + requiredSpace > 275) { // Leave more space for footer
+          pdf.addPage();
+          
+          // Add header to new page
+          pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.rect(0, 0, 210, 25, 'F');
+          
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(16);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('Diabetes Management Report (continued)', 15, 16);
+          
+          yPos = 35;
+        }
+      };
       
       // Add patient info section
-      let yPos = 65;
+      let yPos = 70;
       
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
@@ -442,7 +574,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Title
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(8);
-        pdf.setTextColor(100, 100, 100);
+        pdf.setTextColor(200, 200, 200);
         pdf.text(title, x + 4, y + 5);
         
         // Value
@@ -454,14 +586,14 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Subtext
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(7);
-        pdf.setTextColor(120, 120, 120);
+        pdf.setTextColor(220, 220, 220);
         pdf.text(subtext, x + 4, y + 18);
       };
       
       // First row of metrics
       const ranges = getCurrentGlucoseRanges();
-      const rangeLabel = `${formatGlucoseValue(ranges.TARGET_MIN, 'mgdl')}-${formatGlucoseValue(ranges.TARGET_MAX, 'mgdl')} ${getUnitLabel()}`;
-      addMetricBox('AVERAGE GLUCOSE', formatGlucoseValue(stats.averageGlucose, 'mgdl'), 'Mean glucose level', [41, 82, 163], 15, yPos, 42); // Blue
+      const rangeLabel = `${ranges.TARGET_MIN.toFixed(1)}-${ranges.TARGET_MAX.toFixed(1)} ${getUnitLabel()}`;
+      addMetricBox('AVERAGE GLUCOSE', formatGlucoseValue(stats.averageGlucose, 'mgdl', true), 'Mean glucose level', [41, 82, 163], 15, yPos, 42); // Blue
       addMetricBox('TIME IN RANGE', `${stats.timeInRange.toFixed(1)}%`, rangeLabel, [46, 184, 89], 62, yPos, 42); // Green
       addMetricBox('ESTIMATED A1C', `${stats.estimatedA1C.toFixed(1)}%`, 'Based on average glucose', [156, 39, 176], 109, yPos, 42); // Purple
       addMetricBox('GMI', `${stats.glucoseManagementIndicator.toFixed(1)}%`, 'Glucose Management Indicator', [230, 126, 34], 156, yPos, 42); // Orange
@@ -469,8 +601,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       yPos += 25;
       
       // Second row of metrics
-      const lowThreshold = formatGlucoseValue(ranges.TARGET_MIN, 'mgdl');
-      const highThreshold = formatGlucoseValue(ranges.TARGET_MAX, 'mgdl');
+      const lowThreshold = ranges.TARGET_MIN.toFixed(1);
+      const highThreshold = ranges.TARGET_MAX.toFixed(1);
       addMetricBox('VARIABILITY (CV)', `${stats.cv.toFixed(1)}%`, 'Coefficient of Variation', [41, 128, 185], 15, yPos, 42); // Light blue
       addMetricBox('TIME BELOW RANGE', `${stats.lowPercentage.toFixed(1)}%`, `<${lowThreshold} ${getUnitLabel()}`, [231, 76, 60], 62, yPos, 42); // Red
       addMetricBox('TIME ABOVE RANGE', `${stats.highPercentage.toFixed(1)}%`, `>${highThreshold} ${getUnitLabel()}`, [243, 156, 18], 109, yPos, 42); // Yellow
@@ -525,10 +657,10 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       
       // Get current glucose ranges for legend
       const currentRanges = getCurrentGlucoseRanges();
-      const veryLowThreshold = formatGlucoseValue(convertToCurrentUnit(54, 'mgdl'), 'mgdl');
-      const lowThresholdLabel = formatGlucoseValue(currentRanges.TARGET_MIN, 'mgdl');
-      const highThresholdLabel = formatGlucoseValue(currentRanges.TARGET_MAX, 'mgdl');
-      const veryHighThreshold = formatGlucoseValue(convertToCurrentUnit(250, 'mgdl'), 'mgdl');
+      const veryLowThreshold = formatGlucoseValue(convertToCurrentUnit(54, 'mgdl'), unit, false);
+      const lowThresholdLabel = currentRanges.TARGET_MIN.toFixed(1);
+      const highThresholdLabel = currentRanges.TARGET_MAX.toFixed(1);
+      const veryHighThreshold = formatGlucoseValue(convertToCurrentUnit(250, 'mgdl'), unit, false);
       
       // Very Low legend
       pdf.setFillColor(156, 39, 176);
@@ -541,7 +673,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       // Low legend
       pdf.setFillColor(231, 76, 60);
       pdf.rect(barX, yPos, 3, 3, 'F');
-      pdf.text(`Low (${veryLowThreshold}-${lowThresholdLabel} ${getUnitLabel()}): ${(stats.lowPercentage - stats.veryLowPercentage).toFixed(1)}%`, barX + 5, yPos + 3);
+      const lowRangeStart = formatGlucoseValue(convertToCurrentUnit(55, 'mgdl'), unit, false);
+      pdf.text(`Low (${lowRangeStart}-${lowThresholdLabel} ${getUnitLabel()}): ${(stats.lowPercentage - stats.veryLowPercentage).toFixed(1)}%`, barX + 5, yPos + 3);
       
       yPos += 6;
       
@@ -566,91 +699,628 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       
       yPos += 15;
       
-      // Add target ranges
-      pdf.setFillColor(240, 240, 240);
-      pdf.rect(15, yPos, 180, 20, 'F');
+      // Add target ranges with better formatting and correct values
+      pdf.setFillColor(248, 249, 250);
+      pdf.setDrawColor(230, 230, 230);
+      pdf.setLineWidth(0.5);
+      pdf.roundedRect(15, yPos, 180, 50, 2, 2, 'FD');
       
-      pdf.setFontSize(10);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(0, 0, 0);
-      pdf.text('TARGET RANGES', 20, yPos + 7);
-      
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(9);
-      const targetRangeText = `${lowThresholdLabel}-${highThresholdLabel} ${getUnitLabel()}`;
-      const belowRangeText = `${lowThresholdLabel} ${getUnitLabel()}`;
-      pdf.text(`• Time in Range (${targetRangeText}): ≥70%`, 20, yPos + 15);
-      pdf.text(`• Time Below Range (<${belowRangeText}): <4%`, 100, yPos + 15);
-      
-      yPos += 25;
-      
-      // Add assessment
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'bold');
       pdf.setTextColor(41, 82, 163);
-      pdf.text('CLINICAL ASSESSMENT', 15, yPos);
+      pdf.text('TARGET RANGES', 20, yPos + 10);
       
-      yPos += 8;
+      // Get the correct target ranges from current settings
+      const targetRanges = getCurrentGlucoseRanges();
+      const targetMinValue = targetRanges.TARGET_MIN.toFixed(1);
+      const targetMaxValue = targetRanges.TARGET_MAX.toFixed(1);
+      const targetRangeDisplay = `${targetMinValue}-${targetMaxValue} ${getUnitLabel()}`;
+      const belowRangeDisplay = `${targetMinValue} ${getUnitLabel()}`;
       
-      // Assessment box
-      pdf.setDrawColor(200, 200, 200);
-      pdf.setLineWidth(0.5);
-      pdf.rect(15, yPos, 180, 25, 'S');
-      
-      pdf.setFontSize(10);
       pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
       pdf.setTextColor(0, 0, 0);
       
-      // Determine assessment text
-      let assessmentText = '';
-      let assessmentColor: [number, number, number] = [0, 0, 0];
+      // Create two columns for better readability with proper spacing
+      pdf.text(`Time in Range (${targetRangeDisplay}): >=70%`, 20, yPos + 22);
+      pdf.text(`Time Below Range (<${belowRangeDisplay}): <4%`, 20, yPos + 32);
       
-      if (stats.timeInRange >= 70 && stats.lowPercentage < 4) {
-        assessmentText = '✓ Excellent glucose control with optimal time in range and minimal hypoglycemia.';
-        assessmentColor = [46, 184, 89]; // Green
-      } else if (stats.timeInRange >= 60 && stats.lowPercentage < 5) {
-        assessmentText = '✓ Good glucose control with room for improvement in time in range.';
-        assessmentColor = [41, 128, 185]; // Blue
-      } else if (stats.lowPercentage > 5) {
-        assessmentText = '⚠ Elevated hypoglycemia risk. Consider adjusting insulin doses to reduce low glucose events.';
-        assessmentColor = [231, 76, 60]; // Red
-      } else if (stats.highPercentage > 30) {
-        assessmentText = '⚠ Significant time above range. Consider reviewing insulin-to-carb ratios and correction factors.';
-        assessmentColor = [243, 156, 18]; // Yellow
+      // Add glucose management targets on the right side (positioned for better balance)
+      pdf.text(`Glucose Variability (CV): <36%`, 100, yPos + 22);
+      pdf.text(`Estimated A1C: <7.0% (individualized)`, 100, yPos + 32);
+      
+      yPos += 55;
+      
+      // Check if we need a new page before clinical assessment (reduced space requirement)
+      checkPageBreak(150); // Reduced from 180 to 150
+      
+      // Add comprehensive clinical assessment with better styling
+      pdf.setFillColor(248, 249, 250);
+      pdf.setDrawColor(41, 82, 163);
+      pdf.setLineWidth(1);
+      pdf.roundedRect(15, yPos - 5, 180, 8, 2, 2, 'FD');
+      
+      pdf.setFontSize(14);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(255, 255, 255);
+      pdf.text('CLINICAL ASSESSMENT', 20, yPos);
+      
+      yPos += 10;
+      
+      // Assessment cards with better visual hierarchy and improved spacing
+      const createAssessmentCard = (title: string, score: number, description: string, recommendations: string[], color: [number, number, number], y: number) => {
+        // Card background with reduced height
+        pdf.setFillColor(color[0], color[1], color[2], 0.05);
+        pdf.setDrawColor(color[0], color[1], color[2]);
+        pdf.setLineWidth(0.5);
+        pdf.roundedRect(15, y, 180, 40, 3, 3, 'FD'); // Reduced from 50 to 40
+        
+        // Title and score
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(12);
+        pdf.setTextColor(color[0], color[1], color[2]);
+        pdf.text(title, 20, y + 8);
+        
+        // Score indicator
+        const scoreWidth = 30;
+        const scoreHeight = 6;
+        pdf.setFillColor(240, 240, 240);
+        pdf.roundedRect(150, y + 3, scoreWidth, scoreHeight, 1, 1, 'F');
+        
+        const filledWidth = (score / 100) * scoreWidth;
+        pdf.setFillColor(color[0], color[1], color[2]);
+        pdf.roundedRect(150, y + 3, filledWidth, scoreHeight, 1, 1, 'F');
+        
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8);
+        pdf.setTextColor(200, 200, 200);
+        pdf.text(`${Math.round(score)}%`, 185, y + 7);
+        
+        // Description
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(9); // Reduced font size slightly
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(description, 20, y + 18);
+        
+        // Recommendations (limited to 1 line each)
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8); // Smaller font for recommendations
+        pdf.setTextColor(220, 220, 220);
+        recommendations.forEach((rec, index) => {
+          if (index < 2) { // Limit to 2 recommendations per card
+            // Truncate long recommendations
+            const maxLength = 70;
+            const truncatedRec = rec.length > maxLength ? rec.substring(0, maxLength) + '...' : rec;
+            pdf.text(truncatedRec, 20, y + 26 + (index * 7)); // Tighter spacing
+          }
+        });
+        
+        return y + 45; // Reduced spacing between cards
+      };
+      
+      // Calculate scores and assessments
+      const tirScore = Math.min(100, (stats.timeInRange / 70) * 100);
+      const hypoScore = Math.max(0, 100 - (stats.lowPercentage / 4) * 100);
+      const variabilityScore = Math.max(0, Math.min(100, 100 - ((stats.cv - 20) / 30) * 100));
+      
+      // Time in Range Assessment
+      let tirRecommendations = [];
+      if (stats.timeInRange < 50) {
+        tirRecommendations = [
+          '• Consider comprehensive diabetes management review',
+          '• Evaluate insulin regimen and glucose monitoring frequency'
+        ];
+      } else if (stats.timeInRange < 70) {
+        tirRecommendations = [
+          '• Review meal timing and carbohydrate counting accuracy',
+          '• Consider insulin dose optimization with healthcare provider'
+        ];
       } else {
-        assessmentText = '⚠ Glucose management needs improvement. Consider reviewing diabetes management plan with healthcare provider.';
-        assessmentColor = [243, 156, 18]; // Yellow
+        tirRecommendations = [
+          '• Excellent glucose control - maintain current strategies',
+          '• Continue regular monitoring and lifestyle consistency'
+        ];
       }
       
-      pdf.setTextColor(assessmentColor[0], assessmentColor[1], assessmentColor[2]);
-      pdf.text(assessmentText, 20, yPos + 10);
+      const tirColor: [number, number, number] = stats.timeInRange >= 70 ? [46, 184, 89] : stats.timeInRange >= 50 ? [243, 156, 18] : [231, 76, 60];
+      checkPageBreak(50); // Reduced space requirement
+      yPos = createAssessmentCard(
+        'Time in Range Performance',
+        tirScore,
+        `${stats.timeInRange.toFixed(1)}% of readings in target range (Goal: ≥70%)`,
+        tirRecommendations,
+        tirColor,
+        yPos
+      );
       
-      // Add variability assessment
-      let variabilityText = '';
-      if (stats.cv < 36) {
-        variabilityText = '✓ Glucose variability is within target range (CV <36%).';
-        pdf.setTextColor(46, 184, 89); // Green
+      // Hypoglycemia Risk Assessment
+      let hypoRecommendations = [];
+      if (stats.lowPercentage > 10) {
+        hypoRecommendations = [
+          '• High hypoglycemia risk - immediate attention needed',
+          '• Review insulin doses and consider reducing basal rates'
+        ];
+      } else if (stats.lowPercentage > 4) {
+        hypoRecommendations = [
+          '• Moderate hypoglycemia risk - evaluate insulin sensitivity',
+          '• Consider adjusting correction factors and meal bolus timing'
+        ];
       } else {
-        variabilityText = '⚠ Elevated glucose variability (CV >36%). Consider more consistent meal timing and insulin dosing.';
-        pdf.setTextColor(243, 156, 18); // Yellow
+        hypoRecommendations = [
+          '• Low hypoglycemia risk - well-managed glucose lows',
+          '• Maintain current hypoglycemia prevention strategies'
+        ];
       }
       
-      pdf.text(variabilityText, 20, yPos + 20);
+      const hypoColor: [number, number, number] = stats.lowPercentage < 4 ? [46, 184, 89] : stats.lowPercentage < 10 ? [243, 156, 18] : [231, 76, 60];
+      checkPageBreak(50); // Reduced space requirement
+      yPos = createAssessmentCard(
+        'Hypoglycemia Risk Management',
+        hypoScore,
+        `${stats.lowPercentage.toFixed(1)}% time below range (Goal: <4%)`,
+        hypoRecommendations,
+        hypoColor,
+        yPos
+      );
       
-      // Add second page with advanced statistics if selected
+      // Glucose Variability Assessment
+      let varRecommendations = [];
+      if (stats.cv > 50) {
+        varRecommendations = [
+          '• High glucose variability - focus on consistency',
+          '• Review meal timing, stress management, and sleep patterns'
+        ];
+      } else if (stats.cv > 36) {
+        varRecommendations = [
+          '• Moderate variability - work on glucose stability',
+          '• Consider more frequent glucose monitoring and dose adjustments'
+        ];
+      } else {
+        varRecommendations = [
+          '• Excellent glucose stability - maintain current approach',
+          '• Continue consistent diabetes management practices'
+        ];
+      }
+      
+      const varColor: [number, number, number] = stats.cv < 36 ? [46, 184, 89] : stats.cv < 50 ? [243, 156, 18] : [231, 76, 60];
+      checkPageBreak(50); // Reduced space requirement
+      yPos = createAssessmentCard(
+        'Glucose Variability Control',
+        variabilityScore,
+        `${stats.cv.toFixed(1)}% coefficient of variation (Goal: <36%)`,
+        varRecommendations,
+        varColor,
+        yPos
+      );
+      
+      // Add second page with enhanced analytics
       if (includeAdvancedStats) {
         pdf.addPage();
         
-        // Add header to second page
+        // Add modern header to second page
         pdf.setFillColor(41, 82, 163);
-        pdf.rect(0, 0, 210, 20, 'F');
+        pdf.rect(0, 0, 210, 25, 'F');
         
         pdf.setTextColor(255, 255, 255);
-        pdf.setFontSize(16);
+        pdf.setFontSize(18);
         pdf.setFont('helvetica', 'bold');
-        pdf.text('Advanced Glucose Statistics', 15, 14);
+        pdf.text('Advanced Analytics & Trends', 15, 16);
         
-        yPos = 30;
+        yPos = 35;
+        
+        // Add glucose trends analysis
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('GLUCOSE TRENDS & PATTERNS', 15, yPos);
+        
+        yPos += 10;
+        
+        // Create trend indicators
+        const createTrendCard = (title: string, value: string, trend: 'up' | 'down' | 'stable', color: [number, number, number], x: number, y: number, width: number) => {
+          // Card background with gradient effect
+          pdf.setFillColor(color[0], color[1], color[2], 0.1);
+          pdf.roundedRect(x, y, width, 35, 3, 3, 'F');
+          
+          // Border
+          pdf.setDrawColor(color[0], color[1], color[2]);
+          pdf.setLineWidth(0.8);
+          pdf.roundedRect(x, y, width, 35, 3, 3, 'S');
+          
+          // Title
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          pdf.setTextColor(200, 200, 200);
+          pdf.text(title, x + 5, y + 8);
+          
+          // Value
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(14);
+          pdf.setTextColor(color[0], color[1], color[2]);
+          pdf.text(value, x + 5, y + 20);
+          
+          // Trend indicator
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(12);
+          const trendSymbol = trend === 'up' ? '↗' : trend === 'down' ? '↘' : '→';
+          const trendColor = trend === 'up' ? [231, 76, 60] : trend === 'down' ? [46, 184, 89] : [200, 200, 200];
+          pdf.setTextColor(trendColor[0], trendColor[1], trendColor[2]);
+          pdf.text(trendSymbol, x + width - 15, y + 20);
+          
+          // Trend label
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(8);
+          pdf.setTextColor(220, 220, 220);
+          const trendLabel = trend === 'up' ? 'Increasing' : trend === 'down' ? 'Decreasing' : 'Stable';
+          pdf.text(trendLabel, x + 5, y + 30);
+        };
+        
+        // Calculate weekly averages for trend analysis
+        const calculateTrends = () => {
+          const weeklyData = [];
+          const sortedReadings = [...filteredReadings].sort((a, b) => a.date - b.date);
+          const weeksBack = Math.min(4, Math.floor(sortedReadings.length / (7 * 24 * 4))); // 4 readings per hour estimate
+          
+          for (let i = 0; i < weeksBack; i++) {
+            const weekStart = sortedReadings.length - (i + 1) * Math.floor(sortedReadings.length / weeksBack);
+            const weekEnd = sortedReadings.length - i * Math.floor(sortedReadings.length / weeksBack);
+            const weekReadings = sortedReadings.slice(Math.max(0, weekStart), weekEnd);
+            
+            if (weekReadings.length > 0) {
+              const weekAvg = weekReadings.reduce((sum, r) => sum + r.sgv, 0) / weekReadings.length;
+              weeklyData.push(weekAvg);
+            }
+          }
+          
+          return weeklyData.reverse(); // Most recent first
+        };
+        
+        const weeklyTrends = calculateTrends();
+        const avgTrend = weeklyTrends.length >= 2 ? 
+          (weeklyTrends[weeklyTrends.length - 1] > weeklyTrends[0] ? 'up' : 
+           weeklyTrends[weeklyTrends.length - 1] < weeklyTrends[0] ? 'down' : 'stable') : 'stable';
+        
+        // Daily patterns analysis
+        const hourlyAverages = Array(24).fill(0).map(() => ({ sum: 0, count: 0 }));
+        filteredReadings.forEach(reading => {
+          const hour = new Date(reading.date).getHours();
+          hourlyAverages[hour].sum += reading.sgv;
+          hourlyAverages[hour].count++;
+        });
+        
+        const hourlyMeans = hourlyAverages.map(h => h.count > 0 ? h.sum / h.count : 0);
+        const morningAvg = hourlyMeans.slice(6, 12).reduce((a, b) => a + b, 0) / 6;
+        const afternoonAvg = hourlyMeans.slice(12, 18).reduce((a, b) => a + b, 0) / 6;
+        const nightAvg = hourlyMeans.slice(0, 6).reduce((a, b) => a + b, 0) / 6;
+        
+        // Create trend cards in a grid
+        const cardWidth = 42;
+        const cardSpacing = 4;
+        
+        createTrendCard(
+          'Average Glucose',
+          formatGlucoseValue(stats.averageGlucose, 'mgdl', true),
+          avgTrend,
+          [41, 82, 163],
+          15,
+          yPos,
+          cardWidth
+        );
+        
+        createTrendCard(
+          'Morning (6-12h)',
+          formatGlucoseValue(morningAvg, 'mgdl', true),
+          morningAvg > stats.averageGlucose ? 'up' : morningAvg < stats.averageGlucose ? 'down' : 'stable',
+          [46, 184, 89],
+          15 + cardWidth + cardSpacing,
+          yPos,
+          cardWidth
+        );
+        
+        createTrendCard(
+          'Afternoon (12-18h)', 
+          formatGlucoseValue(afternoonAvg, 'mgdl', true),
+          afternoonAvg > stats.averageGlucose ? 'up' : afternoonAvg < stats.averageGlucose ? 'down' : 'stable',
+          [243, 156, 18],
+          15 + 2 * (cardWidth + cardSpacing),
+          yPos,
+          cardWidth
+        );
+        
+        createTrendCard(
+          'Night (0-6h)',
+          formatGlucoseValue(nightAvg, 'mgdl', true),
+          nightAvg > stats.averageGlucose ? 'up' : nightAvg < stats.averageGlucose ? 'down' : 'stable',
+          [156, 39, 176],
+          15 + 3 * (cardWidth + cardSpacing),
+          yPos,
+          cardWidth
+        );
+        
+        yPos += 45;
+        
+        // Check page break before data quality section
+        checkPageBreak(100);
+        
+        // Add comprehensive data quality section
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('DATA QUALITY & MONITORING', 15, yPos);
+        
+        yPos += 10;
+        
+        // Data quality metrics table with modern styling
+        const createModernTable = (headers: string[], data: any[][], x: number, y: number, width: number) => {
+          const rowHeight = 10;
+          const colWidth = width / headers.length;
+          
+          // Header with gradient effect
+          pdf.setFillColor(41, 82, 163);
+          pdf.roundedRect(x, y, width, rowHeight, 2, 2, 'F');
+          
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(10);
+          pdf.setTextColor(255, 255, 255);
+          
+          headers.forEach((header, i) => {
+            pdf.text(header, x + (i * colWidth) + 3, y + 7);
+          });
+          
+          // Data rows with alternating colors
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          
+          data.forEach((row, rowIndex) => {
+            const rowY = y + (rowIndex + 1) * rowHeight;
+            
+            // Alternating row background
+            if (rowIndex % 2 === 0) {
+              pdf.setFillColor(248, 249, 250);
+              pdf.rect(x, rowY, width, rowHeight, 'F');
+            }
+            
+            pdf.setTextColor(0, 0, 0);
+            row.forEach((cell, cellIndex) => {
+              pdf.text(cell.toString(), x + (cellIndex * colWidth) + 3, rowY + 7);
+            });
+          });
+          
+          // Table border
+          pdf.setDrawColor(230, 230, 230);
+          pdf.setLineWidth(0.5);
+          pdf.roundedRect(x, y, width, (data.length + 1) * rowHeight, 2, 2, 'S');
+          
+          return y + (data.length + 1) * rowHeight;
+        };
+        
+        // Data quality metrics
+        const qualityHeaders = ['Metric', 'Value', 'Quality Score', 'Status'];
+        const dataCompleteness = Math.min(100, (stats.dailyReadings / 288) * 100); // 288 = 24h * 12 readings/hour
+        const gapScore = Math.max(0, 100 - (stats.readingGaps * 5));
+        const consistencyScore = Math.max(0, 100 - Math.max(0, stats.longestGap - 60) / 10);
+        
+        const qualityData = [
+          ['Daily Readings', `${stats.dailyReadings.toFixed(1)}/day`, `${dataCompleteness.toFixed(0)}%`, dataCompleteness > 80 ? 'Excellent' : dataCompleteness > 60 ? 'Good' : 'Poor'],
+          ['Data Gaps', stats.readingGaps.toString(), `${gapScore.toFixed(0)}%`, gapScore > 80 ? 'Minimal' : gapScore > 60 ? 'Moderate' : 'Frequent'],
+          ['Longest Gap', `${Math.round(stats.longestGap)} min`, `${consistencyScore.toFixed(0)}%`, consistencyScore > 80 ? 'Excellent' : consistencyScore > 60 ? 'Good' : 'Poor'],
+          ['Coverage Period', `${Math.round((filteredReadings[filteredReadings.length - 1]?.date - filteredReadings[0]?.date) / (1000 * 60 * 60 * 24))} days`, '100%', 'Complete']
+        ];
+        
+        yPos = createModernTable(qualityHeaders, qualityData, 15, yPos, 180);
+        
+        yPos += 15;
+        
+        // Check page break before glucose distribution
+        checkPageBreak(80);
+        
+        // Add glucose distribution visualization
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('GLUCOSE DISTRIBUTION ANALYSIS', 15, yPos);
+        
+        yPos += 10;
+        
+        // Create glucose distribution histogram
+        const createGlucoseDistribution = (x: number, y: number, width: number, height: number) => {
+          const ranges = getCurrentGlucoseRanges();
+          const binSize = 20; // mg/dL bins
+          const bins: { range: number; count: number }[] = [];
+          const maxBinValue = 400;
+          
+          // Initialize bins
+          for (let i = 40; i <= maxBinValue; i += binSize) {
+            bins.push({ range: i, count: 0 });
+          }
+          
+          // Count readings in each bin
+          filteredReadings.forEach(reading => {
+            const glucose = reading.sgv;
+            const binIndex = Math.floor((glucose - 40) / binSize);
+            if (binIndex >= 0 && binIndex < bins.length) {
+              bins[binIndex].count++;
+            }
+          });
+          
+          const maxCount = Math.max(...bins.map(b => b.count));
+          const barWidth = width / bins.length;
+          
+          // Draw histogram bars
+          bins.forEach((bin, index) => {
+            const barHeight = (bin.count / maxCount) * height;
+            const barX = x + (index * barWidth);
+            const barY = y + height - barHeight;
+            
+            // Determine color based on glucose range
+            let color: [number, number, number];
+            if (bin.range < convertToCurrentUnit(ranges.TARGET_MIN, 'mgdl')) {
+              color = [231, 76, 60]; // Red for low
+            } else if (bin.range <= convertToCurrentUnit(ranges.TARGET_MAX, 'mgdl')) {
+              color = [46, 184, 89]; // Green for in range
+            } else if (bin.range <= convertToCurrentUnit(250, 'mgdl')) {
+              color = [243, 156, 18]; // Yellow for high
+            } else {
+              color = [211, 84, 0]; // Orange for very high
+            }
+            
+            pdf.setFillColor(color[0], color[1], color[2], 0.7);
+            pdf.rect(barX, barY, barWidth - 0.5, barHeight, 'F');
+          });
+          
+          // Draw axes
+          pdf.setDrawColor(100, 100, 100);
+          pdf.setLineWidth(0.5);
+          pdf.line(x, y + height, x + width, y + height); // X-axis
+          pdf.line(x, y, x, y + height); // Y-axis
+          
+          // Add labels
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(8);
+          pdf.setTextColor(100, 100, 100);
+          
+          // X-axis labels (every other bin)
+          for (let i = 0; i < bins.length; i += 3) {
+            const labelX = x + (i * barWidth) + barWidth / 2;
+            const glucoseValue = formatGlucoseValue(bins[i].range, 'mgdl', false);
+            pdf.text(glucoseValue, labelX - 5, y + height + 8);
+          }
+          
+          // Y-axis label
+          pdf.text('Frequency', x - 20, y + height / 2, { angle: 90 });
+          pdf.text(`Glucose (${getUnitLabel()})`, x + width / 2 - 15, y + height + 18);
+        };
+        
+        createGlucoseDistribution(15, yPos, 180, 40);
+        
+        yPos += 65;
+        
+        // Check page break before personalized insights
+        checkPageBreak(120);
+        
+        // Add personalized insights section
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('PERSONALIZED INSIGHTS & PATTERNS', 15, yPos);
+        
+        yPos += 10;
+        
+        // Generate personalized insights
+        const generateInsights = () => {
+          const insights = [];
+          
+          // Time-based patterns
+          const morningMean = morningAvg;
+          const afternoonMean = afternoonAvg;
+          const nightMean = nightAvg;
+          
+          if (morningMean > stats.averageGlucose + 20) {
+            insights.push({
+              icon: '🌅',
+              title: 'Dawn Phenomenon',
+              description: 'Morning glucose levels are consistently elevated. Consider discussing dawn phenomenon management with your healthcare provider.',
+              priority: 'high'
+            });
+          }
+          
+          if (afternoonMean < stats.averageGlucose - 20) {
+            insights.push({
+              icon: '🍽️',
+              title: 'Post-Lunch Pattern',
+              description: 'Afternoon glucose levels tend to be lower. Monitor pre-lunch insulin timing and carbohydrate intake.',
+              priority: 'medium'
+            });
+          }
+          
+          if (nightMean > stats.averageGlucose + 15) {
+            insights.push({
+              icon: '🌙',
+              title: 'Nighttime Elevation',
+              description: 'Nighttime glucose levels are elevated. Consider reviewing evening meal timing and insulin doses.',
+              priority: 'high'
+            });
+          }
+          
+          // Variability insights
+          if (stats.cv > 45) {
+            insights.push({
+              icon: '📊',
+              title: 'High Variability',
+              description: 'Glucose levels show high variability. Focus on consistency in meal timing, carb counting, and stress management.',
+              priority: 'high'
+            });
+          }
+          
+          // Data quality insights
+          if (stats.readingGaps > 10) {
+            insights.push({
+              icon: '!',
+              title: 'Data Gaps',
+              description: `${stats.readingGaps} data gaps detected. Ensure CGM sensor is properly attached and connected to your device.`,
+              priority: 'medium'
+            });
+          }
+          
+          // Positive reinforcement
+          if (stats.timeInRange > 80) {
+            insights.push({
+              icon: '⭐',
+              title: 'Excellent Control',
+              description: 'Outstanding glucose management! Your current strategies are working very well.',
+              priority: 'positive'
+            });
+          }
+          
+          return insights.slice(0, 4); // Limit to 4 insights
+        };
+        
+        const insights = generateInsights();
+        
+        // Display insights in cards
+        insights.forEach((insight, index) => {
+          const cardY = yPos + (index * 25);
+          const priorityColors = {
+            high: [231, 76, 60],
+            medium: [243, 156, 18],
+            positive: [46, 184, 89]
+          };
+          const color = priorityColors[insight.priority as keyof typeof priorityColors] || [100, 100, 100];
+          
+          // Card background
+          pdf.setFillColor(color[0], color[1], color[2], 0.05);
+          pdf.setDrawColor(color[0], color[1], color[2]);
+          pdf.setLineWidth(0.5);
+          pdf.roundedRect(15, cardY, 180, 20, 2, 2, 'FD');
+          
+          // Icon and title
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.setTextColor(color[0], color[1], color[2]);
+          pdf.text(`${insight.icon} ${insight.title}`, 20, cardY + 8);
+          
+          // Description
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          pdf.setTextColor(220, 220, 220);
+          const wrappedText = insight.description.length > 90 ? 
+            insight.description.substring(0, 87) + '...' : insight.description;
+          pdf.text(wrappedText, 20, cardY + 16);
+        });
+        
+        yPos += insights.length * 25 + 10;
+        
+        // Add glucose distribution if selected
+        if (includeDistributionChart) {
+          createGlucoseDistribution(15, yPos, 180, 40);
+          yPos += 65;
+        }
+        
+        // Add personalized insights if selected
+        if (includePersonalizedInsights && insights.length > 0) {
+          // Display insights in cards (already rendered above)
+          yPos += 10;
+        }
         
         // Daily patterns section
         pdf.setTextColor(41, 82, 163);
@@ -715,6 +1385,12 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         yPos += 15;
         
+        // Check if we need a new page for the extreme values section
+        if (yPos > 250) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
         // Extreme values section
         pdf.setTextColor(41, 82, 163);
         pdf.setFontSize(14);
@@ -724,20 +1400,96 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         // Extreme values table
         const extremeHeaders = ['Metric', 'Value', 'Target', 'Risk Level'];
-        const veryLowThresholdLabel = formatGlucoseValue(convertToCurrentUnit(54, 'mgdl'), 'mgdl');
-        const veryHighThresholdLabel = formatGlucoseValue(convertToCurrentUnit(250, 'mgdl'), 'mgdl');
-        const lowTargetLabel = formatGlucoseValue(currentRanges.TARGET_MIN, 'mgdl');
-        const highTargetLabel = formatGlucoseValue(currentRanges.TARGET_MAX, 'mgdl');
+        const veryLowThresholdLabel = formatGlucoseValue(convertToCurrentUnit(54, 'mgdl'), unit, false);
+        const veryHighThresholdLabel = formatGlucoseValue(convertToCurrentUnit(250, 'mgdl'), unit, false);
+        const lowTargetLabel = currentRanges.TARGET_MIN.toFixed(1);
+        const highTargetLabel = currentRanges.TARGET_MAX.toFixed(1);
         
         const extremeData = [
           [`Time <${veryLowThresholdLabel} ${getUnitLabel()}`, `${stats.veryLowPercentage.toFixed(1)}%`, '<1%', stats.veryLowPercentage < 1 ? 'Low' : stats.veryLowPercentage < 3 ? 'Medium' : 'High'],
           [`Time >${veryHighThresholdLabel} ${getUnitLabel()}`, `${stats.veryHighPercentage.toFixed(1)}%`, '<5%', stats.veryHighPercentage < 5 ? 'Low' : stats.veryHighPercentage < 10 ? 'Medium' : 'High'],
-          ['Avg. Daily Low', `${formatGlucoseValue(stats.avgDailyLows, 'mgdl')} ${getUnitLabel()}`, `>${lowTargetLabel} ${getUnitLabel()}`, convertToCurrentUnit(stats.avgDailyLows, 'mgdl') > currentRanges.TARGET_MIN ? 'Low' : 'Medium'],
-          ['Avg. Daily High', `${formatGlucoseValue(stats.avgDailyHighs, 'mgdl')} ${getUnitLabel()}`, `<${highTargetLabel} ${getUnitLabel()}`, convertToCurrentUnit(stats.avgDailyHighs, 'mgdl') < currentRanges.TARGET_MAX ? 'Low' : 'Medium']
+          ['Avg. Daily Low', `${formatGlucoseValue(stats.avgDailyLows, 'mgdl', false)} ${getUnitLabel()}`, `>${lowTargetLabel} ${getUnitLabel()}`, convertToCurrentUnit(stats.avgDailyLows, 'mgdl') > currentRanges.TARGET_MIN ? 'Low' : 'Medium'],
+          ['Avg. Daily High', `${formatGlucoseValue(stats.avgDailyHighs, 'mgdl', false)} ${getUnitLabel()}`, `<${highTargetLabel} ${getUnitLabel()}`, convertToCurrentUnit(stats.avgDailyHighs, 'mgdl') < currentRanges.TARGET_MAX ? 'Low' : 'Medium']
         ];
         
         yPos = createTable(extremeHeaders, extremeData, 15, yPos, 180);
         
+        yPos += 15;
+        
+        // Add Hourly Glucose Patterns section
+        if (yPos > 200) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.text('HOURLY GLUCOSE PATTERNS', 15, yPos);
+        yPos += 10;
+        
+        // Create hourly analysis
+        const hourlyData = [];
+        const hourlyStats = Array.from({length: 24}, (_, hour) => {
+          const hourReadings = filteredReadings.filter((reading: any) => new Date(reading.date).getHours() === hour);
+          if (hourReadings.length === 0) return { hour, avg: 'No data', count: 0 };
+          const avg = hourReadings.reduce((sum: number, r: any) => sum + r.sgv, 0) / hourReadings.length;
+          return { hour, avg: `${formatGlucoseValue(avg, 'mgdl', false)} ${getUnitLabel()}`, count: hourReadings.length };
+        });
+        
+        // Add hourly table (show every 2 hours to save space)
+        const hourlyHeaders = ['Time', 'Avg Glucose', 'Readings', 'Time', 'Avg Glucose', 'Readings'];
+        for (let i = 0; i < 12; i++) {
+          const hour1 = hourlyStats[i * 2];
+          const hour2 = hourlyStats[i * 2 + 1];
+          if (hour1 && hour2) {
+            hourlyData.push([
+              `${hour1.hour.toString().padStart(2, '0')}:00`,
+              hour1.avg,
+              hour1.count.toString(),
+              `${hour2.hour.toString().padStart(2, '0')}:00`,
+              hour2.avg,
+              hour2.count.toString()
+            ]);
+          }
+        }
+        
+        yPos = createTable(hourlyHeaders, hourlyData, 15, yPos, 180);
+        yPos += 15;
+        
+        // Add Day of Week Analysis
+        if (yPos > 200) {
+          pdf.addPage();
+          yPos = 30;
+        }
+        
+        pdf.setTextColor(41, 82, 163);
+        pdf.setFontSize(14);
+        pdf.text('DAY OF WEEK ANALYSIS', 15, yPos);
+        yPos += 10;
+        
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const weeklyHeaders = ['Day', 'Avg Glucose', 'Time in Range', 'Readings'];
+        const weeklyCurrentRanges = getCurrentGlucoseRanges();
+        const weeklyData = dayNames.map((day, index) => {
+          const dayReadings = filteredReadings.filter((reading: any) => new Date(reading.date).getDay() === index);
+          if (dayReadings.length === 0) return [day, 'No data', 'No data', '0'];
+          
+          const avg = dayReadings.reduce((sum: number, r: any) => sum + r.sgv, 0) / dayReadings.length;
+          const inRange = dayReadings.filter((r: any) => {
+            const glucose = convertToCurrentUnit(r.sgv, 'mgdl');
+            return glucose >= weeklyCurrentRanges.TARGET_MIN && glucose <= weeklyCurrentRanges.TARGET_MAX;
+          }).length;
+          const tirPercent = ((inRange / dayReadings.length) * 100).toFixed(1);
+          
+          return [
+            day,
+            `${formatGlucoseValue(avg, 'mgdl', false)} ${getUnitLabel()}`,
+            `${tirPercent}%`,
+            dayReadings.length.toString()
+          ];
+        });
+        
+        yPos = createTable(weeklyHeaders, weeklyData, 15, yPos, 180);
         yPos += 15;
         
         // Add risk assessment
@@ -839,7 +1591,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
-        pdf.setTextColor(0, 0, 0);
+        pdf.setTextColor(220, 220, 220);
         pdf.text(`Total Insulin: ${treatmentStats.totalInsulin.toFixed(1)} U`, 20, yPos + 20);
         pdf.text(`Daily Average: ${treatmentStats.dailyInsulin.toFixed(1)} U/day`, 20, yPos + 28);
         pdf.text(`Meal Boluses: ${treatmentStats.mealBoluses}`, 20, yPos + 36);
@@ -857,7 +1609,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
-        pdf.setTextColor(0, 0, 0);
+        pdf.setTextColor(220, 220, 220);
         pdf.text(`Total Carbs: ${treatmentStats.totalCarbs.toFixed(0)} g`, 20 + boxWidth + boxSpacing, yPos + 20);
         pdf.text(`Daily Average: ${treatmentStats.dailyCarbs.toFixed(0)} g/day`, 20 + boxWidth + boxSpacing, yPos + 28);
         pdf.text(`Avg. Meal Size: ${treatmentStats.avgCarbs.toFixed(0)} g`, 20 + boxWidth + boxSpacing, yPos + 36);
@@ -948,21 +1700,11 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         yPos += 65;
       }
       
-      // Add footer to all pages
+      // Add footer to all pages using enhanced footer function
       const pageCount = pdf.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         pdf.setPage(i);
-        
-        // Footer line
-        pdf.setDrawColor(200, 200, 200);
-        pdf.setLineWidth(0.5);
-        pdf.line(15, 280, 195, 280);
-        
-        // Footer text
-        pdf.setFontSize(8);
-        pdf.setTextColor(150, 150, 150);
-        pdf.text('This report is for informational purposes only and should not replace medical advice.', 15, 285);
-        pdf.text(`Page ${i} of ${pageCount}`, 180, 285);
+        addFooter(i, pageCount);
       }
       
       // Save the PDF
@@ -985,6 +1727,49 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         <FileText className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Comprehensive PDF Report</h3>
       </div>
+
+      {/* Data Availability Info */}
+      {dataSpanInfo && (
+        <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-start">
+            <Activity className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-1">
+                Data Availability
+              </h4>
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                Available data: <strong>{dataSpanInfo.spanDays} days</strong> ({dataSpanInfo.totalReadings.toLocaleString()} readings)
+                <br />
+                From {format(dataSpanInfo.oldestDate, 'MMM dd, yyyy')} to {format(dataSpanInfo.newestDate, 'MMM dd, yyyy')}
+              </p>
+              {dataSpanInfo.spanDays < 90 && (
+                <p className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                  💡 Need more data? You can fetch additional historical data for longer reports.
+                </p>
+              )}
+            </div>
+            {dataSpanInfo.spanDays < 90 && (
+              <button
+                onClick={async () => {
+                  setFetchingMoreData(true);
+                  try {
+                    await fetchDataForDays(90); // Fetch 3 months of data
+                  } catch (error) {
+                    console.error('Failed to fetch more data:', error);
+                  } finally {
+                    setFetchingMoreData(false);
+                  }
+                }}
+                disabled={fetchingMoreData}
+                className="ml-2 px-3 py-1 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs rounded flex items-center transition-colors duration-200"
+              >
+                <RefreshCw className={`w-3 h-3 mr-1 ${fetchingMoreData ? 'animate-spin' : ''}`} />
+                {fetchingMoreData ? 'Fetching...' : 'Fetch 3 Months'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Time Selection */}
       <div className="mb-6">
@@ -1015,6 +1800,43 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
             </button>
           )}
         </div>
+
+        {/* Warning for insufficient data */}
+        {!isCustomRange && dataSpanInfo && timeWindow > dataSpanInfo.spanHours && (
+          <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+            <div className="flex items-start">
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mr-2 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  <strong>Limited Data Available:</strong> You selected {getTimeWindowLabel(timeWindow)}, but only {dataSpanInfo.spanDays} days of data are available.
+                  {fetchingMoreData 
+                    ? ' Fetching more data...' 
+                    : ' The report will include all available readings.'
+                  }
+                </p>
+              </div>
+              {!fetchingMoreData && (
+                <button
+                  onClick={async () => {
+                    const requestedDays = Math.ceil(timeWindow / 24);
+                    setFetchingMoreData(true);
+                    try {
+                      await fetchDataForDays(requestedDays);
+                    } catch (error) {
+                      console.error('Failed to fetch more data:', error);
+                    } finally {
+                      setFetchingMoreData(false);
+                    }
+                  }}
+                  className="ml-2 px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded flex items-center transition-colors duration-200"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Fetch More
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Calendar Modal */}
@@ -1079,7 +1901,24 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       {/* Report Options */}
       <div className="mb-6">
         <h4 className="text-md font-medium text-gray-900 dark:text-gray-100 mb-3">Report Options</h4>
-        <div className="space-y-3">
+        
+        {/* Report Theme */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Report Theme
+          </label>
+          <select
+            value={reportTheme}
+            onChange={(e) => setReportTheme(e.target.value as 'professional' | 'clinical' | 'personal')}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+          >
+            <option value="professional">Professional - Comprehensive clinical report</option>
+            <option value="clinical">Clinical - Focus on medical metrics</option>
+            <option value="personal">Personal - Easy-to-read summary</option>
+          </select>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="flex items-center">
             <input
               type="checkbox"
@@ -1089,7 +1928,20 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
               className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 dark:focus:ring-blue-400 border-gray-300 dark:border-gray-600 rounded transition-colors duration-200"
             />
             <label htmlFor="includeAdvancedStats" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-              Include Advanced Statistics
+              Advanced Statistics & Patterns
+            </label>
+          </div>
+          
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="includeDistributionChart"
+              checked={includeDistributionChart}
+              onChange={(e) => setIncludeDistributionChart(e.target.checked)}
+              className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 dark:focus:ring-blue-400 border-gray-300 dark:border-gray-600 rounded transition-colors duration-200"
+            />
+            <label htmlFor="includeDistributionChart" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+              Glucose Distribution Chart
             </label>
           </div>
           
@@ -1102,7 +1954,20 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
               className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 dark:focus:ring-blue-400 border-gray-300 dark:border-gray-600 rounded transition-colors duration-200"
             />
             <label htmlFor="includeTreatments" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-              Include Treatment Analysis
+              Treatment Analysis
+            </label>
+          </div>
+          
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              id="includePersonalizedInsights"
+              checked={includePersonalizedInsights}
+              onChange={(e) => setIncludePersonalizedInsights(e.target.checked)}
+              className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 dark:focus:ring-blue-400 border-gray-300 dark:border-gray-600 rounded transition-colors duration-200"
+            />
+            <label htmlFor="includePersonalizedInsights" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+              Personalized Insights
             </label>
           </div>
           
@@ -1115,7 +1980,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
               className="h-4 w-4 text-blue-600 dark:text-blue-500 focus:ring-blue-500 dark:focus:ring-blue-400 border-gray-300 dark:border-gray-600 rounded transition-colors duration-200"
             />
             <label htmlFor="includeRecommendations" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-              Include Recommendations
+              Clinical Recommendations
             </label>
           </div>
         </div>
@@ -1143,7 +2008,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           <div className="bg-white dark:bg-gray-700 p-3 rounded-lg shadow-sm">
             <div className="flex flex-col">
               <span className="text-xs text-gray-500 dark:text-gray-400">Avg Glucose</span>
-              <span className="font-medium text-gray-900 dark:text-gray-100">{formatGlucoseValue(stats.averageGlucose, 'mgdl')} {getUnitLabel()}</span>
+              <span className="font-medium text-gray-900 dark:text-gray-100">{formatGlucoseValue(stats.averageGlucose, 'mgdl', true)}</span>
             </div>
           </div>
           
@@ -1203,7 +2068,21 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           {includeAdvancedStats && (
             <div className="flex items-center">
               <BarChart2 className="h-4 w-4 text-purple-600 dark:text-purple-400 mr-2" />
-              <span className="text-gray-700 dark:text-gray-300">Advanced Statistics & Pattern Analysis</span>
+              <span className="text-gray-700 dark:text-gray-300">Advanced Statistics & Daily Patterns</span>
+            </div>
+          )}
+          
+          {includeDistributionChart && (
+            <div className="flex items-center">
+              <Target className="h-4 w-4 text-indigo-600 dark:text-indigo-400 mr-2" />
+              <span className="text-gray-700 dark:text-gray-300">Glucose Distribution Visualization</span>
+            </div>
+          )}
+          
+          {includePersonalizedInsights && (
+            <div className="flex items-center">
+              <Brain className="h-4 w-4 text-pink-600 dark:text-pink-400 mr-2" />
+              <span className="text-gray-700 dark:text-gray-300">Personalized Pattern Insights</span>
             </div>
           )}
           
@@ -1216,8 +2095,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           
           {includeRecommendations && (
             <div className="flex items-center">
-              <Target className="h-4 w-4 text-red-600 dark:text-red-400 mr-2" />
-              <span className="text-gray-700 dark:text-gray-300">Personalized Recommendations & Next Steps</span>
+              <Zap className="h-4 w-4 text-red-600 dark:text-red-400 mr-2" />
+              <span className="text-gray-700 dark:text-gray-300">Clinical Recommendations & Next Steps</span>
             </div>
           )}
         </div>

@@ -69,5 +69,34 @@ export const formatGlucose = (value: number): string => {
   return `${toMmol(value)} mmol/L`;
 };
 
+// Format glucose value with proper units based on user preference (for services)
+export const formatGlucoseWithUnit = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl', showUnit: boolean = true): string => {
+  // Get user's preferred unit from localStorage
+  const savedUnit = localStorage.getItem('glucose_unit') as 'mmol' | 'mgdl' || 'mmol';
+  
+  let convertedValue: number;
+  let unitLabel: string;
+  
+  if (fromUnit === savedUnit) {
+    convertedValue = value;
+  } else if (fromUnit === 'mgdl' && savedUnit === 'mmol') {
+    convertedValue = toMmol(value);
+  } else if (fromUnit === 'mmol' && savedUnit === 'mgdl') {
+    convertedValue = toMgdl(value);
+  } else {
+    convertedValue = value;
+  }
+  
+  if (savedUnit === 'mmol') {
+    unitLabel = 'mmol/L';
+    convertedValue = Math.round(convertedValue * 10) / 10; // Round to 1 decimal place
+  } else {
+    unitLabel = 'mg/dL';
+    convertedValue = Math.round(convertedValue); // Round to nearest integer
+  }
+  
+  return showUnit ? `${convertedValue}${unitLabel}` : convertedValue.toString();
+};
+
 // Export glucose ranges
 export { GLUCOSE_RANGES };
