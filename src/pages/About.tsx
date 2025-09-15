@@ -1,4 +1,3 @@
-import React from 'react';
 import { 
   Activity, 
   Heart, 
@@ -12,12 +11,14 @@ import {
   Target, 
   Droplet, 
   Cookie, 
-  TrendingUp, 
   FileText, 
   AlertTriangle, 
   CheckCircle, 
   Thermometer, 
-  Sun
+  Sun,
+  Phone,
+  Mail,
+  MessageCircle
 } from 'lucide-react';
 
 const About = () => {
@@ -492,12 +493,45 @@ const About = () => {
               We're constantly working to improve Diabetes Analyzer based on user feedback. If you have questions, 
               suggestions, or need support, please reach out to us.
             </p>
-            <div className="flex justify-center">
+            
+            {/* Contact Information */}
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center justify-center text-blue-800 dark:text-blue-200">
+                <Mail className="h-4 w-4 mr-2" />
+                <span className="text-sm">milan.krnjajic@gmail.com</span>
+              </div>
+              <div className="flex items-center justify-center text-blue-800 dark:text-blue-200">
+                <Phone className="h-4 w-4 mr-2" />
+                <span className="text-sm">+385 99 402 3492</span>
+              </div>
+            </div>
+            
+            {/* Contact Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <a 
-                href="mailto:support@diabetesanalyzer.com" 
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                href="mailto:milan.krnjajic@gmail.com" 
+                className="flex items-center justify-center px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
               >
-                Contact Support
+                <Mail className="h-4 w-4 mr-2" />
+                Email Support
+              </a>
+              
+              <a 
+                href="https://wa.me/385994023492" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center px-4 py-2 bg-green-600 dark:bg-green-500 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-600 transition-colors duration-200"
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                WhatsApp
+              </a>
+              
+              <a 
+                href="viber://chat?number=385994023492" 
+                className="flex items-center justify-center px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded-lg hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                Viber
               </a>
             </div>
           </div>
