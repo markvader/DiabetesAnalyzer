@@ -7,9 +7,24 @@ import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
 import { useTimeInRange } from '../contexts/TimeInRangeContext';
 import { INSULIN_PUMPS, InsulinPumpProfile, getPumpsByCategory, getAAPSSupportedPumps } from '../constants/insulinPumps';
+import { 
+  OPENAI_MODELS, 
+  getModelsByCategory, 
+  getModelsByProvider,
+  getRecommendedModels, 
+  getModelById, 
+  calculateEstimatedCost, 
+  formatCostEstimate, 
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_MODEL,
+  DIABETES_ANALYSIS_TOKENS,
+  OpenAIModel,
+  AIModel 
+} from '../constants/openaiModels';
 import { format } from 'date-fns';
 import { testConnection } from '../services/nightscoutService';
-import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu, Target } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu, Target, DollarSign, Zap } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import TimeInRangeSettings from '../components/TimeInRangeSettings';
 
@@ -56,11 +71,13 @@ const Settings = () => {
   const [testing, setTesting] = useState(false);
   const [apiKeyStatus, setApiKeyStatus] = useState<{
     openai: boolean | null;
+    gemini: boolean | null;
     deepseek: boolean | null;
     anthropic: boolean | null;
     tensorflow: boolean | null;
   }>({
     openai: null,
+    gemini: null,
     deepseek: null,
     anthropic: null,
     tensorflow: null
@@ -69,6 +86,9 @@ const Settings = () => {
   
   // API Key states
   const [openaiKey, setOpenaiKey] = useState(localStorage.getItem('openai_api_key') || '');
+  const [selectedOpenAIModel, setSelectedOpenAIModel] = useState(localStorage.getItem('openai_selected_model') || DEFAULT_OPENAI_MODEL);
+  const [geminiKey, setGeminiKey] = useState(localStorage.getItem('gemini_api_key') || '');
+  const [selectedModel, setSelectedModel] = useState(localStorage.getItem('selected_model') || DEFAULT_MODEL);
   const [deepseekKey, setDeepseekKey] = useState(localStorage.getItem('deepseek_api_key') || '');
   const [anthropicKey, setAnthropicKey] = useState(localStorage.getItem('anthropic_api_key') || '');
   
@@ -158,6 +178,7 @@ const Settings = () => {
       const results = await aiService.testAPIKeys();
       setApiKeyStatus({
         openai: results.openai,
+        gemini: false, // Will be updated when Gemini service is implemented
         deepseek: results.deepseek,
         anthropic: results.anthropic,
         tensorflow: results.tensorflow || false
@@ -222,6 +243,21 @@ const Settings = () => {
       localStorage.removeItem('openai_api_key');
     }
     
+    // Save selected OpenAI model
+    localStorage.setItem('openai_selected_model', selectedOpenAIModel);
+    
+    // Save Gemini API key
+    if (geminiKey) {
+      localStorage.setItem('gemini_api_key', geminiKey);
+      // Also update environment variable
+      (window as any).VITE_GEMINI_API_KEY = geminiKey;
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+    
+    // Save selected model (general)
+    localStorage.setItem('selected_model', selectedModel);
+    
     if (deepseekKey) {
       localStorage.setItem('deepseek_api_key', deepseekKey);
       // Also update environment variable
@@ -238,8 +274,11 @@ const Settings = () => {
       localStorage.removeItem('anthropic_api_key');
     }
     
+    // Refresh AI service providers to use new settings
+    aiService.refreshProviders();
+    
     setMessage({
-      text: 'API keys saved successfully. Please refresh the page for changes to take effect.',
+      text: 'API keys and model selection saved successfully. Changes applied immediately.',
       type: 'success'
     });
     
@@ -302,7 +341,7 @@ const Settings = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  OpenAI API Key (GPT-4o mini)
+                  OpenAI API Key
                 </label>
                 <div className="flex items-center">
                   <span className="text-xs text-gray-500 dark:text-gray-400 mr-2">Status:</span>
@@ -319,7 +358,7 @@ const Settings = () => {
                   )}
                 </div>
               </div>
-              <div className="flex">
+              <div className="flex mb-3">
                 <input
                   type="password"
                   value={openaiKey}
@@ -336,8 +375,198 @@ const Settings = () => {
                   <ExternalLink className="h-5 w-5" />
                 </a>
               </div>
+
+              {/* Model Selection */}
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Model Selection
+                </label>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => {
+                    setSelectedModel(e.target.value);
+                    // Also update selectedOpenAIModel for backward compatibility
+                    if (getModelById(e.target.value)?.provider === 'openai') {
+                      setSelectedOpenAIModel(e.target.value);
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                >
+                  <optgroup label="🚀 Latest Models (Recommended)">
+                    {getModelsByCategory('latest').map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🔷 Google Gemini Models">
+                    {getModelsByCategory('gemini').map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🧠 o1 Reasoning Models (ChatGPT-5)">
+                    {getModelsByCategory('reasoning').map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="💬 Chat Models (GPT-4 Family)">
+                    {getModelsByCategory('chat').map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="📜 Legacy Models (GPT-3.5)">
+                    {getModelsByCategory('legacy').map(model => (
+                      <option key={model.id} value={model.id}>
+                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              {/* Selected Model Info */}
+              {(() => {
+                const selectedModelInfo = getModelById(selectedModel);
+                if (!selectedModelInfo) return null;
+                
+                const estimatedCost = calculateEstimatedCost(selectedModelInfo, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output);
+                
+                return (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-3">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 flex items-center">
+                          <Zap className="h-4 w-4 mr-1" />
+                          {selectedModelInfo.name}
+                          {selectedModelInfo.isRecommended && <span className="ml-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs px-2 py-0.5 rounded-full">Recommended</span>}
+                          <span className="ml-2 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 text-xs px-2 py-0.5 rounded-full">{selectedModelInfo.provider === 'openai' ? 'OpenAI' : 'Google'}</span>
+                        </h4>
+                        <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">{selectedModelInfo.description}</p>
+                        <div className="flex items-center mt-2 space-x-4">
+                          <div className="flex items-center text-xs text-blue-600 dark:text-blue-400">
+                            <DollarSign className="h-3 w-3 mr-1" />
+                            <span className="font-medium">{formatCostEstimate(estimatedCost)}</span>
+                            <span className="ml-1">per analysis</span>
+                          </div>
+                          <div className="text-xs text-blue-600 dark:text-blue-400">
+                            Input: ${selectedModelInfo.inputCostPer1k}/1K tokens
+                          </div>
+                          <div className="text-xs text-blue-600 dark:text-blue-400">
+                            Output: ${selectedModelInfo.outputCostPer1k}/1K tokens
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Get your API key from the <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenAI dashboard</a>. Using GPT-4o mini for cost efficiency (~$0.003-0.01 per analysis).
+                Get your API key from the <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenAI dashboard</a>. Costs are estimated based on ~{DIABETES_ANALYSIS_TOKENS.input} input and ~{DIABETES_ANALYSIS_TOKENS.output} output tokens per analysis.
+              </p>
+            </div>
+
+            {/* Google Gemini API Key */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Google Gemini API Key
+                </label>
+                <div className="flex items-center">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 mr-2">Status:</span>
+                  {apiKeyStatus.gemini === null ? (
+                    <span className="text-gray-500 dark:text-gray-400 text-xs">Not tested</span>
+                  ) : apiKeyStatus.gemini ? (
+                    <span className="text-green-600 dark:text-green-400 flex items-center text-xs">
+                      <CheckCircle className="h-3 w-3 mr-1" /> Working
+                    </span>
+                  ) : (
+                    <span className="text-red-600 dark:text-red-400 flex items-center text-xs">
+                      <AlertTriangle className="h-3 w-3 mr-1" /> Not working
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex mb-3">
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="AIzaSy..."
+                  className="flex-grow px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-l-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                />
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-600 border border-gray-300 dark:border-gray-600 border-l-0 rounded-r-md text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors duration-200"
+                >
+                  <ExternalLink className="h-5 w-5" />
+                </a>
+              </div>
+
+              {/* Gemini Models */}
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Gemini Models
+                </label>
+                <div className="grid grid-cols-1 gap-2">
+                  {getModelsByCategory('gemini').map(model => {
+                    const cost = calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output);
+                    return (
+                      <div 
+                        key={model.id}
+                        className={`p-3 border rounded-lg cursor-pointer transition-all duration-200 ${
+                          selectedModel === model.id 
+                            ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20' 
+                            : 'border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500'
+                        }`}
+                        onClick={() => setSelectedModel(model.id)}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center">
+                              <input
+                                type="radio"
+                                checked={selectedModel === model.id}
+                                onChange={() => setSelectedModel(model.id)}
+                                className="h-4 w-4 text-blue-600 dark:text-blue-400 border-gray-300 dark:border-gray-600 focus:ring-blue-500 dark:focus:ring-blue-400"
+                              />
+                              <h4 className="ml-2 text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {model.name}
+                                {model.isRecommended && <span className="ml-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs px-2 py-0.5 rounded-full">Recommended</span>}
+                              </h4>
+                            </div>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 ml-6">{model.description}</p>
+                            <div className="flex items-center mt-2 ml-6 space-x-4">
+                              <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
+                                <DollarSign className="h-3 w-3 mr-1" />
+                                <span className="font-medium">{formatCostEstimate(cost)}</span>
+                                <span className="ml-1">per analysis</span>
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
+                                Input: ${model.inputCostPer1k}/1K tokens
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
+                                Output: ${model.outputCostPer1k}/1K tokens
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Get your API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Google AI Studio</a>. Costs are estimated based on ~{DIABETES_ANALYSIS_TOKENS.input} input and ~{DIABETES_ANALYSIS_TOKENS.output} output tokens per analysis.
               </p>
             </div>
             

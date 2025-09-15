@@ -1,5 +1,7 @@
 import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import TensorFlowAIService from './tensorFlowAIService';
+import GeminiService from './geminiService';
+import { getModelById } from '../constants/openaiModels';
 
 // Interface for custom glucose range settings
 export interface CustomGlucoseRanges {
@@ -12,25 +14,49 @@ export interface CustomGlucoseRanges {
 class AIService {
   providers: any[] = [];
   private tensorFlowService: TensorFlowAIService;
+  private geminiService: GeminiService;
 
   constructor() {
     this.tensorFlowService = new TensorFlowAIService();
+    this.geminiService = new GeminiService();
     this.initializeProviders();
   }
 
   private initializeProviders() {
     // Get API keys from localStorage or environment variables
     const openaiKey = localStorage.getItem('openai_api_key') || import.meta.env.VITE_OPENAI_API_KEY;
+    const selectedOpenAIModel = localStorage.getItem('openai_selected_model') || 'gpt-4o-mini';
+    const geminiKey = localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY;
+    const selectedModel = localStorage.getItem('selected_model') || selectedOpenAIModel;
     const deepseekKey = localStorage.getItem('deepseek_api_key') || import.meta.env.VITE_DEEPSEEK_API_KEY;
     const anthropicKey = localStorage.getItem('anthropic_api_key') || import.meta.env.VITE_ANTHROPIC_API_KEY;
 
+    // Clear existing providers
+    this.providers = [];
+
+    // Refresh Gemini service API key
+    this.geminiService.refreshApiKey();
+
+    // Check if selected model is a Gemini model
+    const selectedModelInfo = getModelById(selectedModel);
+    
     // OpenAI
     if (openaiKey) {
       this.providers.push({
         name: 'OpenAI',
         endpoint: 'https://api.openai.com/v1/chat/completions',
-        model: 'gpt-4o-mini',
+        model: selectedOpenAIModel,
         apiKey: openaiKey
+      });
+    }
+
+    // Gemini
+    if (geminiKey) {
+      this.providers.push({
+        name: 'Gemini',
+        endpoint: 'gemini', // Special identifier for Gemini
+        model: selectedModelInfo?.provider === 'google' ? selectedModel : 'gemini-2.0-flash-exp',
+        apiKey: geminiKey
       });
     }
 
@@ -64,12 +90,22 @@ class AIService {
     
     const results = {
       openai: false,
+      gemini: false,
       deepseek: false,
       anthropic: false,
       tensorflow: this.tensorFlowService.isReady()
     };
 
     console.log(`TensorFlow AI Service status: ${results.tensorflow ? 'Ready' : 'Not Ready'}`);
+    
+    // Test Gemini separately
+    try {
+      results.gemini = await this.geminiService.testConnection();
+      console.log(`Gemini API test: ${results.gemini ? 'Success' : 'Failed'}`);
+    } catch (error) {
+      console.error('Gemini API test failed:', error);
+      results.gemini = false;
+    }
     
     // Test each provider
     for (const provider of this.providers) {
@@ -78,7 +114,10 @@ class AIService {
         
         let response;
         
-        if (provider.name === 'Anthropic') {
+        if (provider.name === 'Gemini') {
+          // Skip testing here since we tested it above
+          continue;
+        } else if (provider.name === 'Anthropic') {
           // Special handling for Anthropic API
           response = await fetch(provider.endpoint, {
             method: 'POST',
@@ -136,6 +175,16 @@ class AIService {
   // Get TensorFlow service for settings access
   getTensorFlowService(): TensorFlowAIService {
     return this.tensorFlowService;
+  }
+
+  // Get current OpenAI model information
+  getCurrentOpenAIModel(): string {
+    return localStorage.getItem('openai_selected_model') || 'gpt-4o-mini';
+  }
+
+  // Refresh providers (call this when settings change)
+  refreshProviders(): void {
+    this.initializeProviders();
   }
 
   // Get TensorFlow info
@@ -229,7 +278,34 @@ class AIService {
             
             let response;
             
-            if (provider.name === 'Anthropic') {
+            if (provider.name === 'Gemini') {
+              // Use dedicated Gemini service
+              const glucoseData = readings.map(r => ({ 
+                timestamp: r.dateString || new Date(r.date).toISOString(), 
+                value: r.sgv || r.value 
+              }));
+              
+              const geminiResult = await this.geminiService.analyzeDiabetesData(
+                glucoseData, 
+                provider.model, 
+                glucoseContext?.unit === 'mmol' ? 'mmol/L' : 'mg/dL'
+              );
+              
+              // Convert Gemini result to expected format
+              return {
+                insights: geminiResult.reasoning,
+                recommendations: geminiResult.recommendations,
+                riskAssessment: geminiResult.riskAssessment,
+                confidence: Math.round(geminiResult.confidence * 100),
+                patterns: {
+                  timeInRange: timeInRange,
+                  variability: stats.cv,
+                  avgGlucose: stats.mean
+                },
+                provider: 'Gemini',
+                tokenUsage: geminiResult.tokenUsage
+              };
+            } else if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
                 method: 'POST',
                 headers: {

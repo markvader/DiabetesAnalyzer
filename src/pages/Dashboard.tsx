@@ -1,10 +1,11 @@
-import React, { useEffect, useCallback, useMemo, useState, useRef } from 'react';
+import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
+import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { Activity, Clock, TrendingUp, Download, Calendar, Brain, Info, RefreshCw } from 'lucide-react';
+import { Activity, Clock, TrendingUp, Download, Calendar, Brain, RefreshCw } from 'lucide-react';
 import GlucoseChart from '../components/GlucoseChart';
 import GlucoseTrendChart from '../components/GlucoseTrendChart';
 import TimeInRangeChart from '../components/TimeInRangeChart';
@@ -12,7 +13,11 @@ import A1CEstimator from '../components/A1CEstimator';
 import StatCard from '../components/StatCard';
 import AlertSettings from '../components/AlertSettings';
 import DataExport from '../components/DataExport';
-import PredictionChart from '../components/PredictionChart';
+import AdvancedPredictionChart from '../components/AdvancedPredictionChart';
+import NightscoutDataDisplay from '../components/NightscoutDataDisplay';
+import PredictionInsightsPanel from '../components/PredictionInsightsPanel';
+import TreatmentTimeline from '../components/TreatmentTimeline';
+import GlucoseTrendAnalysis from '../components/GlucoseTrendAnalysis';
 import AdvancedStats from '../components/AdvancedStats';
 import LoadingSpinner from '../components/LoadingSpinner';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
@@ -24,6 +29,10 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
 import { formatCageValue, formatSageValue, formatBasalRate, getCageColorClass, getSageColorClass } from '../utils/nightscoutFormatting';
+import { 
+  nightscoutTreatmentParser, 
+  type ParsedNightscoutData 
+} from '../services/nightscoutTreatmentParser';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -46,6 +55,187 @@ const Dashboard = () => {
   const { isSubscribed } = useSubscription();
   const { showDeviceStatus } = useDashboardDisplay();
   const { formatGlucoseValue, convertToCurrentUnit, getCurrentGlucoseRanges, getUnitLabel } = useGlucoseFormatting();
+  const { isReady: tensorFlowReady, isEnabled: tensorFlowEnabled } = useTensorFlow();
+  
+  // State for advanced prediction chart
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [parsedNightscoutData, setParsedNightscoutData] = useState<ParsedNightscoutData | null>(null);
+
+  // Check if any API key is available
+  useEffect(() => {
+    const openaiKey = localStorage.getItem('openai_api_key');
+    const deepseekKey = localStorage.getItem('deepseek_api_key');
+    const anthropicKey = localStorage.getItem('anthropic_api_key');
+    const geminiKey = localStorage.getItem('gemini_api_key');
+    
+    setHasApiKey(!!(openaiKey || deepseekKey || anthropicKey || geminiKey));
+  }, []);
+
+  const handleNightscoutDataParsed = useCallback((parsedData: ParsedNightscoutData) => {
+    setParsedNightscoutData(parsedData);
+    setRefreshKey(prev => prev + 1);
+  }, []);
+
+  // Generate prediction context from Nightscout data
+  const getDefaultTimeOfDay = (): 'morning' | 'afternoon' | 'evening' | 'night' => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    if (hour >= 17 && hour < 21) return 'evening';
+    return 'night';
+  };
+
+  const predictionContext = parsedNightscoutData ? {
+    recentMeals: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentMeals || [] : [],
+    recentInsulin: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentInsulin || [] : [],
+    recentExercise: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentExercise || [] : [],
+    timeOfDay: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).timeOfDay || getDefaultTimeOfDay(),
+    dayOfWeek: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).dayOfWeek || new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+    isWeekend: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).isWeekend ?? [0, 6].includes(new Date().getDay()),
+  } : undefined;
+
+  // Generate treatment timeline data
+  const generateTimelineData = () => {
+    if (!data?.treatments || !parsedNightscoutData) return [];
+
+    const timelineItems: Array<{
+      id: string;
+      type: 'meal' | 'bolus' | 'correction' | 'smb' | 'tempBasal' | 'exercise';
+      timestamp: Date;
+      description: string;
+      value?: number;
+      unit?: string;
+      impact?: 'positive' | 'negative' | 'neutral';
+    }> = [];
+    const now = new Date();
+    const last12Hours = new Date(now.getTime() - 12 * 60 * 60 * 1000);
+
+    // Add meals
+    parsedNightscoutData.meals.forEach(meal => {
+      const mealDate = new Date(meal.time);
+      if (mealDate >= last12Hours) {
+        timelineItems.push({
+          id: `meal-${meal.time}`,
+          type: 'meal',
+          timestamp: mealDate,
+          description: `${meal.carbs}g carbs${meal.insulinBolus ? ` + ${meal.insulinBolus}u bolus` : ''}`,
+          value: meal.carbs,
+          unit: 'g',
+          impact: 'positive'
+        });
+      }
+    });
+
+    // Add insulin
+    parsedNightscoutData.insulin.forEach(insulin => {
+      const insulinDate = new Date(insulin.time);
+      if (insulinDate >= last12Hours) {
+        timelineItems.push({
+          id: `insulin-${insulin.time}`,
+          type: insulin.type === 'bolus' ? 'bolus' : 'correction',
+          timestamp: insulinDate,
+          description: `${insulin.units}u ${insulin.type}`,
+          value: insulin.units,
+          unit: 'u',
+          impact: 'negative'
+        });
+      }
+    });
+
+    // Add SMBs
+    parsedNightscoutData.smbs.forEach(smb => {
+      const smbDate = new Date(smb.time);
+      if (smbDate >= last12Hours) {
+        timelineItems.push({
+          id: `smb-${smb.time}`,
+          type: 'smb',
+          timestamp: smbDate,
+          description: `${smb.units}u SMB${smb.reason ? ` - ${smb.reason}` : ''}`,
+          value: smb.units,
+          unit: 'u',
+          impact: 'negative'
+        });
+      }
+    });
+
+    // Add temp basals
+    parsedNightscoutData.tempBasals.forEach(temp => {
+      const tempDate = new Date(temp.time);
+      if (tempDate >= last12Hours) {
+        timelineItems.push({
+          id: `temp-${temp.time}`,
+          type: 'tempBasal',
+          timestamp: tempDate,
+          description: `${temp.rate}u/h for ${temp.duration}min`,
+          value: temp.rate,
+          unit: 'u/h',
+          impact: temp.rate > 1.0 ? 'positive' : 'negative'
+        });
+      }
+    });
+
+    // Add exercise
+    parsedNightscoutData.exercise.forEach(exercise => {
+      const exerciseDate = new Date(exercise.time);
+      if (exerciseDate >= last12Hours) {
+        timelineItems.push({
+          id: `exercise-${exercise.time}`,
+          type: 'exercise',
+          timestamp: exerciseDate,
+          description: `${exercise.intensity} intensity - ${exercise.duration}min`,
+          value: exercise.duration,
+          unit: 'min',
+          impact: 'negative'
+        });
+      }
+    });
+
+    return timelineItems.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  };
+
+  const timelineData = generateTimelineData();
+
+  // Calculate prediction insights
+  const calculatePredictionInsights = () => {
+    if (!data?.entries || data.entries.length === 0) return {};
+
+    const ranges = getCurrentGlucoseRanges();
+    const currentGlucose = data.entries[data.entries.length - 1]?.sgv || 0;
+    const last24Hours = data.entries.slice(-288); // 24 hours of 5-min readings
+    const inRangeReadings = last24Hours.filter(r => r.sgv >= ranges.TARGET_MIN && r.sgv <= ranges.TARGET_MAX);
+    const timeInRange = Math.round((inRangeReadings.length / last24Hours.length) * 100);
+
+    // Simple trend calculation
+    const recentReadings = data.entries.slice(-6); // Last 30 minutes
+    if (recentReadings.length >= 2) {
+      const latest = recentReadings[recentReadings.length - 1];
+      const previous = recentReadings[0];
+      const change = latest.sgv - previous.sgv;
+      const rate = change / 30; // per minute
+
+      return {
+        timeInRange,
+        confidence: Math.min(95, Math.max(60, 85 - Math.abs(rate) * 10)),
+        recentTrends: {
+          direction: (Math.abs(change) < 10 ? 'stable' : change > 0 ? 'rising' : 'falling') as 'stable' | 'rising' | 'falling',
+          rate,
+          prediction1h: currentGlucose + (rate * 60),
+          prediction3h: currentGlucose + (rate * 180)
+        },
+        riskLevel: 
+          currentGlucose < ranges.LOW_THRESHOLD || currentGlucose > ranges.HIGH_THRESHOLD 
+            ? 'high' as const
+            : currentGlucose < ranges.TARGET_MIN || currentGlucose > ranges.TARGET_MAX 
+            ? 'moderate' as const
+            : 'low' as const
+      };
+    }
+
+    return { timeInRange, confidence: 75 };
+  };
+
+  const predictionInsights = calculatePredictionInsights();
   
   // Cache for CAGE and SAGE values to prevent them from disappearing during refresh
   const lastKnownCageRef = useRef<number | null>(null);
@@ -1513,10 +1703,44 @@ const Dashboard = () => {
                 readings={chartReadings} 
                 hours={isCustomRange ? undefined : Math.min(timeWindow, 336)} 
               />
-              <PredictionChart readings={data?.entries || []} />
+              {/* Advanced Prediction with Nightscout Data */}
+              <div className="space-y-4">
+                <NightscoutDataDisplay 
+                  onDataParsed={handleNightscoutDataParsed}
+                  hoursBack={6}
+                />
+                <AdvancedPredictionChart 
+                  key={refreshKey}
+                  readings={data?.entries || []} 
+                  useAI={hasApiKey || (tensorFlowEnabled && tensorFlowReady)}
+                  context={predictionContext}
+                />
+              </div>
             </div>
             <div className="space-y-6">
               <A1CEstimator averageGlucose={filteredStats.totalReadings > 0 ? filteredStats.averageBG : (analysisResults?.averageBG || 0)} />
+              
+              {/* Prediction Insights Panel */}
+              <PredictionInsightsPanel 
+                readings={data?.entries || []}
+                riskLevel={predictionInsights.riskLevel}
+                confidence={predictionInsights.confidence}
+                timeInRange={predictionInsights.timeInRange}
+                recentTrends={predictionInsights.recentTrends}
+              />
+              
+              {/* Glucose Trend Analysis */}
+              <GlucoseTrendAnalysis 
+                readings={data?.entries || []}
+                windowMinutes={30}
+              />
+              
+              {/* Treatment Timeline */}
+              <TreatmentTimeline 
+                treatments={timelineData}
+                maxItems={6}
+              />
+              
               <AlertSettings onSave={handleAlertSettingsSave} />
               <DataExport data={data || { entries: [], treatments: [], devicestatus: [] }} />
             </div>
