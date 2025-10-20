@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { analyzeData } from '../services/analysisService';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
+import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock, Sparkles } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 
 const CarbRatio = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
+  const { isPremium } = useDesignMode();
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -261,10 +264,27 @@ const CarbRatio = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
+    <motion.div 
+      className="space-y-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <motion.div 
+        className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700"
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6 }}
+      >
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">AI-Enhanced Carb Ratio Analysis</h2>
+          <h2 className={
+            isPremium 
+              ? "text-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 dark:from-green-400 dark:to-blue-400 bg-clip-text text-transparent" 
+              : "text-2xl font-bold text-gray-900 dark:text-gray-100"
+          }>
+            {isPremium && <Sparkles className="inline-block w-6 h-6 mr-2 text-green-500 animate-pulse" />}
+            AI-Enhanced Carb Ratio Analysis
+          </h2>
           <p className="text-gray-600 dark:text-gray-400">
             Analysis for {getDisplayLabel()}
           </p>
@@ -290,13 +310,19 @@ const CarbRatio = () => {
             <option value="custom">Custom Range</option>
           </select>
           
-          <button
+          <motion.button
             onClick={() => setShowCalendar(!showCalendar)}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            className={
+              isPremium
+                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
+                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            }
+            whileHover={isPremium ? { scale: 1.05 } : {}}
+            whileTap={isPremium ? { scale: 0.95 } : {}}
           >
             <Calendar className="w-4 h-4 mr-2" />
             Calendar
-          </button>
+          </motion.button>
           
           <button 
             onClick={() => {
@@ -321,7 +347,7 @@ const CarbRatio = () => {
             Refresh AI
           </button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Calendar Modal */}
       {showCalendar && (
@@ -512,7 +538,7 @@ const CarbRatio = () => {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };
 

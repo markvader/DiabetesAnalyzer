@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { Brain, Calendar, Clock, RefreshCw, Cpu, Info } from 'lucide-react';
+import { Brain, Calendar, Clock, RefreshCw, Cpu, Info, Sparkles } from 'lucide-react';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { toMmol } from '../utils/glucoseUtils';
 
 const AIInsights = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
+  const { isPremium } = useDesignMode();
   const { isReady: tensorFlowReady, isEnabled: tensorFlowEnabled, error: tensorFlowError } = useTensorFlow();
   
   // Time selection state
@@ -202,20 +205,45 @@ const AIInsights = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
+    <motion.div 
+      className="space-y-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <motion.div 
+        className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700"
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6 }}
+      >
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">AI-Powered Insights</h2>
+            <h2 className={
+              isPremium 
+                ? "text-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent" 
+                : "text-2xl font-bold text-gray-900 dark:text-gray-100"
+            }>
+              {isPremium && <Sparkles className="inline-block w-6 h-6 mr-2 text-purple-500 animate-pulse" />}
+              AI-Powered Insights
+            </h2>
             {tensorFlowEnabled && (
-              <div className={`flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                tensorFlowReady 
-                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' 
-                  : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
-              }`}>
+              <motion.div 
+                className={`flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                  tensorFlowReady 
+                    ? isPremium
+                      ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-lg'
+                      : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : isPremium
+                      ? 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-lg'
+                      : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                }`}
+                animate={isPremium ? { scale: [1, 1.05, 1] } : {}}
+                transition={isPremium ? { duration: 2, repeat: Infinity } : {}}
+              >
                 <Cpu className="w-3 h-3 mr-1" />
                 {tensorFlowReady ? 'TensorFlow Ready' : 'TensorFlow Loading...'}
-              </div>
+              </motion.div>
             )}
           </div>
           <p className="text-gray-600 dark:text-gray-400">
@@ -253,15 +281,21 @@ const AIInsights = () => {
             <option value="custom">Custom Range</option>
           </select>
           
-          <button
+          <motion.button
             onClick={() => setShowCalendar(!showCalendar)}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            className={
+              isPremium
+                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
+                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            }
+            whileHover={isPremium ? { scale: 1.05 } : {}}
+            whileTap={isPremium ? { scale: 0.95 } : {}}
           >
             <Calendar className="w-4 h-4 mr-2" />
             Calendar
-          </button>
+          </motion.button>
           
-          <button 
+          <motion.button 
             onClick={() => {
               if (isCustomRange) {
                 handleCustomDateSubmit();
@@ -270,21 +304,33 @@ const AIInsights = () => {
                 fetchDataForDays(Math.max(daysNeeded, 14));
               }
             }}
-            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+            className={
+              isPremium
+                ? "px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 flex items-center transition-all duration-200 shadow-lg"
+                : "px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+            }
+            whileHover={isPremium ? { scale: 1.05 } : {}}
+            whileTap={isPremium ? { scale: 0.95 } : {}}
           >
             <Clock className="w-4 h-4 mr-2" />
             Refresh Data
-          </button>
+          </motion.button>
           
-          <button 
+          <motion.button 
             onClick={handleRefreshAI}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            className={
+              isPremium
+                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
+                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            }
+            whileHover={isPremium ? { scale: 1.05 } : {}}
+            whileTap={isPremium ? { scale: 0.95 } : {}}
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh AI
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Calendar Modal */}
       {showCalendar && (
@@ -461,7 +507,7 @@ const AIInsights = () => {
           </p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

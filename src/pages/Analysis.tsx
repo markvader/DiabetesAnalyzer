@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
+import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { getDateRangeString } from '../utils/dateUtils';
 import { analyzeData } from '../services/analysisService';
-import { Activity, Droplet, Cookie, Brain, TrendingUp, Sun, Cloud, Calendar, Clock } from 'lucide-react';
+import { Activity, Droplet, Cookie, Brain, TrendingUp, Sun, Cloud, Calendar, Clock, Sparkles } from 'lucide-react';
 import { detectGlucosePatterns, analyzeMealPatterns, identifyMealClusters } from '../services/patternDetectionService';
 import { analyzeWeatherImpact } from '../services/weatherAnalysis';
 import { analyzeInsulinSensitivity } from '../services/insulinSensitivityAnalysis';
@@ -18,6 +20,7 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 
 const Analysis = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
+  const { isPremium } = useDesignMode();
   const { isSubscribed } = useSubscription();
   const { formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
@@ -350,10 +353,27 @@ const Analysis = () => {
   }
   
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
+    <motion.div 
+      className="space-y-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+    >
+      <motion.div 
+        className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700"
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6 }}
+      >
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Advanced Analysis</h2>
+          <h2 className={
+            isPremium 
+              ? "text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent" 
+              : "text-2xl font-bold text-gray-900 dark:text-gray-100"
+          }>
+            {isPremium && <Sparkles className="inline-block w-6 h-6 mr-2 text-blue-500 animate-pulse" />}
+            Advanced Analysis
+          </h2>
           <p className="text-gray-600 dark:text-gray-400">
             Analysis for {getDisplayLabel()} ({filteredReadings.length} readings)
           </p>
@@ -380,16 +400,22 @@ const Analysis = () => {
           </select>
           
           {!isCustomRange && (
-            <button
+            <motion.button
               onClick={() => setShowCalendar(!showCalendar)}
-              className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+              className={
+                isPremium
+                  ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
+                  : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+              }
+              whileHover={isPremium ? { scale: 1.05 } : {}}
+              whileTap={isPremium ? { scale: 0.95 } : {}}
             >
               <Calendar className="w-4 h-4 mr-2" />
               Calendar
-            </button>
+            </motion.button>
           )}
           
-          <button 
+          <motion.button 
             onClick={() => {
               if (isCustomRange) {
                 handleCustomDateSubmit();
@@ -398,13 +424,19 @@ const Analysis = () => {
                 fetchDataForDays(Math.max(daysNeeded, 14));
               }
             }}
-            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+            className={
+              isPremium
+                ? "px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 flex items-center transition-all duration-200 shadow-lg"
+                : "px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+            }
+            whileHover={isPremium ? { scale: 1.05 } : {}}
+            whileTap={isPremium ? { scale: 0.95 } : {}}
           >
             <Clock className="w-4 h-4 mr-2" />
             Refresh
-          </button>
+          </motion.button>
         </div>
-      </div>
+      </motion.div>
 
       {/* Calendar Modal */}
       {showCalendar && (
@@ -741,7 +773,7 @@ const Analysis = () => {
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 };
 
