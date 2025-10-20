@@ -1,11 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-export type DesignMode = 'classic' | 'modern' | 'premium';
+export type DesignMode = 'classic' | 'premium';
 
 interface DesignModeContextType {
   designMode: DesignMode;
   setDesignMode: (mode: DesignMode) => void;
-  isModern: boolean;
   isClassic: boolean;
   isPremium: boolean;
 }
@@ -16,12 +15,16 @@ const DESIGN_MODE_STORAGE_KEY = 'diabetes-analyzer-design-mode';
 
 export const DesignModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [designMode, setDesignModeState] = useState<DesignMode>(() => {
-    // Load from localStorage or default to modern
+    // Load from localStorage or default to classic
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(DESIGN_MODE_STORAGE_KEY);
-      return (saved as DesignMode) || 'modern';
+      // If saved mode is 'modern', convert to 'classic'
+      if (saved === 'modern') {
+        return 'classic';
+      }
+      return (saved as DesignMode) || 'classic';
     }
-    return 'modern';
+    return 'classic';
   });
 
   const setDesignMode = (mode: DesignMode) => {
@@ -40,7 +43,6 @@ export const DesignModeProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const value: DesignModeContextType = {
     designMode,
     setDesignMode,
-    isModern: designMode === 'modern',
     isClassic: designMode === 'classic',
     isPremium: designMode === 'premium',
   };
