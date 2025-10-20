@@ -1,9 +1,23 @@
 # Diabetes Analyzer - Recent Changes & New Features
-## Period: Last 7 Days (August 25 - September 1, 2025)
+## Period: Last 7 Days (Updated October 20, 2025)
 
 ---
 
 ## 🎯 Major Feature Additions
+
+### 🔥 NEW: AAPS 3.3.3+ Compatibility Fix
+**Status: ✅ COMPLETED** (October 20, 2025)
+- **Description**: Complete fix for newer AndroidAPS versions that no longer include `dateString` field
+- **Problem Identified by**: Martin from 10be.de
+- **AAPS Version Affected**: 3.3.3.0-dev and later
+- **Key Features**:
+  - Automatic fallback from `dateString` to `created_at` for entries (API v1)
+  - Automatic fallback for treatments queries (API v1)
+  - Enhanced API v3 support with dual field detection
+  - Works seamlessly with both old and new AAPS versions
+  - No user intervention required - fully automatic
+- **Documentation**: `AAPS_3_3_3_COMPATIBILITY_FIX.md`
+- **Files Modified**: `src/services/nightscoutService.ts`
 
 ### 1. Nightscout-Style Treatment Visualization
 **Status: ✅ COMPLETED**

@@ -20,6 +20,9 @@ import 'chartjs-adapter-date-fns';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTheme } from '../contexts/ThemeContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
+import { Box, Paper, Typography, useTheme as useMuiTheme } from '@mui/material';
+import { motion } from 'framer-motion';
 
 ChartJS.register(
   CategoryScale,
@@ -63,16 +66,17 @@ interface GlucoseChartProps {
   title?: string;
 }
 
-const GlucoseChart: React.FC<GlucoseChartProps> = ({ 
-  readings, 
-  treatments = [], 
+const GlucoseChart: React.FC<GlucoseChartProps> = ({
+  readings,
+  treatments,
+  title,
   showInsulinDelivery = false,
-  title = 'Glucose Readings' 
 }) => {
+  const { convertToCurrentUnit, formatGlucoseValue, unit, getCurrentGlucoseRanges } = useGlucoseFormatting();
   const { theme } = useTheme();
-  const { getCurrentGlucoseRanges, convertToCurrentUnit, unit } = useGlucoseFormatting();
+  const { isModern, isPremium } = useDesignMode();
+  const muiTheme = useMuiTheme();
   const isDark = theme === 'dark';
-
   const colors = isDark ? GLUCOSE_RANGES.COLORS.DARK : GLUCOSE_RANGES.COLORS;
 
   const processTreatmentOverlays = React.useCallback(() => {
@@ -454,6 +458,140 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
     };
   }, [colors, getCurrentGlucoseRanges, unit]);
   
+  // Premium Design with Advanced Effects
+  if (isPremium) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, type: "spring" }}
+      >
+        <Paper 
+          elevation={0}
+          sx={{ 
+            p: 4,
+            borderRadius: 3,
+            background: `linear-gradient(135deg, ${muiTheme.palette.background.paper} 0%, ${muiTheme.palette.background.default} 100%)`,
+            boxShadow: theme === 'dark' 
+              ? '0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05)'
+              : '0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.8)',
+            position: 'relative',
+            overflow: 'hidden',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '4px',
+              background: `linear-gradient(90deg, ${muiTheme.palette.primary.main} 0%, ${muiTheme.palette.secondary.main} 50%, ${muiTheme.palette.primary.main} 100%)`,
+            }
+          }}
+        >
+          {/* Premium header */}
+          {title && (
+            <Box sx={{ mb: 3, pb: 2, borderBottom: `1px solid ${muiTheme.palette.divider}20` }}>
+              <Typography 
+                variant="h5" 
+                sx={{ 
+                  fontWeight: 700,
+                  background: `linear-gradient(135deg, ${muiTheme.palette.primary.main} 0%, ${muiTheme.palette.secondary.main} 100%)`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  color: 'transparent',
+                }}
+              >
+                {title}
+              </Typography>
+            </Box>
+          )}
+
+          {/* Enhanced chart container */}
+          <Box 
+            sx={{ 
+              height: { xs: 280, sm: 360 },
+              position: 'relative',
+              '& canvas': {
+                borderRadius: 2,
+                boxShadow: `0 4px 16px ${muiTheme.palette.primary.main}08`,
+              }
+            }}
+          >
+            {readings && readings.length > 0 ? (
+              <Chart 
+                type="line"
+                data={processedData} 
+                options={options} 
+                plugins={[targetRangePlugin]}
+              />
+            ) : (
+              <Box 
+                sx={{ 
+                  height: '100%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  background: `linear-gradient(135deg, ${muiTheme.palette.background.default} 0%, ${muiTheme.palette.background.paper} 100%)`,
+                  borderRadius: 2,
+                  border: `1px dashed ${muiTheme.palette.divider}`,
+                }}
+              >
+                <Typography 
+                  color="text.secondary" 
+                  sx={{ 
+                    fontStyle: 'italic',
+                    textAlign: 'center'
+                  }}
+                >
+                  📊 No glucose data available
+                  <br />
+                  <Typography variant="caption" color="text.secondary">
+                    Connect your CGM to see glucose trends
+                  </Typography>
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </Paper>
+      </motion.div>
+    );
+  }
+
+  // Modern Material UI Design  
+  if (isModern) {
+    return (
+      <Paper 
+        elevation={2}
+        sx={{ 
+          p: 3,
+          borderRadius: 2,
+          backgroundColor: muiTheme.palette.background.paper,
+        }}
+      >
+        {title && (
+          <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+            {title}
+          </Typography>
+        )}
+        <Box sx={{ height: { xs: 256, sm: 320 } }}>
+          {readings && readings.length > 0 ? (
+            <Chart 
+              type="line"
+              data={processedData} 
+              options={options} 
+              plugins={[targetRangePlugin]}
+            />
+          ) : (
+            <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Typography color="text.secondary">No glucose data available</Typography>
+            </Box>
+          )}
+        </Box>
+      </Paper>
+    );
+  }
+
+  // Classic Tailwind Design
   return (
     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200">
       <div className="h-64 sm:h-80">

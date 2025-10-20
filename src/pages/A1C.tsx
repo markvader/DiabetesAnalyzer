@@ -5,10 +5,25 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Calendar, Clock } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useDesignMode } from '../contexts/DesignModeContext';
+import { 
+  Container, 
+  Paper, 
+  Typography, 
+  Box, 
+  FormControl,
+  Select,
+  MenuItem,
+  Button,
+  Alert,
+  useTheme 
+} from '@mui/material';
 
 const A1C = () => {
   const { data, loading, error, fetchDataForDays, forceRefresh } = useNightscout();
   const { formatGlucoseValue } = useGlucoseFormatting();
+  const { isModern } = useDesignMode();
+  const theme = useTheme();
   
   // Time selection state
   const [timeWindow, setTimeWindow] = useState(168); // Default to 7 days (168 hours)
@@ -202,10 +217,75 @@ const A1C = () => {
   if (loading) return <LoadingSpinner />;
 
   if (error) {
+    if (isModern) {
+      return (
+        <Container maxWidth="lg" sx={{ py: 3 }}>
+          <Alert severity="error" sx={{ borderRadius: 2 }}>
+            {error}
+          </Alert>
+        </Container>
+      );
+    }
+    
     return (
       <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4">
         <p className="text-red-700 dark:text-red-400">{error}</p>
       </div>
+    );
+  }
+
+  // Modern Material UI Design
+  if (isModern) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        <Paper elevation={0} sx={{ p: 4, borderRadius: 3, mb: 3 }}>
+          <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2}>
+            <Box>
+              <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 700 }}>
+                A1C Estimation
+              </Typography>
+              <Typography variant="body1" color="text.secondary" gutterBottom>
+                Estimated A1C based on your average glucose levels for {getDisplayLabel()} ({filteredReadings.length} readings)
+              </Typography>
+              {dataSpanInfo && (
+                <Typography variant="caption" color="text.secondary">
+                  Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')} ({dataSpanInfo.spanDays} days)
+                </Typography>
+              )}
+            </Box>
+            
+            <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2}>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <Select
+                  value={isCustomRange ? 'custom' : timeWindow.toString()}
+                  onChange={(e) => handleTimeWindowChange(e.target.value)}
+                  sx={{ borderRadius: 2 }}
+                >
+                  {getAllTimeWindows().map(option => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                  <MenuItem value="custom">Custom Range</MenuItem>
+                </Select>
+              </FormControl>
+              
+              <Button
+                variant="outlined"
+                startIcon={<Calendar size={16} />}
+                onClick={() => setShowCalendar(!showCalendar)}
+                sx={{ borderRadius: 2 }}
+              >
+                Calendar
+              </Button>
+            </Box>
+          </Box>
+        </Paper>
+
+        <Paper elevation={2} sx={{ borderRadius: 3 }}>
+          <A1CEstimator averageGlucose={averageBG} />
+        </Paper>
+      </Container>
     );
   }
 

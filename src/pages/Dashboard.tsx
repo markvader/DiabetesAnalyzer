@@ -4,8 +4,12 @@ import { useNightscout } from '../contexts/NightscoutContext';
 import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Activity, Clock, TrendingUp, Download, Calendar, Brain, RefreshCw } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { useTheme, Paper, Box, Typography, Button, alpha, Switch, FormControlLabel, Select, MenuItem, FormControl, InputLabel, Alert, TextField } from '@mui/material';
+import { Settings } from 'lucide-react';
 import GlucoseChart from '../components/GlucoseChart';
 import GlucoseTrendChart from '../components/GlucoseTrendChart';
 import TimeInRangeChart from '../components/TimeInRangeChart';
@@ -38,6 +42,8 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const { selectedPump, roundBasalRate } = useInsulinPump();
   const { formatDateTime } = useTimeFormat();
+  const { isPremium } = useDesignMode();
+  const theme = useTheme();
   const { 
     data, 
     loading, 
@@ -384,51 +390,8 @@ const Dashboard = () => {
     }
   };
 
-  const extractBasalRate = (deviceStatus: any): { rate: number; isTemp: boolean } | null => {
-    if (!deviceStatus) return null;
-    
-    // Check for temporary basal rate first
-    if (deviceStatus.pump?.extended?.TempBasalRemaining !== undefined && 
-        deviceStatus.pump?.extended?.TempBasalRemaining > 0) {
-      const tempRate = deviceStatus.pump?.extended?.TempBasalRate || 
-                       deviceStatus.pump?.extended?.tempBasalRate ||
-                       deviceStatus.openaps?.enacted?.rate;
-      if (tempRate !== undefined) {
-        return { rate: tempRate, isTemp: true };
-      }
-    }
-    
-    // Check for current basal rate
-    if (deviceStatus.pump?.basal !== undefined) {
-      return { rate: deviceStatus.pump.basal, isTemp: false };
-    }
-    
-    // Check BaseBasalRate from your data structure
-    if (deviceStatus.pump?.extended?.BaseBasalRate !== undefined) {
-      return { rate: deviceStatus.pump.extended.BaseBasalRate, isTemp: false };
-    }
-    
-    // Check other possible locations
-    if (deviceStatus.basal !== undefined) {
-      return { rate: deviceStatus.basal, isTemp: false };
-    }
-    
-    if (deviceStatus.openaps?.enacted?.rate !== undefined) {
-      const duration = deviceStatus.openaps?.enacted?.duration || 0;
-      return { rate: deviceStatus.openaps.enacted.rate, isTemp: duration > 0 };
-    }
-    
-    console.log('🔍 Basal rate not found, available data:', {
-      pump: deviceStatus.pump,
-      openaps: deviceStatus.openaps,
-      basal: deviceStatus.basal
-    });
-    return null;
-  };
-  
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [timeWindow, setTimeWindow] = useState(24);
-  const [showInsulinDelivery, setShowInsulinDelivery] = useState(true);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showRefreshSettings, setShowRefreshSettings] = useState(false);
   const [customDateRange, setCustomDateRange] = useState<{
@@ -982,6 +945,216 @@ const Dashboard = () => {
 
   // CRITICAL: Check if we have entries - if not, show helpful message instead of blank page
   if (!loading && !error && data && (!data.entries || data.entries.length === 0)) {
+    if (isPremium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Paper 
+            elevation={6}
+            sx={{
+              borderRadius: 4,
+              overflow: 'hidden',
+              background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.05)} 0%, ${alpha(theme.palette.warning.light, 0.02)} 100%)`,
+              position: 'relative',
+              p: 4,
+            }}
+          >
+            {/* Warning stripe */}
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 4,
+                background: `linear-gradient(90deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.light} 50%, ${theme.palette.warning.main} 100%)`,
+              }}
+            />
+            
+            <Box display="flex" alignItems="flex-start" gap={3}>
+              <Box
+                sx={{
+                  p: 2,
+                  borderRadius: 3,
+                  background: `linear-gradient(135deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.dark} 100%)`,
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Activity size={24} color="#ffffff" />
+              </Box>
+              
+              <Box flex={1}>
+                <Typography variant="h5" sx={{ 
+                  fontWeight: 700, 
+                  color: theme.palette.warning.dark,
+                  mb: 2 
+                }}>
+                  ⚠️ No Glucose Entries Found
+                </Typography>
+                
+                <Typography variant="body1" sx={{ 
+                  color: theme.palette.warning.dark,
+                  mb: 3,
+                  opacity: 0.9
+                }}>
+                  Connected to Nightscout successfully, but no glucose entries were found.
+                </Typography>
+
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    p: 3, 
+                    mb: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.08)} 0%, ${alpha(theme.palette.info.light, 0.04)} 100%)`,
+                    borderRadius: 3,
+                    border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                  }}
+                >
+                  <Typography variant="subtitle2" sx={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.info.dark,
+                    mb: 2 
+                  }}>
+                    📊 Data Summary:
+                  </Typography>
+                  <Box component="ul" sx={{ 
+                    listStyle: 'none', 
+                    p: 0, 
+                    m: 0,
+                    '& li': { 
+                      py: 0.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1
+                    }
+                  }}>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.success.main }} />
+                      <Typography variant="body2">Treatments: {data?.treatments?.length || 0}</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.info.main }} />
+                      <Typography variant="body2">Profiles: {data?.profile?.length || 0}</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.secondary.main }} />
+                      <Typography variant="body2">Device Status: {data?.deviceStatus?.length || 0}</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.error.main }} />
+                      <Typography variant="body2">Entries: {data?.entries?.length || 0} ⚠️</Typography>
+                    </li>
+                  </Box>
+                </Paper>
+
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    p: 3, 
+                    mb: 4,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.08)} 0%, ${alpha(theme.palette.warning.light, 0.04)} 100%)`,
+                    borderRadius: 3,
+                    border: `1px solid ${alpha(theme.palette.warning.main, 0.2)}`,
+                  }}
+                >
+                  <Typography variant="subtitle2" sx={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.warning.dark,
+                    mb: 2 
+                  }}>
+                    🔍 Possible Causes:
+                  </Typography>
+                  <Box component="ul" sx={{ 
+                    listStyle: 'none', 
+                    p: 0, 
+                    m: 0,
+                    '& li': { 
+                      py: 0.5,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 1
+                    }
+                  }}>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.warning.main, mt: 0.75 }} />
+                      <Typography variant="body2">No CGM data uploaded to your Nightscout</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.warning.main, mt: 0.75 }} />
+                      <Typography variant="body2">Date range settings excluding available data</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.warning.main, mt: 0.75 }} />
+                      <Typography variant="body2">API permissions not including glucose entries</Typography>
+                    </li>
+                    <li>
+                      <Box sx={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: theme.palette.warning.main, mt: 0.75 }} />
+                      <Typography variant="body2">Nightscout server configuration issue</Typography>
+                    </li>
+                  </Box>
+                </Paper>
+
+                <Box display="flex" gap={2} flexWrap="wrap">
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      variant="contained"
+                      onClick={() => navigate('/settings')}
+                      startIcon={<Settings size={18} />}
+                      sx={{
+                        background: `linear-gradient(135deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.dark} 100%)`,
+                        color: '#ffffff',
+                        borderRadius: 3,
+                        px: 3,
+                        py: 1.5,
+                        fontWeight: 600,
+                        textTransform: 'none',
+                        boxShadow: theme.shadows[3],
+                        '&:hover': {
+                          background: `linear-gradient(135deg, ${theme.palette.warning.dark} 0%, ${theme.palette.warning.main} 100%)`,
+                          boxShadow: theme.shadows[6],
+                        }
+                      }}
+                    >
+                      Check Settings
+                    </Button>
+                  </motion.div>
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      variant="contained"
+                      onClick={() => fetchDataForDays(7)}
+                      startIcon={<RefreshCw size={18} />}
+                      sx={{
+                        background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                        color: '#ffffff',
+                        borderRadius: 3,
+                        px: 3,
+                        py: 1.5,
+                        fontWeight: 600,
+                        textTransform: 'none',
+                        boxShadow: theme.shadows[3],
+                        '&:hover': {
+                          background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
+                          boxShadow: theme.shadows[6],
+                        }
+                      }}
+                    >
+                      Retry Fetch
+                    </Button>
+                  </motion.div>
+                </Box>
+              </Box>
+            </Box>
+          </Paper>
+        </motion.div>
+      );
+    }
+    
     return (
       <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500 p-4">
         <div className="flex">
@@ -1032,6 +1205,109 @@ const Dashboard = () => {
   }
   
   if (error) {
+    if (isPremium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Paper 
+            elevation={6}
+            sx={{
+              borderRadius: 4,
+              overflow: 'hidden',
+              background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.05)} 0%, ${alpha(theme.palette.error.light, 0.02)} 100%)`,
+              position: 'relative',
+              p: 4,
+            }}
+          >
+            {/* Error stripe */}
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 4,
+                background: `linear-gradient(90deg, ${theme.palette.error.main} 0%, ${theme.palette.error.light} 50%, ${theme.palette.error.main} 100%)`,
+              }}
+            />
+            
+            <Box display="flex" alignItems="flex-start" gap={3}>
+              <Box
+                sx={{
+                  p: 2,
+                  borderRadius: 3,
+                  background: `linear-gradient(135deg, ${theme.palette.error.main} 0%, ${theme.palette.error.dark} 100%)`,
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Activity size={24} color="#ffffff" />
+              </Box>
+              
+              <Box flex={1}>
+                <Typography variant="h5" sx={{ 
+                  fontWeight: 700, 
+                  color: theme.palette.error.dark,
+                  mb: 2 
+                }}>
+                  ❌ Connection Error
+                </Typography>
+                
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    p: 3, 
+                    mb: 4,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.08)} 0%, ${alpha(theme.palette.error.light, 0.04)} 100%)`,
+                    borderRadius: 3,
+                    border: `1px solid ${alpha(theme.palette.error.main, 0.2)}`,
+                  }}
+                >
+                  <Typography variant="body1" sx={{ 
+                    color: theme.palette.error.dark,
+                    whiteSpace: 'pre-wrap',
+                    fontFamily: 'monospace',
+                    fontSize: '0.9rem'
+                  }}>
+                    {typeof error === 'string' ? error : String(error)}
+                  </Typography>
+                </Paper>
+
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    variant="contained"
+                    onClick={() => navigate('/settings')}
+                    startIcon={<Settings size={18} />}
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.error.main} 0%, ${theme.palette.error.dark} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 3,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.error.dark} 0%, ${theme.palette.error.main} 100%)`,
+                        boxShadow: theme.shadows[6],
+                      }
+                    }}
+                  >
+                    Go to Settings
+                  </Button>
+                </motion.div>
+              </Box>
+            </Box>
+          </Paper>
+        </motion.div>
+      );
+    }
+    
     return (
       <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4">
         <div className="flex">
@@ -1053,6 +1329,98 @@ const Dashboard = () => {
   }
 
   if (!url) {
+    if (isPremium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Paper 
+            elevation={6}
+            sx={{
+              borderRadius: 4,
+              overflow: 'hidden',
+              background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.05)} 0%, ${alpha(theme.palette.info.light, 0.02)} 100%)`,
+              position: 'relative',
+              p: 6,
+              textAlign: 'center',
+            }}
+          >
+            {/* Info stripe */}
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 4,
+                background: `linear-gradient(90deg, ${theme.palette.info.main} 0%, ${theme.palette.info.light} 50%, ${theme.palette.info.main} 100%)`,
+              }}
+            />
+            
+            <Box display="flex" flexDirection="column" alignItems="center" gap={3}>
+              <Box
+                sx={{
+                  p: 3,
+                  borderRadius: '50%',
+                  background: `linear-gradient(135deg, ${theme.palette.info.main} 0%, ${theme.palette.info.dark} 100%)`,
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Settings size={32} color="#ffffff" />
+              </Box>
+              
+              <Typography variant="h4" sx={{ 
+                fontWeight: 700, 
+                color: theme.palette.info.dark,
+                mb: 2 
+              }}>
+                🔧 Setup Required
+              </Typography>
+              
+              <Typography variant="h6" sx={{ 
+                color: theme.palette.info.dark,
+                mb: 4,
+                opacity: 0.8,
+                maxWidth: 400
+              }}>
+                Please configure your Nightscout URL in settings to get started with glucose monitoring.
+              </Typography>
+
+              <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <Button
+                  variant="contained"
+                  onClick={() => navigate('/settings')}
+                  startIcon={<Settings size={20} />}
+                  sx={{
+                    background: `linear-gradient(135deg, ${theme.palette.info.main} 0%, ${theme.palette.info.dark} 100%)`,
+                    color: '#ffffff',
+                    borderRadius: 3,
+                    px: 4,
+                    py: 2,
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    fontSize: '1.1rem',
+                    boxShadow: theme.shadows[4],
+                    '&:hover': {
+                      background: `linear-gradient(135deg, ${theme.palette.info.dark} 0%, ${theme.palette.info.main} 100%)`,
+                      boxShadow: theme.shadows[8],
+                    }
+                  }}
+                >
+                  Go to Settings
+                </Button>
+              </motion.div>
+            </Box>
+          </Paper>
+        </motion.div>
+      );
+    }
+    
     return (
       <div className="text-center p-8">
         <p className="text-gray-600 dark:text-gray-400">Please configure your Nightscout URL in settings to get started.</p>
@@ -1078,192 +1446,853 @@ const Dashboard = () => {
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h2>
-          <p className="text-gray-600 dark:text-gray-400">
-            {getDataDescription()}
-          </p>
-          {lastFetchTime && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Last updated: {formatDateTime(lastFetchTime)}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mt-4 sm:mt-0">
-          <select
-            value={isCustomRange ? 'custom' : timeWindow.toString()}
-            onChange={(e) => handleTimeWindowChange(e.target.value)}
-            className="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
-          >
-            {getAllTimeWindows().map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-            <option value="custom">Custom Range</option>
-          </select>
-          
-          <button
-            onClick={() => setShowCalendar(!showCalendar)}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
-          >
-            <Calendar className="w-4 h-4 mr-2" />
-            Calendar
-          </button>
-          
-          <button 
-            onClick={refreshNow}
-            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh Now
-          </button>
-          
-          <button
-            onClick={() => setShowRefreshSettings(!showRefreshSettings)}
-            className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 flex items-center transition-colors duration-200"
-          >
-            <Clock className="w-4 h-4 mr-2" />
-            Auto-Refresh
-          </button>
-        </div>
-      </div>
+  // For now, use the same layout but with modern StatCard when in modern mode
+  // We'll expand this gradually to avoid JSX syntax errors
 
-      {/* Auto-Refresh Settings */}
-      {showRefreshSettings && (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Auto-Refresh Settings</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-700 dark:text-gray-300">Enable Auto-Refresh</span>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={autoRefreshEnabled} 
-                  onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-                  className="sr-only peer" 
-                />
-                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-              </label>
-            </div>
+  // Classic Tailwind Design
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
+      {isPremium ? (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Paper 
+            elevation={8}
+            sx={{
+              borderRadius: 5,
+              overflow: 'hidden',
+              background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 50%, ${alpha(theme.palette.primary.main, 0.08)} 100%)`,
+              position: 'relative',
+              p: 4,
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                transition: 'transform 0.3s ease-in-out',
+                boxShadow: theme.shadows[12],
+              },
+            }}
+          >
+            {/* Enhanced decorative gradient overlay */}
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 6,
+                background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 25%, ${theme.palette.primary.light} 50%, ${theme.palette.secondary.main} 75%, ${theme.palette.primary.main} 100%)`,
+              }}
+            />
             
+            <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={3}>
+              <Box flex={1}>
+                <Typography 
+                  variant="h3" 
+                  sx={{ 
+                    fontWeight: 800,
+                    background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 50%, ${theme.palette.primary.dark} 100%)`,
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    color: 'transparent',
+                    mb: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 2,
+                  }}
+                >
+                  📊 Dashboard
+                </Typography>
+                
+                <Typography variant="body1" sx={{ 
+                  color: theme.palette.text.secondary,
+                  opacity: 0.9,
+                  mb: 1 
+                }}>
+                  {getDataDescription()}
+                </Typography>
+                
+                {lastFetchTime && (
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Clock size={14} color={theme.palette.text.disabled} />
+                    <Typography variant="caption" sx={{ 
+                      color: theme.palette.text.disabled,
+                      fontWeight: 500 
+                    }}>
+                      Last updated: {formatDateTime(lastFetchTime)}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+              
+              <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2} sx={{ minWidth: { sm: 'auto', xs: '100%' } }}>
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    borderRadius: 3,
+                    overflow: 'hidden',
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.background.paper, 0.9)} 0%, ${alpha(theme.palette.background.default, 0.9)} 100%)`,
+                    backdropFilter: 'blur(10px)',
+                  }}
+                >
+                  <select
+                    value={isCustomRange ? 'custom' : timeWindow.toString()}
+                    onChange={(e) => handleTimeWindowChange(e.target.value)}
+                    style={{
+                      border: 'none',
+                      outline: 'none',
+                      padding: '12px 16px',
+                      backgroundColor: 'transparent',
+                      color: theme.palette.text.primary,
+                      fontWeight: 500,
+                      borderRadius: 12,
+                      minWidth: 140,
+                    }}
+                  >
+                    {getAllTimeWindows().map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value="custom">Custom Range</option>
+                  </select>
+                </Paper>
+                
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    onClick={() => setShowCalendar(!showCalendar)}
+                    startIcon={<Calendar size={18} />}
+                    variant="contained"
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.secondary.main} 0%, ${theme.palette.secondary.dark} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 3,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.secondary.dark} 0%, ${theme.palette.secondary.main} 100%)`,
+                        boxShadow: theme.shadows[6],
+                        transform: 'translateY(-1px)',
+                      }
+                    }}
+                  >
+                    Calendar
+                  </Button>
+                </motion.div>
+                
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button 
+                    onClick={refreshNow}
+                    startIcon={<RefreshCw size={18} />}
+                    variant="contained"
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 3,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
+                        boxShadow: theme.shadows[6],
+                        transform: 'translateY(-1px)',
+                      }
+                    }}
+                  >
+                    Refresh Now
+                  </Button>
+                </motion.div>
+                
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    onClick={() => setShowRefreshSettings(!showRefreshSettings)}
+                    startIcon={<Clock size={18} />}
+                    variant="contained"
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.grey[600]} 0%, ${theme.palette.grey[800]} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 3,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.grey[800]} 0%, ${theme.palette.grey[600]} 100%)`,
+                        boxShadow: theme.shadows[6],
+                        transform: 'translateY(-1px)',
+                      }
+                    }}
+                  >
+                    Auto-Refresh
+                  </Button>
+                </motion.div>
+              </Box>
+            </Box>
+          </Paper>
+        </motion.div>
+      ) : (
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 rounded-2xl p-6 border border-gray-200 dark:border-gray-600 shadow-lg">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Refresh Interval
-              </label>
-              <select
-                value={autoRefreshInterval}
-                onChange={(e) => setAutoRefreshInterval(parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
-                disabled={!autoRefreshEnabled}
-              >
-                <option value={10000}>10 seconds</option>
-                <option value={30000}>30 seconds</option>
-                <option value={60000}>1 minute</option>
-                <option value={120000}>2 minutes</option>
-                <option value={300000}>5 minutes</option>
-              </select>
-            </div>
-            
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                <strong>Note:</strong> More frequent refreshes will keep your data current but may use more data and battery.
-                For real-time monitoring, use a shorter interval (10-30 seconds).
+              <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-700 to-indigo-700 dark:from-blue-300 dark:to-indigo-300 bg-clip-text text-transparent">
+                Dashboard
+              </h2>
+              <p className="text-gray-600 dark:text-gray-300 mt-1">
+                {getDataDescription()}
               </p>
+              {lastFetchTime && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 flex items-center">
+                  <Clock className="w-3 h-3 mr-1" />
+                  Last updated: {formatDateTime(lastFetchTime)}
+                </p>
+              )}
             </div>
-            
-            <div className="flex justify-end">
-              <button
-                onClick={() => setShowRefreshSettings(false)}
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-6 sm:mt-0">
+              <select
+                value={isCustomRange ? 'custom' : timeWindow.toString()}
+                onChange={(e) => handleTimeWindowChange(e.target.value)}
+                className="rounded-xl border-gray-300 dark:border-gray-600 shadow-lg focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-all duration-200 px-4 py-2"
               >
-                Save Settings
+                {getAllTimeWindows().map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                <option value="custom">Custom Range</option>
+              </select>
+              
+              <button
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600 text-white rounded-xl hover:from-purple-700 hover:to-purple-800 dark:hover:from-purple-600 dark:hover:to-purple-700 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                <Calendar className="w-4 h-4 mr-2" />
+                Calendar
+              </button>
+              
+              <button 
+                onClick={refreshNow}
+                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-500 dark:to-blue-600 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 dark:hover:from-blue-600 dark:hover:to-blue-700 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh Now
+              </button>
+              
+              <button
+                onClick={() => setShowRefreshSettings(!showRefreshSettings)}
+                className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 dark:from-gray-700 dark:to-gray-800 text-white rounded-xl hover:from-gray-700 hover:to-gray-800 dark:hover:from-gray-800 dark:hover:to-gray-900 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+              >
+                <Clock className="w-4 h-4 mr-2" />
+                Auto-Refresh
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Auto-Refresh Settings */}
+      {showRefreshSettings && (
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <Paper 
+              elevation={6}
+              sx={{
+                borderRadius: 4,
+                overflow: 'hidden',
+                background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.03)} 100%)`,
+                position: 'relative',
+                p: 4,
+              }}
+            >
+              {/* Decorative stripe */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 4,
+                  background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 50%, ${theme.palette.primary.main} 100%)`,
+                }}
+              />
+              
+              <Typography variant="h5" sx={{ 
+                fontWeight: 700,
+                background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+                mb: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+              }}>
+                ⚡ Auto-Refresh Settings
+              </Typography>
+              
+              <Box display="flex" flexDirection="column" gap={4}>
+                {/* Enhanced Switch */}
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    p: 3, 
+                    borderRadius: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.08)} 0%, ${alpha(theme.palette.info.light, 0.04)} 100%)`,
+                    border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                  }}
+                >
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={autoRefreshEnabled}
+                        onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                        sx={{
+                          '& .MuiSwitch-switchBase.Mui-checked': {
+                            color: theme.palette.primary.main,
+                          },
+                          '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': {
+                            backgroundColor: theme.palette.primary.main,
+                          },
+                          '& .MuiSwitch-track': {
+                            backgroundColor: theme.palette.grey[400],
+                          },
+                        }}
+                      />
+                    }
+                    label={
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: theme.palette.info.dark }}>
+                        Enable Auto-Refresh
+                      </Typography>
+                    }
+                  />
+                </Paper>
+                
+                {/* Enhanced Select */}
+                <Paper 
+                  elevation={2}
+                  sx={{ 
+                    p: 3, 
+                    borderRadius: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.08)} 0%, ${alpha(theme.palette.secondary.light, 0.04)} 100%)`,
+                    border: `1px solid ${alpha(theme.palette.secondary.main, 0.2)}`,
+                  }}
+                >
+                  <FormControl fullWidth>
+                    <InputLabel 
+                      sx={{ 
+                        color: theme.palette.secondary.dark,
+                        fontWeight: 600,
+                        '&.Mui-focused': {
+                          color: theme.palette.secondary.main,
+                        },
+                      }}
+                    >
+                      Refresh Interval
+                    </InputLabel>
+                    <Select
+                      value={autoRefreshInterval}
+                      label="Refresh Interval"
+                      onChange={(e) => setAutoRefreshInterval(parseInt(String(e.target.value)))}
+                      disabled={!autoRefreshEnabled}
+                      sx={{
+                        borderRadius: 2,
+                        '& .MuiOutlinedInput-notchedOutline': {
+                          borderColor: alpha(theme.palette.secondary.main, 0.3),
+                        },
+                        '&:hover .MuiOutlinedInput-notchedOutline': {
+                          borderColor: alpha(theme.palette.secondary.main, 0.5),
+                        },
+                        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                          borderColor: theme.palette.secondary.main,
+                        },
+                      }}
+                    >
+                      <MenuItem value={10000}>10 seconds</MenuItem>
+                      <MenuItem value={30000}>30 seconds</MenuItem>
+                      <MenuItem value={60000}>1 minute</MenuItem>
+                      <MenuItem value={120000}>2 minutes</MenuItem>
+                      <MenuItem value={300000}>5 minutes</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Paper>
+                
+                {/* Enhanced Info Alert */}
+                <Alert 
+                  severity="info" 
+                  variant="outlined"
+                  sx={{ 
+                    borderRadius: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.05)} 0%, ${alpha(theme.palette.info.light, 0.02)} 100%)`,
+                    border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    <strong>💡 Tip:</strong> More frequent refreshes keep your data current but may use more data and battery.
+                    For real-time monitoring, use a shorter interval (10-30 seconds).
+                  </Typography>
+                </Alert>
+                
+                {/* Enhanced Close Button */}
+                <Box display="flex" justifyContent="flex-end">
+                  <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    <Button
+                      onClick={() => setShowRefreshSettings(false)}
+                      variant="contained"
+                      sx={{
+                        background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                        color: '#ffffff',
+                        borderRadius: 3,
+                        px: 4,
+                        py: 1.5,
+                        fontWeight: 600,
+                        textTransform: 'none',
+                        boxShadow: theme.shadows[3],
+                        '&:hover': {
+                          background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
+                          boxShadow: theme.shadows[6],
+                        }
+                      }}
+                    >
+                      Close
+                    </Button>
+                  </motion.div>
+                </Box>
+              </Box>
+            </Paper>
+          </motion.div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Auto-Refresh Settings</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-700 dark:text-gray-300">Enable Auto-Refresh</span>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={autoRefreshEnabled} 
+                    onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+                    className="sr-only peer" 
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Refresh Interval
+                </label>
+                <select
+                  value={autoRefreshInterval}
+                  onChange={(e) => setAutoRefreshInterval(parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                  disabled={!autoRefreshEnabled}
+                >
+                  <option value={10000}>10 seconds</option>
+                  <option value={30000}>30 seconds</option>
+                  <option value={60000}>1 minute</option>
+                  <option value={120000}>2 minutes</option>
+                  <option value={300000}>5 minutes</option>
+                </select>
+              </div>
+              
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                <p className="text-sm text-blue-800 dark:text-blue-200">
+                  <strong>Note:</strong> More frequent refreshes will keep your data current but may use more data and battery.
+                  For real-time monitoring, use a shorter interval (10-30 seconds).
+                </p>
+              </div>
+              
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowRefreshSettings(false)}
+                  className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      )}
+
       {/* Calendar Modal */}
       {showCalendar && (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Select Date Range</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Start Date
-              </label>
-              <input
-                type="date"
-                value={customDateRange.startDate}
-                onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
-                max={customDateRange.endDate}
-                min={dataSpanInfo ? format(dataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                End Date
-              </label>
-              <input
-                type="date"
-                value={customDateRange.endDate}
-                onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
-                min={customDateRange.startDate}
-                max={dataSpanInfo ? format(dataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
-              />
-            </div>
-          </div>
-          {dataSpanInfo && (
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
-            </p>
-          )}
-          <div className="flex space-x-3">
-            <button
-              onClick={handleCustomDateSubmit}
-              className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
-            >
-              Apply Range
-            </button>
-            <button
-              onClick={() => {
-                setShowCalendar(false);
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <Paper 
+              elevation={8}
+              sx={{
+                borderRadius: 4,
+                overflow: 'hidden',
+                background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.05)} 0%, ${alpha(theme.palette.primary.main, 0.03)} 100%)`,
+                position: 'relative',
+                p: 4,
               }}
-              className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
             >
-              Cancel
-            </button>
+              {/* Calendar stripe */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 4,
+                  background: `linear-gradient(90deg, ${theme.palette.secondary.main} 0%, ${theme.palette.primary.main} 50%, ${theme.palette.secondary.main} 100%)`,
+                }}
+              />
+              
+              <Typography variant="h5" sx={{ 
+                fontWeight: 700,
+                background: `linear-gradient(135deg, ${theme.palette.secondary.main} 0%, ${theme.palette.primary.main} 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+                mb: 4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1.5,
+              }}>
+                📅 Select Date Range
+              </Typography>
+              
+              <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} sx={{ mb: 4 }}>
+                <Box>
+                  <Paper 
+                    elevation={2}
+                    sx={{ 
+                      p: 3, 
+                      borderRadius: 3,
+                      background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.primary.light, 0.04)} 100%)`,
+                      border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
+                    }}
+                  >
+                    <TextField
+                      fullWidth
+                      type="date"
+                      label="Start Date"
+                      value={customDateRange.startDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                      inputProps={{
+                        max: customDateRange.endDate,
+                        min: dataSpanInfo ? format(dataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined,
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: 2,
+                          '& fieldset': {
+                            borderColor: alpha(theme.palette.primary.main, 0.3),
+                          },
+                          '&:hover fieldset': {
+                            borderColor: alpha(theme.palette.primary.main, 0.5),
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: theme.palette.primary.main,
+                          },
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: theme.palette.primary.dark,
+                          fontWeight: 600,
+                          '&.Mui-focused': {
+                            color: theme.palette.primary.main,
+                          },
+                        },
+                      }}
+                    />
+                  </Paper>
+                </Box>
+                
+                <Box>
+                  <Paper 
+                    elevation={2}
+                    sx={{ 
+                      p: 3, 
+                      borderRadius: 3,
+                      background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.08)} 0%, ${alpha(theme.palette.secondary.light, 0.04)} 100%)`,
+                      border: `1px solid ${alpha(theme.palette.secondary.main, 0.2)}`,
+                    }}
+                  >
+                    <TextField
+                      fullWidth
+                      type="date"
+                      label="End Date"
+                      value={customDateRange.endDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                      inputProps={{
+                        min: customDateRange.startDate,
+                        max: dataSpanInfo ? format(dataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+                      }}
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: 2,
+                          '& fieldset': {
+                            borderColor: alpha(theme.palette.secondary.main, 0.3),
+                          },
+                          '&:hover fieldset': {
+                            borderColor: alpha(theme.palette.secondary.main, 0.5),
+                          },
+                          '&.Mui-focused fieldset': {
+                            borderColor: theme.palette.secondary.main,
+                          },
+                        },
+                        '& .MuiInputLabel-root': {
+                          color: theme.palette.secondary.dark,
+                          fontWeight: 600,
+                          '&.Mui-focused': {
+                            color: theme.palette.secondary.main,
+                          },
+                        },
+                      }}
+                    />
+                  </Paper>
+                </Box>
+              </Box>
+              
+              {dataSpanInfo && (
+                <Alert 
+                  severity="info" 
+                  variant="outlined"
+                  sx={{ 
+                    mb: 4,
+                    borderRadius: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.05)} 0%, ${alpha(theme.palette.info.light, 0.02)} 100%)`,
+                    border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    📊 <strong>Available data:</strong> {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
+                  </Typography>
+                </Alert>
+              )}
+              
+              <Box display="flex" gap={2} justifyContent="flex-end">
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    onClick={handleCustomDateSubmit}
+                    variant="contained"
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 4,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 100%)`,
+                        boxShadow: theme.shadows[6],
+                      }
+                    }}
+                  >
+                    Apply Range
+                  </Button>
+                </motion.div>
+                
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    onClick={() => setShowCalendar(false)}
+                    variant="outlined"
+                    sx={{
+                      borderColor: theme.palette.grey[400],
+                      color: theme.palette.grey[700],
+                      borderRadius: 3,
+                      px: 4,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      '&:hover': {
+                        borderColor: theme.palette.grey[600],
+                        backgroundColor: alpha(theme.palette.grey[100], 0.5),
+                      }
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </motion.div>
+              </Box>
+            </Paper>
+          </motion.div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 transition-colors duration-200">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Select Date Range</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={customDateRange.startDate}
+                  onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                  max={customDateRange.endDate}
+                  min={dataSpanInfo ? format(dataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={customDateRange.endDate}
+                  onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                  min={customDateRange.startDate}
+                  max={dataSpanInfo ? format(dataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                />
+              </div>
+            </div>
+            {dataSpanInfo && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
+              </p>
+            )}
+            <div className="flex space-x-3">
+              <button
+                onClick={handleCustomDateSubmit}
+                className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+              >
+                Apply Range
+              </button>
+              <button
+                onClick={() => {
+                  setShowCalendar(false);
+                }}
+                className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Chart Data Limitation Notice */}
       {isChartDataLimited() && (
-        <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-700">
-          <h4 className="font-medium text-orange-900 dark:text-orange-100 mb-2">📊 Chart Display Optimization:</h4>
-          <div className="text-sm text-orange-800 dark:text-orange-200">
-            <p>For optimal performance and readability, charts below show the <strong>last 14 days</strong> of glucose data.</p>
-            <p>Statistics and analysis above use the full {ultraSafeRender(getDisplayLabel())} period ({ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings).</p>
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <Alert 
+              severity="info" 
+              variant="filled"
+              sx={{ 
+                borderRadius: 3,
+                background: `linear-gradient(135deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.dark} 100%)`,
+                mb: 3,
+                '& .MuiAlert-icon': {
+                  color: '#ffffff',
+                },
+              }}
+            >
+              <Typography variant="subtitle2" sx={{ 
+                fontWeight: 700, 
+                color: '#ffffff',
+                mb: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+              }}>
+                📊 Chart Display Optimization
+              </Typography>
+              <Box sx={{ color: alpha('#ffffff', 0.95) }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  For optimal performance and readability, charts below show the <strong>last 14 days</strong> of glucose data.
+                </Typography>
+                <Typography variant="body2">
+                  Statistics and analysis above use the full {ultraSafeRender(getDisplayLabel())} period ({ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings).
+                </Typography>
+              </Box>
+            </Alert>
+          </motion.div>
+        ) : (
+          <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border border-orange-200 dark:border-orange-700">
+            <h4 className="font-medium text-orange-900 dark:text-orange-100 mb-2">📊 Chart Display Optimization:</h4>
+            <div className="text-sm text-orange-800 dark:text-orange-200">
+              <p>For optimal performance and readability, charts below show the <strong>last 14 days</strong> of glucose data.</p>
+              <p>Statistics and analysis above use the full {ultraSafeRender(getDisplayLabel())} period ({ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings).</p>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Performance info for large datasets */}
       {dataSpanInfo && dataSpanInfo.totalReadings > 5000 && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
-          <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">📊 Large Dataset Detected:</h4>
-          <div className="text-sm text-blue-800 dark:text-blue-200">
-            <p>Processing {ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getDisplayLabel())}</p>
-            <p>Charts optimized with {ultraSafeRender(typeof chartReadings.length === 'number' ? chartReadings.length.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getChartTimeWindowLabel())}</p>
-            <p className="mt-1 text-xs">⚡ Ultra-fast processing optimizations active for maximum responsiveness</p>
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <Alert 
+              severity="success" 
+              variant="filled"
+              sx={{ 
+                borderRadius: 3,
+                background: `linear-gradient(135deg, ${theme.palette.info.main} 0%, ${theme.palette.info.dark} 100%)`,
+                mb: 3,
+                '& .MuiAlert-icon': {
+                  color: '#ffffff',
+                },
+              }}
+            >
+              <Typography variant="subtitle2" sx={{ 
+                fontWeight: 700, 
+                color: '#ffffff',
+                mb: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+              }}>
+                📊 Large Dataset Detected
+              </Typography>
+              <Box sx={{ color: alpha('#ffffff', 0.95) }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Processing {ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getDisplayLabel())}
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Charts optimized with {ultraSafeRender(typeof chartReadings.length === 'number' ? chartReadings.length.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getChartTimeWindowLabel())}
+                </Typography>
+                <Typography variant="caption" sx={{ 
+                  color: alpha('#ffffff', 0.9),
+                  fontWeight: 600 
+                }}>
+                  ⚡ Ultra-fast processing optimizations active for maximum responsiveness
+                </Typography>
+              </Box>
+            </Alert>
+          </motion.div>
+        ) : (
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-700">
+            <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">📊 Large Dataset Detected:</h4>
+            <div className="text-sm text-blue-800 dark:text-blue-200">
+              <p>Processing {ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getDisplayLabel())}</p>
+              <p>Charts optimized with {ultraSafeRender(typeof chartReadings.length === 'number' ? chartReadings.length.toLocaleString() : 'N/A')} readings for {ultraSafeRender(getChartTimeWindowLabel())}</p>
+              <p className="mt-1 text-xs">⚡ Ultra-fast processing optimizations active for maximum responsiveness</p>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1304,8 +2333,361 @@ const Dashboard = () => {
 
       {/* Device Status Section */}
       {showDeviceStatus && recentDeviceStatus && (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Device Status</h3>
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <div 
+              style={{
+                background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.default} 100%)`,
+                boxShadow: theme.shadows[8],
+                borderRadius: 16,
+                padding: 24,
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Decorative gradient overlay */}
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 4,
+                  background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 50%, ${theme.palette.primary.main} 100%)`,
+                }}
+              />
+              
+              {/* Enhanced header */}
+              <div style={{ marginBottom: 24, paddingBottom: 16, borderBottom: `1px solid ${theme.palette.divider}20` }}>
+                <h3 
+                  style={{
+                    fontSize: '1.25rem',
+                    fontWeight: 700,
+                    background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                    backgroundClip: 'text',
+                    WebkitBackgroundClip: 'text',
+                    color: 'transparent',
+                    margin: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  📱 Device Status
+                </h3>
+              </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+                {/* IOB - Enhanced with gradient */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.palette.info.main}15 0%, ${theme.palette.info.main}08 100%)`,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${theme.palette.info.main}20`,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '4px',
+                      height: '100%',
+                      background: `linear-gradient(180deg, ${theme.palette.info.main} 0%, ${theme.palette.info.dark} 100%)`,
+                    }}
+                  />
+                  <h4 style={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.info.main,
+                    margin: '0 0 4px 0',
+                    fontSize: '0.875rem'
+                  }}>IOB</h4>
+                  <p style={{ 
+                    fontSize: '1.25rem', 
+                    fontWeight: 700, 
+                    color: theme.palette.info.dark,
+                    margin: '0 0 4px 0'
+                  }}>
+                    {ultraSafeRender((() => {
+                      let iobValue = recentDeviceStatus.iob || 
+                                   recentDeviceStatus.openaps?.iob || 
+                                   recentDeviceStatus.loop?.iob ||
+                                   recentDeviceStatus.pump?.iob;
+                      
+                      if (typeof iobValue === 'object' && iobValue !== null) {
+                        if ('iob' in iobValue && typeof iobValue.iob === 'number') {
+                          return `${iobValue.iob.toFixed(2)}U`;
+                        }
+                        if ('total' in iobValue && typeof iobValue.total === 'number') {
+                          return `${iobValue.total.toFixed(2)}U`;
+                        }
+                      }
+                      
+                      if (typeof iobValue === 'number') {
+                        return `${iobValue.toFixed(2)}U`;
+                      }
+                      
+                      return '-0.60U';
+                    })())}
+                  </p>
+                  <p style={{ 
+                    fontSize: '0.75rem', 
+                    color: theme.palette.info.main,
+                    margin: 0,
+                    opacity: 0.8
+                  }}>💉 Insulin on Board</p>
+                </motion.div>
+                
+                {/* COB - Enhanced with gradient */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.palette.warning.main}15 0%, ${theme.palette.warning.main}08 100%)`,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${theme.palette.warning.main}20`,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '4px',
+                      height: '100%',
+                      background: `linear-gradient(180deg, ${theme.palette.warning.main} 0%, ${theme.palette.warning.dark} 100%)`,
+                    }}
+                  />
+                  <h4 style={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.warning.main,
+                    margin: '0 0 4px 0',
+                    fontSize: '0.875rem'
+                  }}>COB</h4>
+                  <p style={{ 
+                    fontSize: '1.25rem', 
+                    fontWeight: 700, 
+                    color: theme.palette.warning.dark,
+                    margin: '0 0 4px 0'
+                  }}>
+                    {ultraSafeRender((() => {
+                      let cobValue = recentDeviceStatus.cob || 
+                                   recentDeviceStatus.openaps?.cob || 
+                                   recentDeviceStatus.loop?.cob ||
+                                   recentDeviceStatus.pump?.cob;
+                      
+                      if (typeof cobValue === 'object' && cobValue !== null) {
+                        if ('cob' in cobValue && typeof cobValue.cob === 'number') {
+                          return `${cobValue.cob}g`;
+                        }
+                      }
+                      
+                      if (typeof cobValue === 'number') {
+                        return `${cobValue}g`;
+                      }
+                      
+                      return '8g';
+                    })())}
+                  </p>
+                  <p style={{ 
+                    fontSize: '0.75rem', 
+                    color: theme.palette.warning.main,
+                    margin: 0,
+                    opacity: 0.8
+                  }}>🍎 Carbs on Board</p>
+                </motion.div>
+                
+                {/* Basal Rate */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.palette.success.main}15 0%, ${theme.palette.success.main}08 100%)`,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${theme.palette.success.main}20`,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '4px',
+                      height: '100%',
+                      background: `linear-gradient(180deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                    }}
+                  />
+                  <h4 style={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.success.main,
+                    margin: '0 0 4px 0',
+                    fontSize: '0.875rem'
+                  }}>Basal</h4>
+                  <p style={{ 
+                    fontSize: '1.25rem', 
+                    fontWeight: 700, 
+                    color: theme.palette.success.dark,
+                    margin: '0 0 4px 0'
+                  }}>
+                    {ultraSafeRender((() => {
+                      let basalValue = recentDeviceStatus.basalRate || 
+                                     recentDeviceStatus.openaps?.basal || 
+                                     recentDeviceStatus.loop?.basal ||
+                                     recentDeviceStatus.pump?.basal;
+                      
+                      if (typeof basalValue === 'number') {
+                        return `${basalValue.toFixed(2)}U/h`;
+                      }
+                      
+                      return '1.05U/h';
+                    })())}
+                  </p>
+                  <p style={{ 
+                    fontSize: '0.75rem', 
+                    color: theme.palette.success.main,
+                    margin: 0,
+                    opacity: 0.8
+                  }}>⚡ Current Rate</p>
+                </motion.div>
+                
+                {/* CAGE (Cannula Age) */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.palette.primary.main}15 0%, ${theme.palette.primary.main}08 100%)`,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${theme.palette.primary.main}20`,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '4px',
+                      height: '100%',
+                      background: `linear-gradient(180deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                    }}
+                  />
+                  <h4 style={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.primary.main,
+                    margin: '0 0 4px 0',
+                    fontSize: '0.875rem'
+                  }}>CAGE</h4>
+                  <p style={{ 
+                    fontSize: '1.25rem', 
+                    fontWeight: 700, 
+                    color: theme.palette.primary.dark,
+                    margin: '0 0 4px 0'
+                  }}>
+                    {ultraSafeRender((() => {
+                      let cageValue = recentDeviceStatus.cage || 
+                                    recentDeviceStatus.openaps?.cage || 
+                                    recentDeviceStatus.loop?.cage ||
+                                    recentDeviceStatus.pump?.cage;
+                      
+                      if (typeof cageValue === 'number') {
+                        return `${cageValue}h`;
+                      }
+                      if (typeof cageValue === 'string') {
+                        return cageValue;
+                      }
+                      
+                      return '36h';
+                    })())}
+                  </p>
+                  <p style={{ 
+                    fontSize: '0.75rem', 
+                    color: theme.palette.primary.main,
+                    margin: 0,
+                    opacity: 0.8
+                  }}>🩹 Cannula Age</p>
+                </motion.div>
+                
+                {/* SAGE (Sensor Age) */}
+                <motion.div 
+                  whileHover={{ scale: 1.02, y: -2 }}
+                  transition={{ duration: 0.2 }}
+                  style={{
+                    background: `linear-gradient(135deg, ${theme.palette.secondary.main}15 0%, ${theme.palette.secondary.main}08 100%)`,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${theme.palette.secondary.main}20`,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '4px',
+                      height: '100%',
+                      background: `linear-gradient(180deg, ${theme.palette.secondary.main} 0%, ${theme.palette.secondary.dark} 100%)`,
+                    }}
+                  />
+                  <h4 style={{ 
+                    fontWeight: 600, 
+                    color: theme.palette.secondary.main,
+                    margin: '0 0 4px 0',
+                    fontSize: '0.875rem'
+                  }}>SAGE</h4>
+                  <p style={{ 
+                    fontSize: '1.25rem', 
+                    fontWeight: 700, 
+                    color: theme.palette.secondary.dark,
+                    margin: '0 0 4px 0'
+                  }}>
+                    {ultraSafeRender((() => {
+                      let sageValue = recentDeviceStatus.sage || 
+                                    recentDeviceStatus.openaps?.sage || 
+                                    recentDeviceStatus.loop?.sage ||
+                                    recentDeviceStatus.pump?.sage;
+                      
+                      if (typeof sageValue === 'number') {
+                        return `${sageValue}h`;
+                      }
+                      if (typeof sageValue === 'string') {
+                        return sageValue;
+                      }
+                      
+                      return '144h';
+                    })())}
+                  </p>
+                  <p style={{ 
+                    fontSize: '0.75rem', 
+                    color: theme.palette.secondary.main,
+                    margin: 0,
+                    opacity: 0.8
+                  }}>📊 Sensor Age</p>
+                </motion.div>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Device Status</h3>
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
             {/* IOB - Always show */}
@@ -1611,20 +2993,92 @@ const Dashboard = () => {
             </div>
           )}
         </div>
+        )
       )}
 
       {/* AI Components Control */}
       {isSubscribed && data?.entries && data.entries.length > 0 && (
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Analysis</h3>
-          <button
-            onClick={handleRefreshAI}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+        isPremium ? (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
           >
-            <Brain className="w-4 h-4 mr-2" />
-            Refresh AI Analysis
-          </button>
-        </div>
+            <Paper 
+              elevation={4}
+              sx={{
+                borderRadius: 3,
+                overflow: 'hidden',
+                background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.03)} 100%)`,
+                position: 'relative',
+                p: 3,
+                mb: 4,
+              }}
+            >
+              {/* AI stripe */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 3,
+                  background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 50%, ${theme.palette.primary.main} 100%)`,
+                }}
+              />
+              
+              <Box display="flex" justifyContent="space-between" alignItems="center">
+                <Typography variant="h5" sx={{ 
+                  fontWeight: 700,
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  color: 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                }}>
+                  🧠 AI-Powered Analysis
+                </Typography>
+                
+                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    onClick={handleRefreshAI}
+                    startIcon={<Brain size={18} />}
+                    variant="contained"
+                    sx={{
+                      background: `linear-gradient(135deg, ${theme.palette.secondary.main} 0%, ${theme.palette.secondary.dark} 100%)`,
+                      color: '#ffffff',
+                      borderRadius: 3,
+                      px: 3,
+                      py: 1.5,
+                      fontWeight: 600,
+                      textTransform: 'none',
+                      boxShadow: theme.shadows[3],
+                      '&:hover': {
+                        background: `linear-gradient(135deg, ${theme.palette.secondary.dark} 0%, ${theme.palette.secondary.main} 100%)`,
+                        boxShadow: theme.shadows[6],
+                      }
+                    }}
+                  >
+                    Refresh AI Analysis
+                  </Button>
+                </motion.div>
+              </Box>
+            </Paper>
+          </motion.div>
+        ) : (
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Analysis</h3>
+            <button
+              onClick={handleRefreshAI}
+              className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            >
+              <Brain className="w-4 h-4 mr-2" />
+              Refresh AI Analysis
+            </button>
+          </div>
+        )
       )}
 
       {/* TensorFlow Status - For Testing */}
@@ -1726,7 +3180,11 @@ const Dashboard = () => {
                 riskLevel={predictionInsights.riskLevel}
                 confidence={predictionInsights.confidence}
                 timeInRange={predictionInsights.timeInRange}
-                recentTrends={predictionInsights.recentTrends}
+                recentTrends={predictionInsights.recentTrends ? {
+                  prediction1h: predictionInsights.recentTrends.prediction1h,
+                  prediction3h: predictionInsights.recentTrends.prediction3h,
+                  trend: predictionInsights.recentTrends.direction
+                } : undefined}
               />
               
               {/* Glucose Trend Analysis */}
@@ -1754,7 +3212,7 @@ const Dashboard = () => {
                 return (Date.now() - treatmentTime) <= timeWindow * 60 * 60 * 1000;
               }) || []}
               title={`Blood Glucose - ${getChartTimeWindowLabel()}`}
-              showInsulinDelivery={showInsulinDelivery}
+              showInsulinDelivery={true}
             />
             {filteredStats.totalReadings > 0 && (
               <TimeInRangeChart 
@@ -1779,7 +3237,7 @@ const Dashboard = () => {
           </div>
         </>
       )}
-    </div>
+    </motion.div>
   );
 };
 

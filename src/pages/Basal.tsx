@@ -1,13 +1,47 @@
 import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { analyzeData } from '../services/analysisService';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import {
+  Container,
+  Paper,
+  Typography,
+  Box,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  TextField,
+  Alert,
+  Card,
+  CardContent,
+  Divider,
+  Chip,
+  Stack,
+  IconButton,
+  Modal,
+  Fade,
+  useTheme,
+  alpha
+} from '@mui/material';
+import { 
+  CalendarToday, 
+  Refresh, 
+  QueryStats, 
+  Security, 
+  Psychology,
+  Schedule
+} from '@mui/icons-material';
 
 const Basal = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
+  const { isModern } = useDesignMode();
+  const theme = useTheme();
   const [analysisResults, setAnalysisResults] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -260,6 +294,350 @@ const Basal = () => {
     );
   }
 
+  // Modern Material UI Design
+  if (isModern) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 3 }}>
+        <Paper elevation={2} sx={{ borderRadius: 3, overflow: 'hidden' }}>
+          <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
+            <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'start', sm: 'center' }} gap={2}>
+              <Box>
+                <Typography variant="h4" sx={{ fontWeight: 600, mb: 1 }}>
+                  AI-Enhanced Basal Rate Analysis
+                </Typography>
+                <Typography variant="body1" color="text.secondary">
+                  Analysis for {getDisplayLabel()}
+                </Typography>
+                {dataSpanInfo && (
+                  <Typography variant="caption" color="text.secondary">
+                    Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')} ({dataSpanInfo.spanDays} days)
+                  </Typography>
+                )}
+              </Box>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Time Period</InputLabel>
+                  <Select
+                    value={isCustomRange ? 'custom' : timeWindow.toString()}
+                    label="Time Period"
+                    onChange={(e) => handleTimeWindowChange(e.target.value)}
+                  >
+                    {getAllTimeWindows().map(option => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                    <MenuItem value="custom">Custom Range</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <Button
+                  variant="outlined"
+                  startIcon={<CalendarToday />}
+                  onClick={() => setShowCalendar(!showCalendar)}
+                  size="small"
+                >
+                  Calendar
+                </Button>
+                
+                <Button
+                  variant="outlined"
+                  startIcon={<Schedule />}
+                  onClick={() => {
+                    if (isCustomRange) {
+                      handleCustomDateSubmit();
+                    } else {
+                      const daysNeeded = Math.ceil(timeWindow / 24) + 1;
+                      fetchDataForDays(Math.max(daysNeeded, analysisPeriod));
+                    }
+                  }}
+                  size="small"
+                >
+                  Refresh Data
+                </Button>
+                
+                <Button
+                  variant="contained"
+                  startIcon={<Refresh />}
+                  onClick={handleRefreshAI}
+                  size="small"
+                >
+                  Refresh AI
+                </Button>
+              </Stack>
+            </Box>
+          </Box>
+          
+          <Box sx={{ p: 3 }}>
+            {/* Calendar Modal */}
+            <Modal
+              open={showCalendar}
+              onClose={() => setShowCalendar(false)}
+              closeAfterTransition
+            >
+              <Fade in={showCalendar}>
+                <Paper
+                  sx={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    width: { xs: '90%', sm: 500 },
+                    maxWidth: '90vw',
+                    borderRadius: 3,
+                    p: 3
+                  }}
+                >
+                  <Typography variant="h6" sx={{ mb: 3, fontWeight: 600 }}>
+                    Select Date Range
+                  </Typography>
+                  <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={2} sx={{ mb: 3 }}>
+                    <TextField
+                      type="date"
+                      label="Start Date"
+                      value={customDateRange.startDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                      inputProps={{
+                        max: customDateRange.endDate,
+                        min: dataSpanInfo ? format(dataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined
+                      }}
+                      fullWidth
+                      size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    <TextField
+                      type="date"
+                      label="End Date"
+                      value={customDateRange.endDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                      inputProps={{
+                        min: customDateRange.startDate,
+                        max: dataSpanInfo ? format(dataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')
+                      }}
+                      fullWidth
+                      size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Box>
+                  {dataSpanInfo && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
+                    </Typography>
+                  )}
+                  <Stack direction="row" spacing={2}>
+                    <Button variant="contained" onClick={handleCustomDateSubmit}>
+                      Apply Range
+                    </Button>
+                    <Button variant="outlined" onClick={() => setShowCalendar(false)}>
+                      Cancel
+                    </Button>
+                  </Stack>
+                </Paper>
+              </Fade>
+            </Modal>
+
+            {/* Show empty state with manual refresh option when no analysis results */}
+            {!analysisResults && !analyzing && (
+              <Card elevation={0} sx={{ textAlign: 'center', py: 4, backgroundColor: alpha(theme.palette.info.main, 0.05) }}>
+                <CardContent>
+                  <Security sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                    AI-Enhanced Basal Rate Analysis
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                    {(!filteredReadings.length || !filteredTreatments.length) ? (
+                      "Insufficient data for analysis. Please ensure you have glucose readings and treatment data for the selected time period."
+                    ) : hasInitialLoad ? (
+                      "No basal rate analysis available. Click 'Refresh AI' to run analysis for the current time period."
+                    ) : (
+                      `Loading basal rate analysis for the last ${analysisPeriod} day${analysisPeriod > 1 ? 's' : ''}...`
+                    )}
+                  </Typography>
+                  {(filteredReadings.length && filteredTreatments.length && hasInitialLoad) && (
+                    <Button 
+                      variant="contained"
+                      size="large"
+                      startIcon={<Psychology />}
+                      onClick={handleRefreshAI}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Start Basal Analysis
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Analysis Results Section */}
+            {analysisResults && (
+              <Box sx={{ mt: 3, '& > *:not(:last-child)': { mb: 3 } }}>
+                {/* Safety Warnings */}
+                {analysisResults.safetyWarnings?.length > 0 && (
+                  <Alert 
+                    severity="error" 
+                    sx={{ 
+                      borderRadius: 2,
+                      '& .MuiAlert-message': { width: '100%' }
+                    }}
+                  >
+                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                      <Security />
+                      <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                        Critical Safety Warnings
+                      </Typography>
+                    </Box>
+                    <Stack spacing={1}>
+                      {analysisResults.safetyWarnings.map((warning: string, index: number) => (
+                        <Paper 
+                          key={index} 
+                          elevation={0}
+                          sx={{ 
+                            p: 1.5, 
+                            backgroundColor: alpha(theme.palette.error.main, 0.1),
+                            borderLeft: 4,
+                            borderColor: theme.palette.error.main
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {warning}
+                          </Typography>
+                        </Paper>
+                      ))}
+                    </Stack>
+                  </Alert>
+                )}
+
+                {/* AI Analysis Results */}
+                {analysisResults.aiEnhanced && (
+                  <Card elevation={2} sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Psychology color="secondary" />
+                          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                            AI Safety Analysis
+                          </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={1}>
+                          <Chip 
+                            label={`Safety Score: ${analysisResults.aiEnhanced.safetyScore}/100`}
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                          />
+                          <Chip 
+                            label={`Hypo Risk: ${analysisResults.aiEnhanced.hypoglycemiaRisk.toFixed(1)}%`}
+                            size="small"
+                            color="warning"
+                            variant="outlined"
+                          />
+                        </Stack>
+                      </Box>
+
+                      <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
+                        <Paper elevation={0} sx={{ p: 2.5, backgroundColor: alpha(theme.palette.secondary.main, 0.08), borderRadius: 2 }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                            AI Recommendations
+                          </Typography>
+                          <Stack spacing={1}>
+                            {analysisResults.aiEnhanced.aiInsights.recommendations.map((rec: string, index: number) => (
+                              <Paper 
+                                key={index} 
+                                elevation={0}
+                                sx={{ 
+                                  p: 1.5, 
+                                  backgroundColor: alpha(theme.palette.secondary.main, 0.1),
+                                  borderLeft: 4,
+                                  borderColor: theme.palette.secondary.main
+                                }}
+                              >
+                                <Typography variant="body2">{rec}</Typography>
+                              </Paper>
+                            ))}
+                          </Stack>
+                        </Paper>
+                        
+                        <Paper elevation={0} sx={{ p: 2.5, backgroundColor: alpha(theme.palette.info.main, 0.08), borderRadius: 2 }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                            Risk Assessment
+                          </Typography>
+                          <Stack spacing={2}>
+                            <Box display="flex" justifyContent="space-between" alignItems="center">
+                              <Typography variant="body2" color="text.secondary">Overall Risk:</Typography>
+                              <Chip 
+                                label={analysisResults.aiEnhanced.aiInsights.riskAssessment}
+                                size="small"
+                                color={
+                                  analysisResults.aiEnhanced.aiInsights.riskAssessment === 'low' ? 'success' :
+                                  analysisResults.aiEnhanced.aiInsights.riskAssessment === 'medium' ? 'warning' : 'error'
+                                }
+                              />
+                            </Box>
+                            <Box display="flex" justifyContent="space-between" alignItems="center">
+                              <Typography variant="body2" color="text.secondary">AI Confidence:</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {analysisResults.aiEnhanced.aiInsights.confidence}%
+                              </Typography>
+                            </Box>
+                          </Stack>
+                        </Paper>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <Box sx={{ '& > *:not(:last-child)': { mb: 3 } }}>
+                  <SuggestionTable
+                    title="Ultra-Safe Basal Rate Recommendations"
+                    currentValues={analysisResults.currentProfile.basal}
+                    suggestedValues={analysisResults.basalSuggestions || []}
+                    unit="U/hr"
+                  />
+
+                  <Card elevation={2} sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
+                        Understanding Ultra-Safe Basal Rates
+                      </Typography>
+                      <Stack spacing={2}>
+                        <Typography variant="body1" color="text.secondary">
+                          These ultra-conservative basal rate suggestions prioritize preventing hypoglycemia above all else. 
+                          The analysis uses a safety-first approach with:
+                        </Typography>
+                        <Box component="ul" sx={{ pl: 2, '& li': { mb: 1 } }}>
+                          <Typography component="li" variant="body2" color="text.secondary">
+                            Maximum 5% adjustments (reduced from previous 10%)
+                          </Typography>
+                          <Typography component="li" variant="body2" color="text.secondary">
+                            Hypoglycemia prevention as the top priority
+                          </Typography>
+                          <Typography component="li" variant="body2" color="text.secondary">
+                            AI-powered safety validation
+                          </Typography>
+                          <Typography component="li" variant="body2" color="text.secondary">
+                            Pediatric-focused safety constraints
+                          </Typography>
+                        </Box>
+                        <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                          <Typography variant="body2">
+                            <strong>Important:</strong> Always consult with your healthcare provider before making changes to your basal rates.
+                            These suggestions are based on pattern analysis and should be reviewed by your medical team.
+                            Start with the smallest possible changes (1-2%) and monitor closely.
+                          </Typography>
+                        </Alert>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </Paper>
+      </Container>
+    );
+  }
+
+  // Classic Tailwind Design
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
@@ -390,7 +768,7 @@ const Basal = () => {
             ) : hasInitialLoad ? (
               "No basal rate analysis available. Click 'Refresh AI' to run analysis for the current time period."
             ) : (
-              "              `Loading basal rate analysis for the last ${analysisPeriod} day${analysisPeriod > 1 ? 's' : ''}...`"
+              `Loading basal rate analysis for the last ${analysisPeriod} day${analysisPeriod > 1 ? 's' : ''}...`
             )}
           </p>
           {(filteredReadings.length && filteredTreatments.length && hasInitialLoad) && (

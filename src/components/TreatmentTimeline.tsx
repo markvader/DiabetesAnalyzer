@@ -1,7 +1,6 @@
 import React from 'react';
 import { Utensils, Syringe, Zap, Activity, Droplets, Clock } from 'lucide-react';
 import { format } from 'date-fns';
-import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 
 interface Treatment {
   id: string;
@@ -22,8 +21,6 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
   treatments, 
   maxItems = 8 
 }) => {
-  const { formatGlucoseValue } = useGlucoseFormatting();
-
   // Sort treatments by timestamp (most recent first) and limit
   const sortedTreatments = treatments
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
@@ -47,7 +44,7 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
     }
   };
 
-  const getColor = (type: Treatment['type'], impact?: Treatment['impact']) => {
+  const getColor = (type: Treatment['type']) => {
     switch (type) {
       case 'meal':
         return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
@@ -140,7 +137,7 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
             
             <div className="flex items-start space-x-3">
               {/* Icon */}
-              <div className={`p-2 rounded-full ${getColor(treatment.type, treatment.impact)}`}>
+              <div className={`p-2 rounded-full ${getColor(treatment.type)}`}>
                 {getIcon(treatment.type)}
               </div>
               

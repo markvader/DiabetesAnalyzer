@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Cookie, Clock, Lightbulb, AlertTriangle, Loader } from 'lucide-react';
 import { aiService } from '../services/aiService';
+import { useDesignMode } from '../contexts/DesignModeContext';
+import {
+  Paper,
+  Typography,
+  Box,
+  CircularProgress,
+  Alert,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  Card,
+  CardContent,
+  useTheme,
+  alpha
+} from '@mui/material';
 
 interface AIMealAnalysisProps {
   readings: any[];
@@ -9,6 +25,8 @@ interface AIMealAnalysisProps {
 }
 
 const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, manualRefresh = false }) => {
+  const { isModern, isPremium } = useDesignMode();
+  const theme = useTheme();
   const [insights, setInsights] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [mealTiming, setMealTiming] = useState<any[]>([]);
@@ -62,6 +80,139 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
   };
 
   if (loading) {
+    // Premium Design with Advanced Effects
+    if (isPremium) {
+      return (
+        <Paper 
+          elevation={0}
+          sx={{ 
+            p: 4,
+            borderRadius: 3,
+            background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.default} 100%)`,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+            position: 'relative',
+            overflow: 'hidden',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '4px',
+              background: `linear-gradient(90deg, #f97316 0%, #ea580c 100%)`,
+            }
+          }}
+        >
+          <Box display="flex" alignItems="center" gap={2} mb={4}>
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Cookie size={24} color="#ffffff" />
+            </Box>
+            <Typography 
+              variant="h5" 
+              sx={{ 
+                fontWeight: 700,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+
+          <Box 
+            display="flex" 
+            flexDirection="column" 
+            alignItems="center" 
+            py={6}
+            sx={{
+              background: `radial-gradient(circle at center, #f9731608 0%, transparent 70%)`,
+              borderRadius: 2,
+            }}
+          >
+            <Box sx={{ position: 'relative', mb: 3 }}>
+              <CircularProgress 
+                size={64} 
+                thickness={3}
+                sx={{ 
+                  color: '#f97316',
+                  filter: 'drop-shadow(0 0 8px #f97316)',
+                }} 
+              />
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                }}
+              >
+                🍽️
+              </Box>
+            </Box>
+            
+            <Typography 
+              variant="h6" 
+              sx={{ 
+                fontWeight: 600,
+                mb: 1,
+                background: `linear-gradient(135deg, ${theme.palette.text.primary} 0%, ${theme.palette.text.secondary} 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+              }}
+            >
+              Analyzing your meal patterns...
+            </Typography>
+            <Typography variant="body2" color="text.secondary" textAlign="center">
+              🔍 Our AI is processing your carb and glucose data for insights
+            </Typography>
+          </Box>
+        </Paper>
+      );
+    }
+
+    // Modern Material UI Design
+    if (isModern) {
+      return (
+        <Paper elevation={2} sx={{ borderRadius: 3, p: 3 }}>
+          <Box display="flex" alignItems="center" gap={1} mb={3}>
+            <Cookie size={24} color="#f97316" />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+          <Box display="flex" flexDirection="column" alignItems="center" py={4}>
+            <CircularProgress size={48} sx={{ mb: 2, color: '#f97316' }} />
+            <Typography variant="body1" color="text.secondary" textAlign="center">
+              Analyzing your meal patterns...
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }} textAlign="center">
+              Our AI is processing your carb and glucose data
+            </Typography>
+          </Box>
+        </Paper>
+      );
+    }
+
+    // Classic Tailwind Design
     return (
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
         <div className="flex items-center mb-4">
@@ -78,6 +229,100 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
   }
 
   if (error) {
+    // Premium Design with Advanced Effects
+    if (isPremium) {
+      return (
+        <Paper 
+          elevation={0}
+          sx={{ 
+            p: 4,
+            borderRadius: 3,
+            background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.default} 100%)`,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+            position: 'relative',
+            overflow: 'hidden',
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '4px',
+              background: `linear-gradient(90deg, ${theme.palette.error.main} 0%, ${theme.palette.error.dark} 100%)`,
+            }
+          }}
+        >
+          <Box display="flex" alignItems="center" gap={2} mb={3}>
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Cookie size={24} color="#ffffff" />
+            </Box>
+            <Typography 
+              variant="h5" 
+              sx={{ 
+                fontWeight: 700,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+
+          <Alert 
+            severity="error" 
+            variant="outlined" 
+            sx={{ 
+              borderRadius: 2,
+              background: `linear-gradient(135deg, ${theme.palette.error.main}08 0%, ${theme.palette.error.main}05 100%)`,
+              border: `1px solid ${theme.palette.error.main}30`,
+            }}
+            icon={<AlertTriangle size={20} />}
+          >
+            <Typography variant="body1" sx={{ fontWeight: 500, mb: 1 }}>
+              {error}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              💡 Please try again later or check your API configuration.
+            </Typography>
+          </Alert>
+        </Paper>
+      );
+    }
+
+    // Modern Material UI Design
+    if (isModern) {
+      return (
+        <Paper elevation={2} sx={{ borderRadius: 3, p: 3 }}>
+          <Box display="flex" alignItems="center" gap={1} mb={3}>
+            <Cookie size={24} color="#f97316" />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+          <Alert severity="error" variant="outlined" sx={{ borderRadius: 2 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              {error}
+            </Typography>
+            <Typography variant="caption" sx={{ mt: 0.5, display: 'block' }}>
+              Please try again later or check your API configuration.
+            </Typography>
+          </Alert>
+        </Paper>
+      );
+    }
+
+    // Classic Tailwind Design
     return (
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
         <div className="flex items-center mb-4">
@@ -103,6 +348,430 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
     return null;
   }
 
+  // Premium Design with Advanced Effects
+  if (isPremium) {
+    return (
+      <Paper 
+        elevation={0}
+        sx={{ 
+          borderRadius: 3,
+          background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.default} 100%)`,
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '4px',
+            background: `linear-gradient(90deg, #f97316 0%, #ea580c 100%)`,
+          }
+        }}
+      >
+        <Box sx={{ p: 4 }}>
+          <Box display="flex" alignItems="center" gap={2} mb={4}>
+            <Box
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Cookie size={24} color="#ffffff" />
+            </Box>
+            <Typography 
+              variant="h5" 
+              sx={{ 
+                fontWeight: 700,
+                background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} sx={{ mb: 4 }}>
+            {insights.length > 0 && (
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 3, 
+                  background: `linear-gradient(135deg, #f9731608 0%, #ea580c08 100%)`,
+                  borderRadius: 2,
+                  border: '1px solid #f9731620',
+                  position: 'relative',
+                  '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '4px',
+                    height: '100%',
+                    background: `linear-gradient(180deg, #f97316 0%, #ea580c 100%)`,
+                    borderRadius: '0 2px 2px 0',
+                  }
+                }}
+              >
+                <Box display="flex" alignItems="center" gap={1} mb={2}>
+                  <Lightbulb size={20} color="#f97316" />
+                  <Typography 
+                    variant="subtitle2" 
+                    sx={{ 
+                      fontWeight: 600, 
+                      background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                      backgroundClip: 'text',
+                      WebkitBackgroundClip: 'text',
+                      color: 'transparent',
+                    }}
+                  >
+                    Meal Insights
+                  </Typography>
+                </Box>
+                <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
+                  {insights.map((insight, index) => (
+                    <ListItem key={index} sx={{ py: 0.5 }}>
+                      <ListItemIcon sx={{ minWidth: 20 }}>
+                        <Box 
+                          sx={{ 
+                            width: 4, 
+                            height: 4, 
+                            borderRadius: '50%', 
+                            background: `linear-gradient(135deg, #f97316 0%, #ea580c 100%)`,
+                            boxShadow: '0 0 4px #f9731640',
+                          }} 
+                        />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={insight}
+                        primaryTypographyProps={{ 
+                          variant: 'body2',
+                          sx: { 
+                            color: '#ea580c',
+                            fontWeight: 500,
+                            lineHeight: 1.5
+                          }
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            )}
+
+            {recommendations.length > 0 && (
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 3, 
+                  background: `linear-gradient(135deg, ${theme.palette.success.main}08 0%, ${theme.palette.success.dark}08 100%)`,
+                  borderRadius: 2,
+                  border: `1px solid ${theme.palette.success.main}20`,
+                  position: 'relative',
+                  '&::before': {
+                    content: '""',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '4px',
+                    height: '100%',
+                    background: `linear-gradient(180deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                    borderRadius: '0 2px 2px 0',
+                  }
+                }}
+              >
+                <Box display="flex" alignItems="center" gap={1} mb={2}>
+                  <Lightbulb size={20} color={theme.palette.success.main} />
+                  <Typography 
+                    variant="subtitle2" 
+                    sx={{ 
+                      fontWeight: 600, 
+                      background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                      backgroundClip: 'text',
+                      WebkitBackgroundClip: 'text',
+                      color: 'transparent',
+                    }}
+                  >
+                    Recommendations
+                  </Typography>
+                </Box>
+                <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
+                  {recommendations.map((recommendation, index) => (
+                    <ListItem key={index} sx={{ py: 0.5 }}>
+                      <ListItemIcon sx={{ minWidth: 20 }}>
+                        <Box 
+                          sx={{ 
+                            width: 4, 
+                            height: 4, 
+                            borderRadius: '50%', 
+                            background: `linear-gradient(135deg, ${theme.palette.success.main} 0%, ${theme.palette.success.dark} 100%)`,
+                            boxShadow: `0 0 4px ${theme.palette.success.main}40`,
+                          }} 
+                        />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={recommendation}
+                        primaryTypographyProps={{ 
+                          variant: 'body2',
+                          sx: { 
+                            color: theme.palette.success.dark,
+                            fontWeight: 500,
+                            lineHeight: 1.5
+                          }
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            )}
+          </Box>
+
+          {mealTiming.length > 0 && (
+            <Box sx={{ mb: 4 }}>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  mb: 2, 
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  background: `linear-gradient(135deg, ${theme.palette.text.primary} 0%, ${theme.palette.text.secondary} 100%)`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                }}
+              >
+                <Clock size={20} />
+                Optimal Meal Timing
+              </Typography>
+              <Box display="grid" gridTemplateColumns={{ xs: '1fr', sm: 'repeat(auto-fit, minmax(250px, 1fr))' }} gap={2}>
+                {mealTiming.map((timing, index) => (
+                  <Card 
+                    key={index} 
+                    elevation={0}
+                    sx={{ 
+                      borderRadius: 2,
+                      background: `linear-gradient(135deg, ${theme.palette.primary.main}08 0%, ${theme.palette.secondary.main}08 100%)`,
+                      border: `1px solid ${theme.palette.primary.main}20`,
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        boxShadow: `0 4px 12px ${theme.palette.primary.main}20`,
+                        transform: 'translateY(-2px)',
+                      }
+                    }}
+                  >
+                    <CardContent sx={{ p: 2.5 }}>
+                      <Typography 
+                        variant="subtitle1" 
+                        sx={{ 
+                          fontWeight: 600,
+                          mb: 1,
+                          background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                          backgroundClip: 'text',
+                          WebkitBackgroundClip: 'text',
+                          color: 'transparent',
+                        }}
+                      >
+                        {timing.mealType}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontWeight: 500 }}>
+                        ⏰ {timing.startHour}:00 - {timing.endHour}:00
+                      </Typography>
+                      <Typography variant="body2" sx={{ lineHeight: 1.5 }}>
+                        {timing.recommendation}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          <Box 
+            sx={{ 
+              pt: 3, 
+              borderTop: `1px solid ${theme.palette.divider}20`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: `linear-gradient(135deg, ${theme.palette.background.default} 0%, ${theme.palette.background.paper} 100%)`,
+              borderRadius: 2,
+              p: 2.5,
+              border: `1px solid ${theme.palette.divider}10`,
+            }}
+          >
+            <Typography 
+              variant="caption" 
+              color="text.secondary"
+              sx={{ 
+                fontStyle: 'italic',
+                textAlign: 'center',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              🤖 This analysis is generated by AI based on your meal and glucose data. Always consult with your healthcare provider before making changes.
+            </Typography>
+          </Box>
+        </Box>
+      </Paper>
+    );
+  }
+
+  // Modern Material UI Design
+  if (isModern) {
+    return (
+      <Paper elevation={2} sx={{ borderRadius: 3, overflow: 'hidden' }}>
+        <Box sx={{ p: 3 }}>
+          <Box display="flex" alignItems="center" gap={1} mb={3}>
+            <Cookie size={24} color="#f97316" />
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+              AI Meal Pattern Analysis
+            </Typography>
+          </Box>
+
+          <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} sx={{ mb: 3 }}>
+            {insights.length > 0 && (
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 2.5, 
+                  backgroundColor: alpha('#f97316', 0.08),
+                  borderRadius: 2
+                }}
+              >
+                <Box display="flex" alignItems="center" gap={1} mb={2}>
+                  <Lightbulb size={20} color="#f97316" />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, color: '#ea580c' }}>
+                    Meal Insights
+                  </Typography>
+                </Box>
+                <List dense>
+                  {insights.map((insight, index) => (
+                    <ListItem key={index} sx={{ px: 0, py: 0.5 }}>
+                      <ListItemIcon sx={{ minWidth: 20 }}>
+                        <Box 
+                          sx={{ 
+                            width: 4, 
+                            height: 4, 
+                            borderRadius: '50%', 
+                            backgroundColor: '#f97316' 
+                          }} 
+                        />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={insight}
+                        primaryTypographyProps={{ 
+                          variant: 'body2',
+                          color: '#ea580c'
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            )}
+
+            {recommendations.length > 0 && (
+              <Paper 
+                elevation={0} 
+                sx={{ 
+                  p: 2.5, 
+                  backgroundColor: alpha(theme.palette.success.main, 0.08),
+                  borderRadius: 2
+                }}
+              >
+                <Box display="flex" alignItems="center" gap={1} mb={2}>
+                  <Cookie size={20} color={theme.palette.success.main} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, color: theme.palette.success.main }}>
+                    Meal Recommendations
+                  </Typography>
+                </Box>
+                <List dense>
+                  {recommendations.map((recommendation, index) => (
+                    <ListItem key={index} sx={{ px: 0, py: 0.5 }}>
+                      <ListItemIcon sx={{ minWidth: 20 }}>
+                        <Box 
+                          sx={{ 
+                            width: 4, 
+                            height: 4, 
+                            borderRadius: '50%', 
+                            backgroundColor: theme.palette.success.main 
+                          }} 
+                        />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={recommendation}
+                        primaryTypographyProps={{ 
+                          variant: 'body2',
+                          color: theme.palette.success.dark
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              </Paper>
+            )}
+          </Box>
+
+          {mealTiming.length > 0 && (
+            <Box>
+              <Box display="flex" alignItems="center" gap={1} mb={2}>
+                <Clock size={20} color={theme.palette.info.main} />
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                  Optimal Meal Timing
+                </Typography>
+              </Box>
+              
+              <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: 'repeat(3, 1fr)' }} gap={2}>
+                {mealTiming.map((timing, index) => (
+                  <Card 
+                    key={index}
+                    elevation={0} 
+                    sx={{ 
+                      backgroundColor: alpha(theme.palette.info.main, 0.08),
+                      borderRadius: 2
+                    }}
+                  >
+                    <CardContent sx={{ p: 2.5 }}>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600, color: theme.palette.info.main, mb: 1 }}>
+                        {timing.timeOfDay}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                        {timing.startHour}:00 - {timing.endHour}:00
+                      </Typography>
+                      <Typography variant="body2" color="text.primary">
+                        {timing.recommendation}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
+              <Typography variant="caption">
+                This analysis is generated by AI based on your meal and glucose data. Always consult with your healthcare provider before making changes to your meal timing or insulin dosing.
+              </Typography>
+            </Alert>
+          </Box>
+        </Box>
+      </Paper>
+    );
+  }
+
+  // Classic Tailwind Design
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
       <div className="flex items-center mb-4">

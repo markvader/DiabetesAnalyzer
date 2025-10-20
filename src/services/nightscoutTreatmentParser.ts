@@ -198,7 +198,7 @@ class NightscoutTreatmentParser {
     return (
       eventType === 'meal bolus' ||
       eventType === 'combo bolus' ||
-      (treatment.carbs && treatment.carbs > 0 && (treatment.insulin || treatment.units))
+      (treatment.carbs !== undefined && treatment.carbs > 0 && Boolean(treatment.insulin || treatment.units))
     );
   }
   
@@ -208,7 +208,14 @@ class NightscoutTreatmentParser {
       eventType === 'correction bolus' ||
       eventType === 'bolus' ||
       eventType === 'correction' ||
-      ((treatment.insulin || treatment.units) && (!treatment.carbs || treatment.carbs === 0))
+      (
+        ((typeof treatment.insulin === 'number' && treatment.insulin > 0) ||
+         (typeof treatment.units === 'number' && treatment.units > 0))
+        &&
+        (
+          (typeof treatment.carbs !== 'number' || treatment.carbs === 0)
+        )
+      )
     );
   }
   
@@ -219,7 +226,9 @@ class NightscoutTreatmentParser {
       eventType === 'carb correction' ||
       eventType === 'carbs' ||
       eventType === 'meal' ||
-      (Boolean(treatment.carbs) && (treatment.carbs || 0) > 0 && !treatment.insulin && !treatment.units)
+      (typeof treatment.carbs === 'number' && treatment.carbs > 0 && 
+       (treatment.insulin === undefined || treatment.insulin === 0) && 
+       (treatment.units === undefined || treatment.units === 0))
     );
   }
   

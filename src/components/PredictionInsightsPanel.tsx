@@ -4,21 +4,18 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 
 interface PredictionInsightsPanelProps {
   readings: any[];
-  predictionData?: any;
-  riskLevel?: 'low' | 'moderate' | 'high' | 'critical';
+  riskLevel?: 'low' | 'medium' | 'moderate' | 'high' | 'critical';
   confidence?: number;
   timeInRange?: number;
   recentTrends?: {
-    direction: 'rising' | 'falling' | 'stable';
-    rate: number;
     prediction1h: number;
     prediction3h: number;
+    trend: string;
   };
 }
 
 const PredictionInsightsPanel: React.FC<PredictionInsightsPanelProps> = ({
   readings,
-  predictionData,
   riskLevel = 'low',
   confidence = 85,
   timeInRange = 70,

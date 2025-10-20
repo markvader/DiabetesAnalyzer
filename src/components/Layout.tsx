@@ -33,10 +33,15 @@ import {
   Sparkles,
   Shield,
   Heart,
-  Bed
+  Bed,
+  Palette
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
-import SubscriptionBanner from './SubscriptionBanner';
+import DesignModeSelector from './DesignModeSelector';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
 
 interface NavGroup {
   name: string;
@@ -48,10 +53,12 @@ interface NavGroup {
   }[];
 }
 
-const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const location = useLocation();
-  const [expandedGroups, setExpandedGroups] = useState<string[]>(['Dashboard']);
+const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { theme, toggleTheme } = useTheme();
+  const location = useLocation();
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(['Dashboard', 'Analysis']);
+  const [showDesignSelector, setShowDesignSelector] = useState(false);
+  
   const isDark = theme === 'dark';
   
   const isActive = (path: string) => {
@@ -146,15 +153,29 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center">
-              <Activity className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-              <h1 className="ml-2 text-xl font-bold text-gray-900 dark:text-gray-100">Diabetes Analyzer</h1>
+              <img 
+                src="/DiabetesAnalyzer.png" 
+                alt="Diabetes Analyzer Logo" 
+                className="h-12 w-12 mr-3"
+              />
+              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Diabetes Analyzer</h1>
             </div>
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowDesignSelector(!showDesignSelector)}
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Switch Design Mode"
+              >
+                <Palette className="h-5 w-5" />
+              </button>
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Toggle Theme"
+              >
+                {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -209,6 +230,19 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           {children}
         </main>
       </div>
+
+      {/* Design Mode Selector Modal */}
+      {showDesignSelector && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50"
+            onClick={() => setShowDesignSelector(false)}
+          />
+          <div className="relative z-60 max-w-md w-full mx-4">
+            <DesignModeSelector />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

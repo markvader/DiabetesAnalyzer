@@ -25,6 +25,7 @@ import {
 import { format } from 'date-fns';
 import { testConnection } from '../services/nightscoutService';
 import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu, Target, DollarSign, Zap } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { aiService } from '../services/aiService';
 import TimeInRangeSettings from '../components/TimeInRangeSettings';
 
@@ -287,10 +288,17 @@ const Settings = () => {
   };
   
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h2>
-        <p className="text-gray-600 dark:text-gray-400">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="max-w-4xl mx-auto"
+    >
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-gray-800 dark:to-gray-700 rounded-2xl p-6 border border-gray-200 dark:border-gray-600 shadow-lg mb-6">
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-700 to-purple-700 dark:from-indigo-300 dark:to-purple-300 bg-clip-text text-transparent">
+          Settings
+        </h2>
+        <p className="text-gray-600 dark:text-gray-300 mt-1">
           Configure your Nightscout connection and AI providers
         </p>
       </div>
@@ -1442,7 +1450,7 @@ const Settings = () => {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

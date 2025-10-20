@@ -7,10 +7,31 @@ import { Calendar, Clock } from 'lucide-react';
 import TimeInRangeChart from '../components/TimeInRangeChart';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useDesignMode } from '../contexts/DesignModeContext';
+import { motion } from 'framer-motion';
+import { 
+  Paper, 
+  Typography, 
+  Box, 
+  Button,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Alert,
+  TextField,
+  Chip,
+  Card,
+  CardContent,
+  useTheme,
+  alpha
+} from '@mui/material';
 
 const TimeInRange = () => {
   const { data, loading, error, fetchDataForDays, forceRefresh } = useNightscout();
   const { unit, formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges, convertToCurrentUnit } = useGlucoseFormatting();
+  const { isModern, isPremium } = useDesignMode();
+  const theme = useTheme();
   
   // Time selection state
   const [timeWindow, setTimeWindow] = useState(168); // Default to 7 days (168 hours)
@@ -237,6 +258,38 @@ const TimeInRange = () => {
   if (loading) return <LoadingSpinner />;
 
   if (error) {
+    if (isPremium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Alert 
+            severity="error" 
+            variant="outlined"
+            sx={{ 
+              borderRadius: 3,
+              background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.05)} 0%, ${alpha(theme.palette.error.light, 0.02)} 100%)`,
+              border: `1px solid ${alpha(theme.palette.error.main, 0.2)}`,
+            }}
+          >
+            <Typography variant="body1" sx={{ fontWeight: 500 }}>
+              {error}
+            </Typography>
+          </Alert>
+        </motion.div>
+      );
+    }
+    
+    if (isModern) {
+      return (
+        <Alert severity="error" variant="outlined" sx={{ borderRadius: 2 }}>
+          {error}
+        </Alert>
+      );
+    }
+    
     return (
       <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4">
         <p className="text-red-700 dark:text-red-400">{error}</p>
@@ -245,6 +298,86 @@ const TimeInRange = () => {
   }
 
   if (!filteredStats || filteredStats.totalReadings === 0) {
+    if (isPremium) {
+      return (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
+        >
+          <Paper 
+            elevation={6}
+            sx={{
+              borderRadius: 4,
+              overflow: 'hidden',
+              background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
+            }}
+          >
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 4,
+                background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+              }}
+            />
+            
+            <Box sx={{ p: 4 }}>
+              <Typography 
+                variant="h4" 
+                sx={{ 
+                  fontWeight: 700,
+                  background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
+                  backgroundClip: 'text',
+                  WebkitBackgroundClip: 'text',
+                  color: 'transparent',
+                  mb: 2
+                }}
+              >
+                📊 Time in Range Analysis
+              </Typography>
+              
+              <Alert 
+                severity="info" 
+                variant="outlined"
+                sx={{ 
+                  borderRadius: 3,
+                  background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.05)} 0%, ${alpha(theme.palette.info.light, 0.02)} 100%)`,
+                  border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                  mt: 3
+                }}
+              >
+                <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                  📈 No data available for analysis for {getDisplayLabel()}.
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Try selecting a different time range or fetching more data.
+                </Typography>
+              </Alert>
+            </Box>
+          </Paper>
+        </motion.div>
+      );
+    }
+    
+    if (isModern) {
+      return (
+        <Paper elevation={2} sx={{ borderRadius: 3, p: 4 }}>
+          <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
+            Time in Range Analysis
+          </Typography>
+          <Alert severity="info" variant="outlined" sx={{ borderRadius: 2, mt: 3 }}>
+            <Typography>No data available for analysis for {getDisplayLabel()}.</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Try selecting a different time range or fetching more data.
+            </Typography>
+          </Alert>
+        </Paper>
+      );
+    }
+    
     return (
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
@@ -263,6 +396,494 @@ const TimeInRange = () => {
     );
   }
 
+  // Premium Design Implementation
+  if (isPremium) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
+      >
+        <Paper 
+          elevation={6}
+          sx={{
+            borderRadius: 4,
+            overflow: 'hidden',
+            background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
+            position: 'relative',
+          }}
+        >
+          {/* Decorative gradient overlay */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 4,
+              background: `linear-gradient(90deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 50%, ${theme.palette.primary.main} 100%)`,
+            }}
+          />
+          
+          <Box sx={{ p: 4 }}>
+            {/* Premium Header */}
+            <Paper
+              elevation={0}
+              sx={{
+                p: 3,
+                mb: 3,
+                background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                color: 'white',
+                borderRadius: 3,
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              <Box
+                sx={{
+                  position: 'absolute',
+                  top: -20,
+                  right: -20,
+                  width: 80,
+                  height: 80,
+                  background: `radial-gradient(circle, ${alpha(theme.palette.primary.light, 0.3)} 0%, transparent 70%)`,
+                  borderRadius: '50%',
+                }}
+              />
+              
+              <Box sx={{ position: 'relative', zIndex: 1 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="flex-start" flexDirection={{ xs: 'column', sm: 'row' }} gap={2}>
+                  <Box>
+                    <Typography 
+                      variant="h4" 
+                      sx={{ 
+                        fontWeight: 700,
+                        color: 'white',
+                        mb: 1
+                      }}
+                    >
+                      📊 Time in Range Analysis
+                    </Typography>
+                    <Typography variant="body1" sx={{ opacity: 0.9, color: 'white' }}>
+                      📈 Detailed breakdown for {getDisplayLabel()} ({filteredStats.totalReadings} readings)
+                    </Typography>
+                    {dataSpanInfo && (
+                      <Typography variant="caption" sx={{ opacity: 0.8, color: 'white', display: 'block', mt: 0.5 }}>
+                        Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')} ({dataSpanInfo.spanDays} days)
+                      </Typography>
+                    )}
+                  </Box>
+                  
+                  {/* Premium Time Selection Controls */}
+                  <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={1} sx={{ minWidth: { sm: 'auto', xs: '100%' } }}>
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <Select
+                        value={isCustomRange ? 'custom' : timeWindow.toString()}
+                        onChange={(e) => handleTimeWindowChange(e.target.value)}
+                        sx={{
+                          backgroundColor: alpha('#ffffff', 0.2),
+                          color: '#ffffff',
+                          backdropFilter: 'blur(10px)',
+                          borderRadius: 2,
+                          '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
+                          '& .MuiSelect-icon': { color: '#ffffff' },
+                        }}
+                      >
+                        {getAllTimeWindows().map(option => (
+                          <MenuItem key={option.value} value={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                        <MenuItem value="custom">Custom Range</MenuItem>
+                      </Select>
+                    </FormControl>
+                    
+                    <Button
+                      onClick={() => setShowCalendar(!showCalendar)}
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Calendar size={16} />}
+                      sx={{
+                        backgroundColor: alpha('#ffffff', 0.1),
+                        color: '#ffffff',
+                        backdropFilter: 'blur(10px)',
+                        border: `1px solid ${alpha('#ffffff', 0.3)}`,
+                        '&:hover': {
+                          backgroundColor: alpha('#ffffff', 0.2),
+                          border: `1px solid ${alpha('#ffffff', 0.5)}`,
+                        },
+                      }}
+                    >
+                      Calendar
+                    </Button>
+                    
+                    <Button
+                      onClick={() => {
+                        if (isCustomRange) {
+                          handleCustomDateSubmit();
+                        } else {
+                          const daysNeeded = Math.ceil(timeWindow / 24) + 1;
+                          fetchDataForDays(Math.max(daysNeeded, 14));
+                        }
+                      }}
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Clock size={16} />}
+                      sx={{
+                        backgroundColor: alpha('#ffffff', 0.1),
+                        color: '#ffffff',
+                        backdropFilter: 'blur(10px)',
+                        border: `1px solid ${alpha('#ffffff', 0.3)}`,
+                        '&:hover': {
+                          backgroundColor: alpha('#ffffff', 0.2),
+                          border: `1px solid ${alpha('#ffffff', 0.5)}`,
+                        },
+                      }}
+                    >
+                      Refresh
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
+            </Paper>
+
+            {/* Premium Calendar Modal */}
+            {showCalendar && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3 }}
+              >
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    p: 3, 
+                    mb: 3,
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.light, 0.05)} 100%)`,
+                    borderRadius: 3,
+                    border: `1px solid ${alpha(theme.palette.secondary.main, 0.1)}`,
+                  }}
+                >
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: theme.palette.secondary.main, mb: 3 }}>
+                    📅 Select Date Range
+                  </Typography>
+                  <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} sx={{ mb: 3 }}>
+                    <TextField
+                      type="date"
+                      label="Start Date"
+                      value={customDateRange.startDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                      inputProps={{
+                        max: customDateRange.endDate,
+                        min: dataSpanInfo ? format(dataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined,
+                      }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: 2,
+                          background: alpha(theme.palette.background.paper, 0.8),
+                        },
+                      }}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    <TextField
+                      type="date"
+                      label="End Date"
+                      value={customDateRange.endDate}
+                      onChange={(e) => setCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                      inputProps={{
+                        min: customDateRange.startDate,
+                        max: dataSpanInfo ? format(dataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
+                      }}
+                      fullWidth
+                      sx={{
+                        '& .MuiOutlinedInput-root': {
+                          borderRadius: 2,
+                          background: alpha(theme.palette.background.paper, 0.8),
+                        },
+                      }}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Box>
+                  {dataSpanInfo && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      📊 Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
+                    </Typography>
+                  )}
+                  <Box display="flex" gap={2}>
+                    <Button
+                      onClick={handleCustomDateSubmit}
+                      variant="contained"
+                      sx={{
+                        background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+                        borderRadius: 2,
+                      }}
+                    >
+                      Apply Range
+                    </Button>
+                    <Button
+                      onClick={() => setShowCalendar(false)}
+                      variant="outlined"
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Cancel
+                    </Button>
+                  </Box>
+                </Paper>
+              </motion.div>
+            )}
+
+            {/* Premium Debug Info */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+            >
+              <Alert 
+                severity="success" 
+                variant="outlined"
+                sx={{ 
+                  borderRadius: 3,
+                  background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.05)} 0%, ${alpha(theme.palette.success.light, 0.02)} 100%)`,
+                  border: `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                  mb: 3
+                }}
+              >
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  📊 <strong>Time in Range Info:</strong> Analyzing {filteredStats.totalReadings} glucose readings for {getDisplayLabel()}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  🎯 Target range: {formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MIN, unit, false)}-{formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MAX, unit, false)} {getUnitLabel()}
+                  {dataSpanInfo && (
+                    <> • 📊 Total available: {dataSpanInfo.totalReadings} readings spanning {dataSpanInfo.spanDays} days</>
+                  )}
+                </Typography>
+              </Alert>
+            </motion.div>
+
+            {/* Premium Main Content Grid */}
+            <Box display="grid" gridTemplateColumns={{ xs: '1fr', lg: '1fr 1fr' }} gap={3} sx={{ mb: 3 }}>
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.3 }}
+              >
+                <TimeInRangeChart
+                  timeInRange={typeof filteredStats.timeInRange === 'number' ? filteredStats.timeInRange : 0}
+                  highPercentage={typeof filteredStats.highPercentage === 'number' ? filteredStats.highPercentage : 0}
+                  lowPercentage={typeof filteredStats.lowPercentage === 'number' ? filteredStats.lowPercentage : 0}
+                />
+              </motion.div>
+              
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.6, delay: 0.4 }}
+              >
+                <Paper 
+                  elevation={3}
+                  sx={{ 
+                    p: 3, 
+                    height: '100%',
+                    background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.primary.light, 0.05)} 100%)`,
+                    borderRadius: 3,
+                    border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+                  }}
+                >
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: theme.palette.primary.main, mb: 3 }}>
+                    🎯 Target Ranges - {getDisplayLabel()}
+                  </Typography>
+                  <Box display="flex" flexDirection="column" gap={2}>
+                    <Paper 
+                      elevation={0}
+                      sx={{ 
+                        p: 2.5, 
+                        background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.15)} 0%, ${alpha(theme.palette.success.main, 0.08)} 100%)`,
+                        borderRadius: 2,
+                        border: `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: theme.palette.success.dark }}>
+                        Target Range ({formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MIN, unit, false)}-{formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MAX, unit, false)} {getUnitLabel()})
+                      </Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 700, color: theme.palette.success.main }}>
+                        {typeof filteredStats.timeInRange === 'number' ? `${filteredStats.timeInRange.toFixed(1)}%` : 'N/A'}
+                      </Typography>
+                    </Paper>
+                    
+                    <Paper 
+                      elevation={0}
+                      sx={{ 
+                        p: 2.5, 
+                        background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.15)} 0%, ${alpha(theme.palette.warning.main, 0.08)} 100%)`,
+                        borderRadius: 2,
+                        border: `1px solid ${alpha(theme.palette.warning.main, 0.2)}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: theme.palette.warning.dark }}>
+                        High (&gt;{formatGlucoseValue(getCurrentGlucoseRanges().HIGH_THRESHOLD, unit, false)} {getUnitLabel()})
+                      </Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 700, color: theme.palette.warning.main }}>
+                        {typeof filteredStats.highPercentage === 'number' ? `${filteredStats.highPercentage.toFixed(1)}%` : 'N/A'}
+                      </Typography>
+                    </Paper>
+                    
+                    <Paper 
+                      elevation={0}
+                      sx={{ 
+                        p: 2.5, 
+                        background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.15)} 0%, ${alpha(theme.palette.error.main, 0.08)} 100%)`,
+                        borderRadius: 2,
+                        border: `1px solid ${alpha(theme.palette.error.main, 0.2)}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: theme.palette.error.dark }}>
+                        Low (&lt;{formatGlucoseValue(getCurrentGlucoseRanges().LOW_THRESHOLD, unit, false)} {getUnitLabel()})
+                      </Typography>
+                      <Typography variant="h5" sx={{ fontWeight: 700, color: theme.palette.error.main }}>
+                        {typeof filteredStats.lowPercentage === 'number' ? `${filteredStats.lowPercentage.toFixed(1)}%` : 'N/A'}
+                      </Typography>
+                    </Paper>
+                  </Box>
+                  
+                  <Paper 
+                    elevation={0}
+                    sx={{ 
+                      mt: 3, 
+                      p: 2.5, 
+                      background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.15)} 0%, ${alpha(theme.palette.info.main, 0.08)} 100%)`,
+                      borderRadius: 2,
+                      border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
+                    }}
+                  >
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, color: theme.palette.info.dark, mb: 2 }}>
+                      📊 Summary
+                    </Typography>
+                    <Box sx={{ color: theme.palette.info.dark }}>
+                      <Typography variant="body2">• Total readings analyzed: {filteredStats.totalReadings}</Typography>
+                      <Typography variant="body2">• Time period: {getDisplayLabel()}</Typography>
+                      <Typography variant="body2">
+                        • Target achievement: {filteredStats.timeInRange >= 70 ? '✅ Excellent' : filteredStats.timeInRange >= 50 ? '⚠️ Good' : '❌ Needs improvement'}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                </Paper>
+              </motion.div>
+            </Box>
+
+            {/* Premium Additional Insights */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.5 }}
+            >
+              <Paper 
+                elevation={3}
+                sx={{ 
+                  p: 3, 
+                  background: `linear-gradient(135deg, ${alpha(theme.palette.secondary.main, 0.1)} 0%, ${alpha(theme.palette.secondary.light, 0.05)} 100%)`,
+                  borderRadius: 3,
+                  border: `1px solid ${alpha(theme.palette.secondary.main, 0.1)}`,
+                }}
+              >
+                <Typography variant="h6" sx={{ fontWeight: 600, color: theme.palette.secondary.main, mb: 3 }}>
+                  🔍 Time in Range Insights
+                </Typography>
+                <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                      📈 Performance Analysis
+                    </Typography>
+                    <Box display="flex" flexDirection="column" gap={1.5}>
+                      {filteredStats.timeInRange >= 70 && (
+                        <Chip
+                          label="✅ Excellent glucose control (≥70% TIR)"
+                          sx={{
+                            backgroundColor: alpha(theme.palette.success.main, 0.15),
+                            color: theme.palette.success.dark,
+                            fontWeight: 500,
+                            justifyContent: 'flex-start'
+                          }}
+                        />
+                      )}
+                      {filteredStats.timeInRange >= 50 && filteredStats.timeInRange < 70 && (
+                        <Chip
+                          label="⚠️ Good control, room for improvement"
+                          sx={{
+                            backgroundColor: alpha(theme.palette.warning.main, 0.15),
+                            color: theme.palette.warning.dark,
+                            fontWeight: 500,
+                            justifyContent: 'flex-start'
+                          }}
+                        />
+                      )}
+                      {filteredStats.timeInRange < 50 && (
+                        <Chip
+                          label="❌ Consider adjusting diabetes management"
+                          sx={{
+                            backgroundColor: alpha(theme.palette.error.main, 0.15),
+                            color: theme.palette.error.dark,
+                            fontWeight: 500,
+                            justifyContent: 'flex-start'
+                          }}
+                        />
+                      )}
+                      {filteredStats.lowPercentage > 4 && (
+                        <Chip
+                          label="⚠️ High time below range (&gt;4%)"
+                          sx={{
+                            backgroundColor: alpha(theme.palette.error.main, 0.15),
+                            color: theme.palette.error.dark,
+                            fontWeight: 500,
+                            justifyContent: 'flex-start'
+                          }}
+                        />
+                      )}
+                      {filteredStats.highPercentage > 25 && (
+                        <Chip
+                          label="⚠️ High time above range (&gt;25%)"
+                          sx={{
+                            backgroundColor: alpha(theme.palette.warning.main, 0.15),
+                            color: theme.palette.warning.dark,
+                            fontWeight: 500,
+                            justifyContent: 'flex-start'
+                          }}
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                  
+                  <Box>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                      🎯 Recommendations
+                    </Typography>
+                    <Box sx={{ color: 'text.secondary' }}>
+                      <Typography variant="body2" sx={{ mb: 1 }}>• Target: ≥70% time in range ({formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MIN, unit, false)}-{formatGlucoseValue(getCurrentGlucoseRanges().TARGET_MAX, unit, false)} {getUnitLabel()})</Typography>
+                      <Typography variant="body2" sx={{ mb: 1 }}>• Target: &lt;4% time below range (&lt;{formatGlucoseValue(getCurrentGlucoseRanges().LOW_THRESHOLD, unit, false)} {getUnitLabel()})</Typography>
+                      <Typography variant="body2" sx={{ mb: 1 }}>• Target: &lt;25% time above range (&gt;{formatGlucoseValue(getCurrentGlucoseRanges().HIGH_THRESHOLD, unit, false)} {getUnitLabel()})</Typography>
+                      <Typography variant="body2" sx={{ mb: 1 }}>• Review patterns with your healthcare team</Typography>
+                      <Typography variant="body2">• Consider CGM data trends for adjustments</Typography>
+                    </Box>
+                  </Box>
+                </Box>
+              </Paper>
+            </motion.div>
+          </Box>
+        </Paper>
+      </motion.div>
+    );
+  }
+
+  // Classic Tailwind Design
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">

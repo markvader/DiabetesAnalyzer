@@ -1,19 +1,62 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
-import { Target, Activity, TrendingUp, AlertCircle, Clock, Zap } from 'lucide-react';
+import { 
+  Activity, 
+  Clock, 
+  Zap, 
+  Droplets,
+  Cookie,
+  Settings,
+  CheckCircle,
+  XCircle,
+  BarChart3,
+  ArrowUp,
+  ArrowDown,
+  Minus,
+  Info,
+  Wifi,
+  WifiOff,
+  Battery,
+  Gauge
+} from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { format } from 'date-fns';
 
 interface LoopCycle {
   timestamp: string;
   glucose: number;
+  trend: 'rising' | 'falling' | 'stable';
   iob: number;
   cob: number;
   recommendedBasal: number;
+  actualBasal: number;
+  basalType: 'regular' | 'temp' | 'smb';
   enacted: boolean;
   reason: string;
   duration: number;
+  prediction: number;
+  minPredBG: number;
+  maxPredBG: number;
+  eventualBG: number;
+  sensitivity: number;
+  carbRatio: number;
+  target: number;
+}
+
+interface LoopStatus {
+  isConnected: boolean;
+  lastLoop: Date | null;
+  currentIOB: number;
+  currentCOB: number;
+  activeTempBasal: {
+    rate: number;
+    duration: number;
+    started: Date;
+  } | null;
+  pumpBattery: number;
+  cgmStatus: 'connected' | 'disconnected' | 'calibrating';
+  loopVersion: string;
 }
 
 const LoopAnalysis = () => {
@@ -21,25 +64,199 @@ const LoopAnalysis = () => {
   const { formatGlucoseValue } = useGlucoseFormatting();
   const [loopCycles, setLoopCycles] = useState<LoopCycle[]>([]);
   const [loopStats, setLoopStats] = useState<any>(null);
+  const [loopStatus, setLoopStatus] = useState<LoopStatus | null>(null);
 
   useEffect(() => {
-    if (data?.treatments) {
-      analyzeLoopCycles();
+    if (data?.treatments && data?.entries) {
+      analyzeAdvancedLoop();
+      calculateLoopStatus();
     }
-  }, [data, formatGlucoseValue]);
+  }, [data]);
 
-  const analyzeLoopCycles = () => {
+  const calculateLoopStatus = () => {
+    if (!data?.treatments) {
+      setLoopStatus(null);
+      return;
+    }
+
+    console.log('🔍 Analyzing loop status with treatments:', data.treatments.length);
+    
+    const now = new Date();
+    const recentTreatments = data.treatments.filter(t => 
+      new Date(t.created_at || t.timestamp).getTime() > now.getTime() - 30 * 60 * 1000 // Last 30 minutes
+    );
+
+    console.log('🔍 Recent treatments (last 30min):', recentTreatments.length);
+
+    // Find current IOB and COB - check various AAPS/AndroidAPS data sources
+    let currentIOB = 0;
+    let currentCOB = 0;
+    let lastLoop = null;
+
+    // Method 1: Look for the most recent treatment with IOB/COB data
+    const sortedTreatments = data.treatments
+      .sort((a, b) => new Date(b.created_at || b.timestamp).getTime() - new Date(a.created_at || a.timestamp).getTime());
+
+    console.log('🔍 Checking recent treatments for IOB/COB data...');
+    
+    for (const treatment of sortedTreatments.slice(0, 100)) { // Check last 100 treatments
+      // Check if treatment has IOB/COB fields directly
+      if (treatment.iob !== undefined && treatment.iob !== null) {
+        currentIOB = treatment.iob;
+        lastLoop = new Date(treatment.created_at || treatment.timestamp);
+        console.log('✅ Found IOB in treatment:', currentIOB, treatment);
+        break;
+      }
+      
+      // Check AndroidAPS specific fields
+      if (treatment.AAPS && treatment.AAPS.iob !== undefined) {
+        currentIOB = treatment.AAPS.iob;
+        lastLoop = new Date(treatment.created_at || treatment.timestamp);
+        console.log('✅ Found IOB in AAPS field:', currentIOB);
+        break;
+      }
+      
+      // Check if IOB is in notes
+      if (treatment.notes && typeof treatment.notes === 'string') {
+        const iobMatch = treatment.notes.match(/iob[:\s]*([0-9.-]+)/i);
+        if (iobMatch) {
+          currentIOB = parseFloat(iobMatch[1]);
+          lastLoop = new Date(treatment.created_at || treatment.timestamp);
+          console.log('✅ Parsed IOB from notes:', currentIOB, 'from:', treatment.notes);
+          break;
+        }
+      }
+    }
+
+    // Search for COB similarly
+    for (const treatment of sortedTreatments.slice(0, 100)) {
+      if (treatment.cob !== undefined && treatment.cob !== null) {
+        currentCOB = treatment.cob;
+        console.log('✅ Found COB in treatment:', currentCOB, treatment);
+        break;
+      }
+      
+      if (treatment.AAPS && treatment.AAPS.cob !== undefined) {
+        currentCOB = treatment.AAPS.cob;
+        console.log('✅ Found COB in AAPS field:', currentCOB);
+        break;
+      }
+      
+      if (treatment.notes && typeof treatment.notes === 'string') {
+        const cobMatch = treatment.notes.match(/cob[:\s]*([0-9.-]+)/i);
+        if (cobMatch) {
+          currentCOB = parseFloat(cobMatch[1]);
+          console.log('✅ Parsed COB from notes:', currentCOB, 'from:', treatment.notes);
+          break;
+        }
+      }
+    }
+
+    // Method 2: Check device status for IOB/COB
+    if (data?.deviceStatus && data.deviceStatus.length > 0) {
+      console.log('🔍 Checking device status for IOB/COB...');
+      const latestDeviceStatus = data.deviceStatus
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+
+      console.log('📱 Latest device status:', latestDeviceStatus);
+
+      // Check various paths where AAPS might store IOB/COB
+      if (latestDeviceStatus.openaps?.iob?.iob !== undefined) {
+        currentIOB = latestDeviceStatus.openaps.iob.iob;
+        console.log('✅ Found IOB in deviceStatus.openaps.iob:', currentIOB);
+      }
+      
+      if (latestDeviceStatus.openaps?.suggested?.iob !== undefined) {
+        currentIOB = latestDeviceStatus.openaps.suggested.iob;
+        console.log('✅ Found IOB in deviceStatus.openaps.suggested:', currentIOB);
+      }
+      
+      if (latestDeviceStatus.openaps?.suggested?.cob !== undefined) {
+        currentCOB = latestDeviceStatus.openaps.suggested.cob;
+        console.log('✅ Found COB in deviceStatus.openaps.suggested:', currentCOB);
+      }
+
+      // Check for AAPS-specific paths
+      if (latestDeviceStatus.AAPS?.iob !== undefined) {
+        currentIOB = latestDeviceStatus.AAPS.iob;
+        console.log('✅ Found IOB in deviceStatus.AAPS:', currentIOB);
+      }
+      
+      if (latestDeviceStatus.AAPS?.cob !== undefined) {
+        currentCOB = latestDeviceStatus.AAPS.cob;
+        console.log('✅ Found COB in deviceStatus.AAPS:', currentCOB);
+      }
+    }
+
+    // Find active temp basal
+    const activeTempBasal = data.treatments
+      .filter(t => (t.eventType === 'Temp Basal' || t.eventType === 'Temporary basal') && t.duration)
+      .find(t => {
+        const start = new Date(t.created_at || t.timestamp);
+        const end = new Date(start.getTime() + (t.duration! * 60 * 1000));
+        return now >= start && now <= end;
+      });
+
+    // Determine connection status
+    const isConnected = lastLoop ? (now.getTime() - lastLoop.getTime()) < 15 * 60 * 1000 : false; // Connected if data within 15 min
+
+    console.log('📊 Final loop status:', {
+      isConnected,
+      currentIOB,
+      currentCOB,
+      lastLoop: lastLoop?.toISOString(),
+      activeTempBasal: activeTempBasal?.rate || 'none'
+    });
+
+    setLoopStatus({
+      isConnected,
+      lastLoop,
+      currentIOB,
+      currentCOB,
+      activeTempBasal: activeTempBasal ? {
+        rate: activeTempBasal.rate || activeTempBasal.absolute || 0,
+        duration: activeTempBasal.duration || 0,
+        started: new Date(activeTempBasal.created_at || activeTempBasal.timestamp)
+      } : null,
+      pumpBattery: 100, // Default since we can't reliably get this from AAPS
+      cgmStatus: 'connected', // Default since we have glucose data
+      loopVersion: 'AAPS'
+    });
+  };
+
+  const analyzeAdvancedLoop = () => {
     if (!data?.treatments || !data?.entries) {
       setLoopStats(null);
       setLoopCycles([]);
       return;
     }
 
-    // Filter loop treatments
-    const loopTreatments = data.treatments.filter(t => 
-      t.eventType === 'Temp Basal' || 
-      (t.notes && (t.notes.includes('Loop') || t.notes.includes('OpenAPS')))
-    );
+    console.log('🔍 Analyzing loop treatments...', data.treatments.length);
+
+    // Look for AAPS/AndroidAPS treatments and any loop-related data
+    const loopTreatments = data.treatments.filter(t => {
+      const eventType = (t.eventType || '').toLowerCase();
+      const notes = (t.notes || '').toLowerCase();
+      
+      return (
+        eventType === 'temp basal' || 
+        eventType === 'temporary basal' ||
+        eventType === 'openaps enacted' ||
+        eventType === 'bolus' ||
+        eventType === 'smb' ||
+        notes.includes('loop') || 
+        notes.includes('openaps') ||
+        notes.includes('aaps') ||
+        notes.includes('androidaps') ||
+        t.iob !== undefined || 
+        t.cob !== undefined ||
+        t.rate !== undefined ||
+        t.absolute !== undefined ||
+        (t.insulin && t.insulin > 0)
+      ) && new Date(t.created_at || t.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000; // Last 24h
+    });
+
+    console.log('🔍 Found loop treatments:', loopTreatments.length);
 
     if (loopTreatments.length === 0) {
       setLoopStats(null);
@@ -48,55 +265,122 @@ const LoopAnalysis = () => {
     }
 
     const cycles: LoopCycle[] = loopTreatments.map(treatment => {
-      const timestamp = treatment.created_at;
+      const timestamp = treatment.created_at || treatment.timestamp;
       const treatmentTime = new Date(timestamp).getTime();
       
       // Find closest glucose reading
-      const closestReading = data.entries.reduce((closest, reading) => {
-        const readingTime = new Date(reading.date).getTime();
-        const currentDiff = Math.abs(readingTime - treatmentTime);
-        const closestDiff = Math.abs(new Date(closest.date).getTime() - treatmentTime);
-        return currentDiff < closestDiff ? reading : closest;
-      });
+      const closestReading = data.entries.find(reading => {
+        const readingTime = new Date(reading.date || reading.dateString).getTime();
+        return Math.abs(readingTime - treatmentTime) <= 5 * 60 * 1000; // Within 5 minutes
+      }) || data.entries[data.entries.length - 1];
+
+      // Determine trend
+      const glucoseHistory = data.entries
+        .filter(e => new Date(e.date || e.dateString).getTime() <= treatmentTime)
+        .slice(-3);
+      
+      let trend: 'rising' | 'falling' | 'stable' = 'stable';
+      if (glucoseHistory.length >= 2) {
+        const change = glucoseHistory[glucoseHistory.length - 1].sgv - glucoseHistory[0].sgv;
+        if (change > 10) trend = 'rising';
+        else if (change < -10) trend = 'falling';
+      }
+
+      // Determine basal type - improved AAPS detection
+      let basalType: 'regular' | 'temp' | 'smb' = 'regular';
+      const eventType = (treatment.eventType || '').toLowerCase();
+      const notes = (treatment.notes || '').toLowerCase();
+      
+      if (eventType.includes('temp') || eventType.includes('temporary') || treatment.rate !== undefined || treatment.absolute !== undefined) {
+        basalType = 'temp';
+      } else if (eventType.includes('smb') || notes.includes('smb') || (treatment.insulin && treatment.insulin < 1)) {
+        basalType = 'smb';
+      }
+
+      // Extract IOB and COB with better parsing
+      let iob = treatment.iob || 0;
+      let cob = treatment.cob || 0;
+
+      // Try to parse from notes if not in main fields
+      if (treatment.notes) {
+        const iobMatch = treatment.notes.match(/iob[:\s]*([0-9.-]+)/i);
+        const cobMatch = treatment.notes.match(/cob[:\s]*([0-9.-]+)/i);
+        if (iobMatch && !iob) iob = parseFloat(iobMatch[1]);
+        if (cobMatch && !cob) cob = parseFloat(cobMatch[1]);
+      }
 
       return {
         timestamp,
         glucose: closestReading.sgv,
-        iob: treatment.iob || 0,
-        cob: treatment.cob || 0,
-        recommendedBasal: treatment.rate || treatment.absolute || 0,
+        trend,
+        iob,
+        cob,
+        recommendedBasal: treatment.rate || treatment.absolute || treatment.insulin || 0,
+        actualBasal: treatment.rate || treatment.absolute || treatment.insulin || 0,
+        basalType,
         enacted: treatment.enacted !== false,
-        reason: treatment.reason || treatment.notes || 'Loop adjustment',
-        duration: treatment.duration || 30
+        reason: treatment.reason || treatment.notes || treatment.eventType || 'AAPS adjustment',
+        duration: treatment.duration || 30,
+        prediction: treatment.predBGs?.[0] || closestReading.sgv,
+        minPredBG: treatment.predBGs ? Math.min(...treatment.predBGs) : closestReading.sgv,
+        maxPredBG: treatment.predBGs ? Math.max(...treatment.predBGs) : closestReading.sgv,
+        eventualBG: treatment.eventualBG || closestReading.sgv,
+        sensitivity: treatment.sensitivity || 45,
+        carbRatio: treatment.carbRatio || 12,
+        target: treatment.target || 100
       };
     });
 
     setLoopCycles(cycles.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
 
-    // Calculate statistics
+    // Calculate enhanced statistics
     if (cycles.length > 0) {
       const enactedCycles = cycles.filter(c => c.enacted);
-      const avgGlucose = cycles.reduce((sum, c) => sum + c.glucose, 0) / cycles.length;
-      const avgBasal = cycles.reduce((sum, c) => sum + c.recommendedBasal, 0) / cycles.length;
+      const tempBasalCycles = cycles.filter(c => c.basalType === 'temp');
+      const smbCycles = cycles.filter(c => c.basalType === 'smb');
       
-      // Loop frequency analysis
-      const last24h = cycles.filter(c => 
-        new Date(c.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000
-      );
-
+      const avgGlucose = cycles.reduce((sum, c) => sum + c.glucose, 0) / cycles.length;
+      const avgIOB = cycles.reduce((sum, c) => sum + c.iob, 0) / cycles.length;
+      const avgCOB = cycles.reduce((sum, c) => sum + c.cob, 0) / cycles.length;
+      
+      // Calculate prediction accuracy (less strict for AAPS)
+      const accuratePredictions = cycles.filter(c => 
+        Math.abs(c.prediction - c.glucose) <= 30 // More lenient for AAPS
+      ).length;
+      
       setLoopStats({
         totalCycles: cycles.length,
         enactedCycles: enactedCycles.length,
+        tempBasalCycles: tempBasalCycles.length,
+        smbCycles: smbCycles.length,
         enactmentRate: ((enactedCycles.length / cycles.length) * 100).toFixed(1),
+        tempBasalRate: ((tempBasalCycles.length / cycles.length) * 100).toFixed(1),
         avgGlucose: avgGlucose,
-        avgBasal: avgBasal.toFixed(2),
-        last24h: last24h.length,
+        avgIOB: avgIOB.toFixed(2),
+        avgCOB: avgCOB.toFixed(1),
+        predictionAccuracy: ((accuratePredictions / cycles.length) * 100).toFixed(1),
         avgCycleTime: cycles.length > 1 ? 
           ((new Date(cycles[0].timestamp).getTime() - new Date(cycles[cycles.length - 1].timestamp).getTime()) / 
            (cycles.length - 1) / 60000).toFixed(1) : 0
       });
     } else {
       setLoopStats(null);
+    }
+  };
+
+  const getTrendIcon = (trend: 'rising' | 'falling' | 'stable') => {
+    switch (trend) {
+      case 'rising': return <ArrowUp className="h-4 w-4 text-red-500" />;
+      case 'falling': return <ArrowDown className="h-4 w-4 text-blue-500" />;
+      default: return <Minus className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getBasalTypeIcon = (type: 'regular' | 'temp' | 'smb') => {
+    switch (type) {
+      case 'temp': return <Clock className="h-4 w-4 text-orange-500" />;
+      case 'smb': return <Zap className="h-4 w-4 text-purple-500" />;
+      default: return <Droplets className="h-4 w-4 text-blue-500" />;
     }
   };
 
@@ -113,79 +397,205 @@ const LoopAnalysis = () => {
   return (
     <div className="space-y-6">
       <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Loop Analysis</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Advanced Loop Analysis</h2>
         <p className="text-gray-600 dark:text-gray-400">
-          Automated insulin delivery loop performance and decision analysis
+          Comprehensive automated insulin delivery loop monitoring and performance analysis
         </p>
       </div>
 
-      {/* Loop Statistics */}
-      {loopStats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-            <div className="flex items-center">
-              <Target className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Cycles</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {loopStats.totalCycles}
-                </p>
+      {/* Loop Status Dashboard */}
+      {loopStatus && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Current Status Card */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4">
+              <div className="flex items-center justify-between text-white">
+                <div className="flex items-center">
+                  {loopStatus.isConnected ? (
+                    <Wifi className="h-6 w-6 mr-2" />
+                  ) : (
+                    <WifiOff className="h-6 w-6 mr-2" />
+                  )}
+                  <h3 className="text-lg font-semibold">Loop Status</h3>
+                </div>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  loopStatus.isConnected 
+                    ? 'bg-green-500 text-white' 
+                    : 'bg-red-500 text-white'
+                }`}>
+                  {loopStatus.isConnected ? 'Connected' : 'Disconnected'}
+                </span>
               </div>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center">
+                  <Droplets className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Current IOB</p>
+                    <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                      {loopStatus.currentIOB.toFixed(2)}U
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center">
+                  <Cookie className="h-5 w-5 text-orange-600 dark:text-orange-400 mr-2" />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Current COB</p>
+                    <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                      {loopStatus.currentCOB.toFixed(1)}g
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {loopStatus.activeTempBasal && (
+                <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg border border-orange-200 dark:border-orange-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400 mr-2" />
+                      <span className="font-medium text-orange-900 dark:text-orange-100">
+                        Active Temp Basal
+                      </span>
+                    </div>
+                    <span className="text-orange-800 dark:text-orange-200 font-bold">
+                      {loopStatus.activeTempBasal.rate.toFixed(2)} U/h
+                    </span>
+                  </div>
+                  <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
+                    Started: {format(loopStatus.activeTempBasal.started, 'HH:mm')} • 
+                    Duration: {loopStatus.activeTempBasal.duration}min
+                  </p>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <div className="flex items-center">
+                  <Battery className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Pump Battery</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {loopStatus.pumpBattery}%
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center">
+                  <Activity className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">CGM Status</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 capitalize">
+                      {loopStatus.cgmStatus}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              {loopStatus.lastLoop && (
+                <div className="text-center pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Last Loop: {format(loopStatus.lastLoop, 'HH:mm:ss')}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-            <div className="flex items-center">
-              <Activity className="h-8 w-8 text-green-600 dark:text-green-400" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Enactment Rate</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {loopStats.enactmentRate}%
-                </p>
+          {/* Loop Statistics Card */}
+          {loopStats && (
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <div className="flex items-center mb-4">
+                <BarChart3 className="h-6 w-6 text-indigo-600 dark:text-indigo-400 mr-2" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">24h Statistics</h3>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                  <p className="text-blue-600 dark:text-blue-400 text-sm font-medium">Total Cycles</p>
+                  <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">
+                    {loopStats.totalCycles}
+                  </p>
+                </div>
+                
+                <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
+                  <p className="text-green-600 dark:text-green-400 text-sm font-medium">Enacted</p>
+                  <p className="text-2xl font-bold text-green-900 dark:text-green-100">
+                    {loopStats.enactmentRate}%
+                  </p>
+                </div>
+                
+                <div className="bg-orange-50 dark:bg-orange-900/20 p-3 rounded-lg">
+                  <p className="text-orange-600 dark:text-orange-400 text-sm font-medium">Temp Basals</p>
+                  <p className="text-2xl font-bold text-orange-900 dark:text-orange-100">
+                    {loopStats.tempBasalRate}%
+                  </p>
+                </div>
+                
+                <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg">
+                  <p className="text-purple-600 dark:text-purple-400 text-sm font-medium">Pred. Accuracy</p>
+                  <p className="text-2xl font-bold text-purple-900 dark:text-purple-100">
+                    {loopStats.predictionAccuracy}%
+                  </p>
+                </div>
+              </div>
+              
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Avg IOB</p>
+                    <p className="font-bold text-gray-900 dark:text-gray-100">{loopStats.avgIOB}U</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Avg COB</p>
+                    <p className="font-bold text-gray-900 dark:text-gray-100">{loopStats.avgCOB}g</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Cycle Time</p>
+                    <p className="font-bold text-gray-900 dark:text-gray-100">{loopStats.avgCycleTime}min</p>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-            <div className="flex items-center">
-              <Clock className="h-8 w-8 text-purple-600 dark:text-purple-400" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Avg Cycle Time</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {loopStats.avgCycleTime}min
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-            <div className="flex items-center">
-              <Zap className="h-8 w-8 text-orange-600 dark:text-orange-400" />
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Last 24h</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {loopStats.last24h}
-                </p>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
       {/* No Data Message */}
       {!loopStats && !loading && (
-        <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500 p-4">
-          <p className="text-yellow-700 dark:text-yellow-400">
-            No loop data found. This could mean the loop is not running or no loop events have been recorded.
-          </p>
+        <div className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-6 rounded-lg">
+          <div className="flex items-start">
+            <Info className="h-6 w-6 text-blue-600 dark:text-blue-400 mt-0.5 mr-3 flex-shrink-0" />
+            <div>
+              <h3 className="text-blue-900 dark:text-blue-100 font-medium mb-2">No Loop Data Found</h3>
+              <p className="text-blue-800 dark:text-blue-200 mb-4">
+                We couldn't find any automated insulin delivery loop data in your Nightscout instance. 
+                This could mean the loop is not running or no loop events have been recorded recently.
+              </p>
+              <div className="text-sm text-blue-700 dark:text-blue-300">
+                <p className="mb-2"><strong>Loop data includes:</strong></p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>Temporary basal rate changes</li>
+                  <li>OpenAPS enacted treatments</li>
+                  <li>IOB (Insulin on Board) calculations</li>
+                  <li>COB (Carbs on Board) calculations</li>
+                  <li>Prediction and recommendation data</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Loop Cycles Table */}
+      {/* Advanced Loop Cycles Table */}
       {loopCycles.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Recent Loop Cycles</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Detailed analysis of automated insulin delivery decisions
+            </p>
           </div>
           
           <div className="overflow-x-auto">
@@ -224,32 +634,67 @@ const LoopAnalysis = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                       {format(new Date(cycle.timestamp), 'dd.MM. HH:mm')}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {formatGlucoseValue(cycle.glucose, 'mgdl', true)}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <div className="flex items-center">
+                        <span className="text-gray-900 dark:text-gray-100">
+                          {formatGlucoseValue(cycle.glucose)}
+                        </span>
+                        <span className="ml-2">
+                          {getTrendIcon(cycle.trend)}
+                        </span>
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 dark:text-blue-400">
-                      {cycle.recommendedBasal.toFixed(2)} U/h
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <div className="flex items-center">
+                        <span className="font-medium text-blue-600 dark:text-blue-400">
+                          {cycle.recommendedBasal.toFixed(2)} U/h
+                        </span>
+                        <span className="ml-2">
+                          {getBasalTypeIcon(cycle.basalType)}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                       {cycle.duration}min
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {cycle.iob.toFixed(2)}U
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {cycle.cob}g
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        cycle.enacted 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
-                          : 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={`font-medium ${
+                        cycle.iob > 2 ? 'text-red-600 dark:text-red-400' :
+                        cycle.iob > 1 ? 'text-orange-600 dark:text-orange-400' :
+                        'text-gray-900 dark:text-gray-100'
                       }`}>
-                        {cycle.enacted ? 'Enacted' : 'Not Enacted'}
+                        {cycle.iob.toFixed(2)}U
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs truncate">
-                      {cycle.reason}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span className={`font-medium ${
+                        cycle.cob > 30 ? 'text-orange-600 dark:text-orange-400' :
+                        cycle.cob > 0 ? 'text-yellow-600 dark:text-yellow-400' :
+                        'text-gray-900 dark:text-gray-100'
+                      }`}>
+                        {cycle.cob}g
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          cycle.enacted 
+                            ? 'bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100'
+                            : 'bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100'
+                        }`}>
+                          {cycle.enacted ? 'Enacted' : 'Not Enacted'}
+                        </span>
+                        {cycle.enacted ? (
+                          <CheckCircle className="h-4 w-4 text-green-500 ml-1" />
+                        ) : (
+                          <XCircle className="h-4 w-4 text-red-500 ml-1" />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100 max-w-xs">
+                      <div className="truncate" title={cycle.reason}>
+                        {cycle.reason}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -259,63 +704,77 @@ const LoopAnalysis = () => {
         </div>
       )}
 
-      {/* Loop Performance Insights */}
+      {/* Performance Analytics */}
       {loopStats && (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
-          <div className="flex items-center mb-4">
-            <TrendingUp className="h-6 w-6 text-indigo-600 dark:text-indigo-400 mr-2" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Loop Performance Insights</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <div className="flex items-center mb-4">
+              <Gauge className="h-6 w-6 text-green-600 dark:text-green-400 mr-2" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Loop Performance</h3>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <span className="text-green-800 dark:text-green-200 font-medium">Enactment Rate</span>
+                <span className="text-green-600 dark:text-green-400 font-bold text-lg">
+                  {loopStats.enactmentRate}%
+                </span>
+              </div>
+              
+              <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <span className="text-blue-800 dark:text-blue-200 font-medium">Prediction Accuracy</span>
+                <span className="text-blue-600 dark:text-blue-400 font-bold text-lg">
+                  {loopStats.predictionAccuracy}%
+                </span>
+              </div>
+              
+              <div className="flex justify-between items-center p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                <span className="text-orange-800 dark:text-orange-200 font-medium">Temp Basal Usage</span>
+                <span className="text-orange-600 dark:text-orange-400 font-bold text-lg">
+                  {loopStats.tempBasalRate}%
+                </span>
+              </div>
+            </div>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-              <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Loop Frequency</h4>
-              <p className="text-blue-800 dark:text-blue-200">
-                Loop runs every {loopStats.avgCycleTime} minutes on average
-              </p>
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <div className="flex items-center mb-4">
+              <Settings className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Loop Insights</h3>
             </div>
             
-            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
-              <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">Enactment Success</h4>
-              <p className="text-green-800 dark:text-green-200">
-                {loopStats.enactmentRate}% of recommendations were enacted
-              </p>
-            </div>
-            
-            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
-              <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Average Glucose</h4>
-              <p className="text-purple-800 dark:text-purple-200">
-                {formatGlucoseValue(loopStats.avgGlucose, 'mgdl', true)} during loop cycles
-              </p>
-            </div>
-            
-            <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
-              <h4 className="font-medium text-orange-900 dark:text-orange-100 mb-2">Average Basal</h4>
-              <p className="text-orange-800 dark:text-orange-200">
-                {loopStats.avgBasal} U/h recommended basal rate
-              </p>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-start">
+                <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <p className="text-gray-700 dark:text-gray-300">
+                  Loop cycles every {loopStats.avgCycleTime} minutes on average
+                </p>
+              </div>
+              
+              <div className="flex items-start">
+                <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <p className="text-gray-700 dark:text-gray-300">
+                  {loopStats.enactmentRate}% of recommendations successfully enacted
+                </p>
+              </div>
+              
+              <div className="flex items-start">
+                <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <p className="text-gray-700 dark:text-gray-300">
+                  Average glucose during loop cycles: {formatGlucoseValue(loopStats.avgGlucose)}
+                </p>
+              </div>
+              
+              <div className="flex items-start">
+                <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
+                <p className="text-gray-700 dark:text-gray-300">
+                  {loopStats.smbCycles > 0 ? `${loopStats.smbCycles} SMB deliveries detected` : 'No SMB deliveries in recent data'}
+                </p>
+              </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* About Loop */}
-      <div className="bg-gray-50 dark:bg-gray-700/50 p-6 rounded-lg">
-        <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">About Automated Insulin Delivery Loop</h3>
-        <div className="space-y-3 text-gray-700 dark:text-gray-300">
-          <p>
-            The automated insulin delivery loop continuously monitors glucose levels and adjusts insulin delivery 
-            to maintain glucose within target range.
-          </p>
-          <ul className="list-disc list-inside space-y-1 ml-4">
-            <li>Loop cycles typically run every 5 minutes</li>
-            <li>Each cycle considers current glucose, IOB, COB, and trends</li>
-            <li>Recommendations may include temporary basal rate changes or SMB delivery</li>
-            <li>Not all recommendations are enacted due to safety constraints</li>
-            <li>High enactment rates indicate good loop performance and settings</li>
-          </ul>
-        </div>
-      </div>
     </div>
   );
 };

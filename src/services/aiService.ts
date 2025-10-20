@@ -198,7 +198,7 @@ class AIService {
   }
 
   // Analyze glucose patterns - API Primary, TensorFlow Fallback
-  async analyzeGlucosePatterns(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }, customGlucoseRanges?: CustomGlucoseRanges) {
+  async analyzeGlucosePatterns(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }, _customGlucoseRanges?: CustomGlucoseRanges) {
     console.log('🔍 Glucose Pattern Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       hasTimeInRange: !!timeInRange 
@@ -389,15 +389,15 @@ class AIService {
   }
 
   // Generate management plan
-  async generateManagementPlan(readings: any[], treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
+  async generateManagementPlan(readings: any[], _treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
     // If no API providers are available, use fallback
     if (this.providers.length === 0) {
       return this.getFallbackManagementPlan(glucoseContext);
     }
 
-    // Sample data to reduce token usage
-    const sampledReadings = this.sampleData(readings, 50);
-    const sampledTreatments = this.sampleData(treatments, 25);
+    // Sample data to reduce token usage (currently not used in prompt)
+    // const sampledReadings = this.sampleData(readings, 50);
+    // const sampledTreatments = this.sampleData(treatments, 25);
     
     // Calculate basic stats for the prompt
     const stats = this.calculateBasicStats(readings);
@@ -694,8 +694,8 @@ class AIService {
 
       // Priority 2: External API providers
       if (this.providers.length > 0) {
-        // Sample data to reduce token usage
-        const sampledReadings = this.sampleData(readings, 50);
+        // Sample data to reduce token usage (currently not used in prompt)
+        // const sampledReadings = this.sampleData(readings, 50);
         
         // Filter exercise treatments
         const exerciseTreatments = treatments.filter(t => 
@@ -851,8 +851,8 @@ class AIService {
 
       // Priority 2: External API providers
       if (this.providers.length > 0) {
-        // Sample data to reduce token usage
-        const sampledReadings = this.sampleData(readings, 50);
+        // Sample data to reduce token usage (currently not used in prompt)
+        // const sampledReadings = this.sampleData(readings, 50);
         
         // Filter night-time readings
         const nightReadings = readings.filter(r => {
@@ -1006,8 +1006,8 @@ class AIService {
 
       // Priority 2: External API providers
       if (this.providers.length > 0) {
-        // Sample data to reduce token usage
-        const sampledReadings = this.sampleData(readings, 50);
+        // Sample data to reduce token usage (currently not used in prompt)
+        // const sampledReadings = this.sampleData(readings, 50);
         
         // Calculate basic stats
         const stats = this.calculateBasicStats(readings);
@@ -1156,9 +1156,9 @@ class AIService {
 
       // Priority 2: External API providers
       if (this.providers.length > 0) {
-        // Sample data to reduce token usage
-        const sampledReadings = this.sampleData(readings, 50);
-        const sampledTreatments = this.sampleData(treatments, 25);
+        // Sample data to reduce token usage (currently not used in prompt)
+        // const sampledReadings = this.sampleData(readings, 50);
+        // const sampledTreatments = this.sampleData(treatments, 25);
         
         // Calculate basic stats
         const stats = this.calculateBasicStats(readings);
@@ -1276,6 +1276,8 @@ class AIService {
     }
   }
   // Helper methods
+  // Currently unused but kept for potential future use
+  /*
   private sampleData(data: any[], maxSamples: number) {
     if (!data || data.length <= maxSamples) return data;
     
@@ -1288,6 +1290,7 @@ class AIService {
     
     return sampled;
   }
+  */
 
   private calculateBasicStats(readings: any[]) {
     if (!readings || readings.length === 0) {
@@ -1490,7 +1493,7 @@ class AIService {
 * Consult with your healthcare provider before making significant changes`;
   }
 
-  private getFallbackMealAnalysis(glucoseContext?: any) {
+  private getFallbackMealAnalysis(_glucoseContext?: any) {
     return {
       insights: [
         "Meal timing and composition significantly impact glucose control.",
@@ -1614,7 +1617,7 @@ class AIService {
     };
   }
 
-  private getFallbackISFOptimization(readings: any[], treatments: any[], currentProfile: any) {
+  private getFallbackISFOptimization(_readings: any[], _treatments: any[], currentProfile: any) {
     const currentISF = currentProfile?.sens || [];
     
     return {
