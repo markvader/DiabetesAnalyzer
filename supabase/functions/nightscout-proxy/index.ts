@@ -429,20 +429,53 @@ This is a server-side configuration issue, not an authentication problem.`,
     // Log successful response details
     console.log(`Successfully proxied ${detectedApiVersion.toUpperCase()} request. Response type: ${typeof responseData}, Array: ${Array.isArray(responseData)}`);
     
-    if (Array.isArray(responseData)) {
-      console.log(`Returned ${responseData.length} items`);
-    } else if (responseData && typeof responseData === 'object') {
-      console.log(`Returned object with keys: ${Object.keys(responseData).join(', ')}`);
+    // Handle API v3 response format - API v3 wraps data in { status, result } object
+    // API v1 returns arrays directly, API v3 returns { status: 200, result: [...] }
+    let normalizedData = responseData;
+    
+    if (detectedApiVersion === 'v3' && responseData && typeof responseData === 'object' && !Array.isArray(responseData)) {
+      // API v3 response format: { status: 200, result: [...] }
+      if (responseData.result !== undefined) {
+        console.log(`API v3 response detected with result wrapper. Extracting result array.`);
+        normalizedData = responseData.result;
+        
+        // Handle case where result might be a single object (like profile/current)
+        if (normalizedData && typeof normalizedData === 'object' && !Array.isArray(normalizedData)) {
+          // For single object responses like profile, wrap in array for consistency
+          // But only if it's not already an array
+          console.log(`API v3 result is single object, keeping as-is for profile-like endpoints`);
+        }
+      } else if (responseData.status && responseData.message) {
+        // Error response from API v3
+        console.log(`API v3 error response: ${responseData.message}`);
+        return new Response(
+          JSON.stringify({ 
+            error: 'API v3 error', 
+            message: responseData.message || 'Unknown API v3 error',
+            status: responseData.status
+          }),
+          { 
+            status: responseData.status || 500, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+    }
+    
+    if (Array.isArray(normalizedData)) {
+      console.log(`Returned ${normalizedData.length} items`);
+    } else if (normalizedData && typeof normalizedData === 'object') {
+      console.log(`Returned object with keys: ${Object.keys(normalizedData).join(', ')}`);
     }
 
     // Return successful response with API version info
     return new Response(
       JSON.stringify({ 
-        data: responseData,
+        data: normalizedData,
         apiVersion: detectedApiVersion,
         success: true,
         timestamp: new Date().toISOString(),
-        itemCount: Array.isArray(responseData) ? responseData.length : null
+        itemCount: Array.isArray(normalizedData) ? normalizedData.length : null
       }),
       { 
         status: 200, 

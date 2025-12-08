@@ -506,7 +506,8 @@ export const testConnection = async (url: string, token?: string, apiVersion: 'v
     // Use appropriate test endpoint based on API version
     let testPath: string;
     if (apiVersion === 'v3') {
-      testPath = '/api/v3/entries?limit=1&sort=-date';
+      // API v3 uses $desc syntax for sorting
+      testPath = '/api/v3/entries?limit=1&sort$desc=date';
     } else {
       testPath = '/api/v1/entries?count=1';
     }
@@ -659,151 +660,93 @@ export const fetchData = async (
       const startTimestamp = new Date(startDate).getTime();
       const endTimestamp = new Date(endDate).getTime();
       
-      // API v3 has stricter limits - use chunked requests for large datasets
-      const maxV3Limit = 1000; // Safe limit for API v3
-      const entriesLimit = Math.min(countLimit, maxV3Limit);
-      const treatmentsLimit = Math.min(Math.min(countLimit, 5000), maxV3Limit);
+      // API v3 has a default limit of 1000, which is sufficient for most use cases
+      // We'll use larger limits and fewer requests to minimize Edge Function calls
+      // The API v3 limit can be up to 1000 per request
+      const maxV3Limit = 1000;
       
       console.log(`📅 API v3 date range: ${startTimestamp} to ${endTimestamp}`);
-      console.log(`📊 API v3 limits: entries=${entriesLimit}, treatments=${treatmentsLimit}`);
-      
-      if (countLimit > maxV3Limit) {
-        console.log(`🔄 Large dataset requested (${countLimit} items). Using pagination to stay within API v3 limits.`);
-      }
+      console.log(`📊 Requesting data for ${days} days`);
 
-      // For large datasets, we need to implement pagination
-      const fetchV3DataPaginated = async (endpoint: string, dataType: string) => {
-        let allData: any[] = [];
-        let currentTimestamp = endTimestamp; // Start from most recent
-        let hasMore = true;
-        let pageCount = 0;
-        const maxPages = Math.ceil(countLimit / maxV3Limit);
+      // For API v3, we'll make a single optimized request for each data type
+      // Using date$gte and date$lte query parameters (API v3 uses $ instead of [] for filters)
+      
+      // Fetch entries - API v3 uses sort$desc=date syntax
+      let v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=date`;
+      console.log(`🔗 API v3 entries endpoint: ${v3EntriesPath}`);
+      entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
+      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      
+      // If we got exactly maxV3Limit items, there might be more data - fetch additional pages
+      // But limit to a maximum of 3 additional requests to keep costs down
+      if (Array.isArray(entries) && entries.length === maxV3Limit && days > 7) {
+        console.log(`⚠️ Got max limit items, fetching additional pages for longer time range...`);
+        let allEntries = [...entries];
+        let additionalPages = 0;
+        const maxAdditionalPages = 2; // Max 2 additional pages = 3 total requests
         
-        // Determine which field to use for timestamps (date or created_at)
-        const useCreatedAt = endpoint.includes('created_at');
-        const timestampField = useCreatedAt ? 'created_at' : 'date';
-        const filterParam = useCreatedAt ? 'filter[created_at]' : 'filter[date]';
-        const sortParam = useCreatedAt ? 'sort=-created_at' : 'sort=-date';
-        
-        console.log(`🔄 Starting paginated fetch for ${dataType}, max pages: ${maxPages}, using field: ${timestampField}`);
-        
-        while (hasMore && pageCount < maxPages && allData.length < countLimit) {
-          const remainingCount = countLimit - allData.length;
-          const currentLimit = Math.min(maxV3Limit, remainingCount);
+        while (additionalPages < maxAdditionalPages && entries.length === maxV3Limit) {
+          // Get the oldest entry from the last batch to paginate
+          const oldestEntry = entries[entries.length - 1];
+          const oldestDate = oldestEntry.date || oldestEntry.srvCreated;
           
-          const paginatedPath = `${endpoint}&${filterParam}[$lte]=${currentTimestamp}&limit=${currentLimit}&${sortParam}`;
-          console.log(`📄 Page ${pageCount + 1} for ${dataType}: ${paginatedPath}`);
+          if (!oldestDate || oldestDate <= startTimestamp) break;
           
-          try {
-            const pageData = await makeProxyRequestWithFallback(url, paginatedPath, token, signal, 'v3');
-            
-            if (Array.isArray(pageData) && pageData.length > 0) {
-              allData = allData.concat(pageData);
-              
-              // Update timestamp for next page (oldest item from this page)
-              // Try both date and created_at fields for maximum compatibility
-              const oldestItem = pageData[pageData.length - 1];
-              const oldestTimestamp = oldestItem[timestampField] || oldestItem.date || oldestItem.created_at;
-              
-              if (oldestTimestamp && oldestTimestamp > startTimestamp) {
-                currentTimestamp = oldestTimestamp - 1; // Subtract 1ms to avoid duplicates
-                hasMore = pageData.length === currentLimit; // Continue if we got a full page
-                pageCount++;
-              } else {
-                hasMore = false; // Reached the start date
-              }
-            } else {
-              hasMore = false; // No more data
-            }
-          } catch (error) {
-            console.warn(`⚠️ Failed to fetch page ${pageCount + 1} for ${dataType}:`, error);
-            hasMore = false; // Stop pagination on error
-          }
+          v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lt=${oldestDate}&limit=${maxV3Limit}&sort$desc=date`;
+          console.log(`📄 Fetching additional page ${additionalPages + 1}: ${v3EntriesPath}`);
           
-          // Safety check to prevent infinite loops
-          if (pageCount >= 50) {
-            console.warn(`⚠️ Stopping pagination for ${dataType} after 50 pages`);
+          entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
+          if (Array.isArray(entries) && entries.length > 0) {
+            allEntries = allEntries.concat(entries);
+            additionalPages++;
+          } else {
             break;
           }
         }
         
-        console.log(`✅ Completed paginated fetch for ${dataType}: ${allData.length} items in ${pageCount} pages`);
-        return allData;
-      };
-
-      // Fetch entries with pagination if needed
-      let entries: any[];
-      if (countLimit <= maxV3Limit) {
-        // Single request for smaller datasets - try with date field first
-        let v3EntriesPath = `/api/v3/entries?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${entriesLimit}&sort=-date`;
-        console.log(`🔗 API v3 entries endpoint (trying date): ${v3EntriesPath}`);
-        entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
-        console.log(`📋 Entries result with date: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-        
-        // If entries is empty, try with created_at (for AAPS 3.3.3+ compatibility)
-        if (Array.isArray(entries) && entries.length === 0) {
-          console.log('⚠️ No entries found with date field, retrying with created_at for newer AAPS compatibility...');
-          v3EntriesPath = `/api/v3/entries?filter[created_at][$gte]=${startTimestamp}&filter[created_at][$lte]=${endTimestamp}&limit=${entriesLimit}&sort=-created_at`;
-          console.log(`🔗 API v3 entries endpoint (trying created_at): ${v3EntriesPath}`);
-          entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
-          console.log(`📋 Entries result with created_at: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-        }
-      } else {
-        // Paginated requests for larger datasets
-        const baseEntriesPath = `/api/v3/entries?filter[date][$gte]=${startTimestamp}`;
-        entries = await fetchV3DataPaginated(baseEntriesPath, 'entries');
-        
-        // If no entries found, try with created_at
-        if (Array.isArray(entries) && entries.length === 0) {
-          console.log('⚠️ No paginated entries found with date, retrying with created_at...');
-          const baseEntriesPathAlt = `/api/v3/entries?filter[created_at][$gte]=${startTimestamp}`;
-          entries = await fetchV3DataPaginated(baseEntriesPathAlt, 'entries');
-        }
+        entries = allEntries;
+        console.log(`📋 Total entries after pagination: ${entries.length} items`);
       }
 
-      // Fetch treatments with pagination if needed
-      let treatments: any[];
-      if (Math.min(countLimit, 5000) <= maxV3Limit) {
-        // Single request for smaller datasets - use created_at first for treatments
-        let v3TreatmentsPath = `/api/v3/treatments?filter[created_at][$gte]=${startTimestamp}&filter[created_at][$lte]=${endTimestamp}&limit=${treatmentsLimit}&sort=-created_at`;
-        console.log(`🔗 API v3 treatments endpoint (trying created_at): ${v3TreatmentsPath}`);
-        treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
-        console.log(`💊 Treatments result with created_at: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-        
-        // If treatments is empty, try with date field as fallback
-        if (Array.isArray(treatments) && treatments.length === 0) {
-          console.log('⚠️ No treatments found with created_at, retrying with date field...');
-          v3TreatmentsPath = `/api/v3/treatments?filter[date][$gte]=${startTimestamp}&filter[date][$lte]=${endTimestamp}&limit=${treatmentsLimit}&sort=-date`;
-          console.log(`🔗 API v3 treatments endpoint (trying date): ${v3TreatmentsPath}`);
-          treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
-          console.log(`💊 Treatments result with date: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-        }
-      } else {
-        // Paginated requests for larger datasets - try created_at first
-        const baseTreatmentsPath = `/api/v3/treatments?filter[created_at][$gte]=${startTimestamp}`;
-        treatments = await fetchV3DataPaginated(baseTreatmentsPath, 'treatments');
-        
-        // If no treatments found, try with date
-        if (Array.isArray(treatments) && treatments.length === 0) {
-          console.log('⚠️ No paginated treatments found with created_at, retrying with date...');
-          const baseTreatmentsPathAlt = `/api/v3/treatments?filter[date][$gte]=${startTimestamp}`;
-          treatments = await fetchV3DataPaginated(baseTreatmentsPathAlt, 'treatments');
-        }
-      }
+      // Fetch treatments - same approach
+      let v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
+      console.log(`🔗 API v3 treatments endpoint: ${v3TreatmentsPath}`);
+      treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
+      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
 
-      // Fetch profile and device status (these are typically small)
+      // Fetch profile and device status (these are typically small - single requests)
       const v3ProfilePath = '/api/v3/profile/current';
-      const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort=-date';
+      const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort$desc=created_at';
 
-      const profiles = await makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3');
+      profiles = await makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3');
       const deviceStatus = await makeProxyRequestWithFallback(url, v3DeviceStatusPath, token, signal, 'v3');
       
-      console.log('✅ Successfully fetched data using API v3 with pagination');
+      console.log('✅ Successfully fetched data using API v3 with optimized requests');
       
+      // Normalize the data to ensure consistent format with v1
+      // API v3 might have slightly different field names
+      const normalizedEntries = Array.isArray(entries) ? entries.map((entry: any) => ({
+        ...entry,
+        // Ensure date field exists (v3 might use 'date' or 'srvCreated')
+        date: entry.date || entry.srvCreated,
+        // Ensure sgv is a number (v3 might return as string)
+        sgv: typeof entry.sgv === 'string' ? parseInt(entry.sgv, 10) : entry.sgv,
+        // Ensure mills exists for compatibility
+        mills: entry.date || entry.srvCreated
+      })) : [];
+
+      const normalizedTreatments = Array.isArray(treatments) ? treatments.map((treatment: any) => ({
+        ...treatment,
+        // Ensure created_at exists
+        created_at: treatment.created_at || treatment.srvCreated,
+        // Ensure mills exists for compatibility
+        mills: treatment.created_at || treatment.srvCreated
+      })) : [];
+
       // Return the detected API version along with the data
       result = {
-        entries: Array.isArray(entries) ? entries : [],
-        treatments: Array.isArray(treatments) ? treatments : [],
+        entries: normalizedEntries,
+        treatments: normalizedTreatments,
         profile: Array.isArray(profiles) ? profiles : (profiles ? [profiles] : []), // Normalize v3 profile response
         deviceStatus: Array.isArray(deviceStatus) ? deviceStatus : [],
         detectedApiVersion: apiVersion as 'v1' | 'v3'
