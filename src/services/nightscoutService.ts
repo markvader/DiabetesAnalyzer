@@ -603,38 +603,30 @@ export const fetchData = async (
     let result;
     
     if (apiVersion === 'v1') {
-      console.log('🔧 Using API v1...');
+      console.log('🔧 Using API v1 (optimized for cost)...');
       
-      // Try with dateString first (older AAPS versions)
-      let v1EntriesPath = `/api/v1/entries?find[dateString][$gte]=${startDate}&find[dateString][$lte]=${endDate}&count=${countLimit}`;
-      console.log(`🔗 API v1 entries endpoint (trying dateString): ${v1EntriesPath}`);
+      // OPTIMIZATION: Use date timestamp instead of dateString for better performance
+      // Most Nightscout instances index by date (timestamp) which is more reliable
+      const startTimestamp = new Date(startDate).getTime();
+      const endTimestamp = new Date(endDate).getTime();
+      
+      // Use a reasonable limit - API v1 can handle larger counts
+      // But we'll cap at 10000 to avoid timeout issues
+      const optimizedLimit = Math.min(countLimit, 10000);
+      
+      // Single optimized entries request using date timestamp (most reliable across all versions)
+      const v1EntriesPath = `/api/v1/entries?find[date][$gte]=${startTimestamp}&find[date][$lte]=${endTimestamp}&count=${optimizedLimit}`;
+      console.log(`🔗 API v1 entries endpoint: ${v1EntriesPath}`);
       
       entries = await makeProxyRequestWithFallback(url, v1EntriesPath, token, signal, 'v1');
-      console.log(`📋 Entries result with dateString: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
       
-      // If entries is empty, try with created_at (newer AAPS 3.3.3+ versions)
-      if (Array.isArray(entries) && entries.length === 0) {
-        console.log('⚠️ No entries found with dateString, retrying with created_at for newer AAPS compatibility...');
-        v1EntriesPath = `/api/v1/entries?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${countLimit}`;
-        console.log(`🔗 API v1 entries endpoint (trying created_at): ${v1EntriesPath}`);
-        
-        entries = await makeProxyRequestWithFallback(url, v1EntriesPath, token, signal, 'v1');
-        console.log(`� Entries result with created_at: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-      }
-      
-      // Treatments - try with created_at first, then fallback to dateString if needed
-      let v1TreatmentsPath = `/api/v1/treatments?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${Math.min(countLimit, 5000)}`;
+      // Single optimized treatments request using created_at timestamp
+      const v1TreatmentsPath = `/api/v1/treatments?find[created_at][$gte]=${startDate}&count=${Math.min(optimizedLimit, 5000)}`;
       treatments = await makeProxyRequestWithFallback(url, v1TreatmentsPath, token, signal, 'v1');
-      console.log(`� Treatments result with created_at: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
+      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
       
-      // If treatments is empty, try with dateString as fallback
-      if (Array.isArray(treatments) && treatments.length === 0) {
-        console.log('⚠️ No treatments found with created_at, retrying with dateString...');
-        v1TreatmentsPath = `/api/v1/treatments?find[dateString][$gte]=${startDate}&find[dateString][$lte]=${endDate}&count=${Math.min(countLimit, 5000)}`;
-        treatments = await makeProxyRequestWithFallback(url, v1TreatmentsPath, token, signal, 'v1');
-        console.log(`💊 Treatments result with dateString: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-      }
-      
+      // Profile and device status - these are simple single requests
       const v1ProfilePath = '/api/v1/profile';
       profiles = await makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1');
       console.log(`👤 Profile result: ${Array.isArray(profiles) ? profiles.length + ' items' : typeof profiles}`);
@@ -643,7 +635,7 @@ export const fetchData = async (
       const deviceStatus = await makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1');
       console.log(`📱 Device status result: ${Array.isArray(deviceStatus) ? deviceStatus.length + ' items' : typeof deviceStatus}`);
       
-      console.log('✅ Successfully fetched data using API v1 with AAPS 3.3.3+ compatibility');
+      console.log('✅ Successfully fetched data using API v1 (4 optimized requests)');
       
       // Return the detected API version along with the data
       result = {
