@@ -7,6 +7,7 @@ import { format, subDays, startOfDay, endOfDay, parseISO, isValid } from 'date-f
 import { Brain, Calendar, Clock, AlertTriangle, Thermometer, Calculator, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { aiService } from '../services/aiService';
+import { formatCostEstimate, getModelById } from '../constants/openaiModels';
 
 const ISFOptimization = () => {
   const { data, loading, error } = useNightscout();
@@ -17,6 +18,7 @@ const ISFOptimization = () => {
   const [aiError, setAiError] = useState<string | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   
   // Time selection state
   const [timeWindow, setTimeWindow] = useState(336); // Default to 2 weeks (336 hours)
@@ -165,6 +167,28 @@ const ISFOptimization = () => {
   }, [isfAnalysis, unit]);
 
   // Helper functions
+  const getUsageLabel = () => {
+    if (!convertedISFAnalysis?.provider || !convertedISFAnalysis?.model) return null;
+
+    const modelInfo = getModelById(convertedISFAnalysis.model);
+    const modelLabel = modelInfo?.name || convertedISFAnalysis.model;
+    const tokens = convertedISFAnalysis.tokenUsage;
+
+    const tokensLabel =
+      tokens && (tokens.inputTokens > 0 || tokens.outputTokens > 0)
+        ? `${tokens.inputTokens} in / ${tokens.outputTokens} out`
+        : null;
+    const costLabel =
+      convertedISFAnalysis.costUSD != null
+        ? `Cost ${formatCostEstimate(convertedISFAnalysis.costUSD)}`
+        : null;
+
+    const parts = [`${convertedISFAnalysis.provider} • ${modelLabel}`];
+    if (tokensLabel) parts.push(tokensLabel);
+    if (costLabel) parts.push(costLabel);
+    return parts.join(' • ');
+  };
+
   const timeWindowOptions = [
     { value: 168, label: '1 Week' },
     { value: 336, label: '2 Weeks' },
@@ -370,7 +394,12 @@ const ISFOptimization = () => {
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
             <div className="flex items-center mb-4">
               <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered ISF Insights</h3>
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered ISF Insights</h3>
+                {getUsageLabel() && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{getUsageLabel()}</p>
+                )}
+              </div>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -400,6 +429,61 @@ const ISFOptimization = () => {
                 </div>
               )}
             </div>
+
+            {convertedISFAnalysis?.details && (
+              <div className="mt-4">
+                <button
+                  onClick={() => setShowDetails((v) => !v)}
+                  className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+                >
+                  {showDetails ? 'Hide details' : 'More details'}
+                </button>
+
+                {showDetails && (
+                  <div className="mt-3 space-y-3 text-sm">
+                    {convertedISFAnalysis.details.executiveSummary && (
+                      <div className="bg-gray-50 dark:bg-gray-900/20 p-4 rounded-lg">
+                        <p className="font-medium text-gray-900 dark:text-gray-100">Executive summary</p>
+                        <p className="text-gray-700 dark:text-gray-300">{convertedISFAnalysis.details.executiveSummary}</p>
+                      </div>
+                    )}
+
+                    {Array.isArray(convertedISFAnalysis.details.safetyFlags) && convertedISFAnalysis.details.safetyFlags.length > 0 && (
+                      <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+                        <p className="font-medium text-red-900 dark:text-red-100">Safety flags</p>
+                        <ul className="list-disc ml-5 text-red-800 dark:text-red-200">
+                          {convertedISFAnalysis.details.safetyFlags.map((flag: string, i: number) => (
+                            <li key={i}>{flag}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(convertedISFAnalysis.details.actionPlan7Days) && convertedISFAnalysis.details.actionPlan7Days.length > 0 && (
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                        <p className="font-medium text-blue-900 dark:text-blue-100">7-day plan</p>
+                        <ul className="list-disc ml-5 text-blue-800 dark:text-blue-200">
+                          {convertedISFAnalysis.details.actionPlan7Days.map((step: string, i: number) => (
+                            <li key={i}>{step}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(convertedISFAnalysis.details.dataQualityNotes) && convertedISFAnalysis.details.dataQualityNotes.length > 0 && (
+                      <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
+                        <p className="font-medium text-yellow-900 dark:text-yellow-100">Data quality notes</p>
+                        <ul className="list-disc ml-5 text-yellow-800 dark:text-yellow-200">
+                          {convertedISFAnalysis.details.dataQualityNotes.map((note: string, i: number) => (
+                            <li key={i}>{note}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ISF Suggestions Table */}

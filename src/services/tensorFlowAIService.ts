@@ -262,10 +262,10 @@ class TensorFlowAIService {
 
     // Time in range recommendations
     if (timeInRange.low > 5) {
-      recommendations.push('Consider reducing basal insulin rates or adjusting insulin-to-carb ratios to prevent hypoglycemia');
+      recommendations.push('Hypoglycemia risk is elevated. Review low patterns and discuss safer insulin/therapy adjustments with your clinician.');
     }
     if (timeInRange.high > 20) {
-      recommendations.push('Monitor carbohydrate intake and consider adjusting meal bolus calculations');
+      recommendations.push('Above-range time is elevated. Review post-meal patterns, carb counting consistency, and discuss strategy adjustments with your clinician.');
     }
     if (timeInRange.inRange < 70) {
       recommendations.push('Focus on improving time in range through consistent meal timing and insulin management');
@@ -286,7 +286,7 @@ class TensorFlowAIService {
     // Treatment pattern analysis
     const recentInsulin = treatments.filter(t => t.insulin && new Date(t.created_at).getTime() > Date.now() - 24 * 60 * 60 * 1000);
     if (recentInsulin.length > 6) {
-      recommendations.push('Frequent insulin corrections detected. Consider basal rate adjustments');
+      recommendations.push('Frequent corrections detected. Consider reviewing common triggers (meals, activity, missed boluses) and discuss therapy settings with your clinician.');
     }
 
     // Default recommendations if none generated

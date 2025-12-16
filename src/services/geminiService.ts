@@ -155,6 +155,32 @@ class GeminiService {
     };
   }
 
+  public async generateJson(
+    modelId: string,
+    prompt: string
+  ): Promise<{ json: any; tokenUsage: { prompt: number; completion: number; total: number } }> {
+    const response = await this.generateContent(modelId, prompt);
+    const responseText = response.text;
+
+    let parsed: any;
+    try {
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : responseText;
+      parsed = JSON.parse(jsonStr);
+    } catch (error) {
+      throw new Error(`Gemini returned non-JSON response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    return {
+      json: parsed,
+      tokenUsage: {
+        prompt: response.usageMetadata?.promptTokenCount ?? 0,
+        completion: response.usageMetadata?.candidatesTokenCount ?? 0,
+        total: response.usageMetadata?.totalTokenCount ?? 0
+      }
+    };
+  }
+
   public async analyzeDiabetesData(
     glucoseData: { timestamp: string; value: number; }[],
     modelId: string,

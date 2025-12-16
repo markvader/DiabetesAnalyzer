@@ -30,6 +30,7 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
   const [insights, setInsights] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [mealTiming, setMealTiming] = useState<any[]>([]);
+  const [details, setDetails] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
@@ -66,6 +67,7 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
         setInsights(result.insights);
         setRecommendations(result.recommendations);
         setMealTiming(result.mealTiming);
+        setDetails((result as any).details ?? null);
         setLastAnalyzedData(dataHash);
         setInitialLoadDone(true);
       } else {
@@ -534,6 +536,86 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
             )}
           </Box>
 
+          {details && (
+            <Paper
+              elevation={0}
+              sx={{
+                p: 3,
+                mb: 4,
+                borderRadius: 2,
+                border: `1px solid ${theme.palette.divider}20`,
+                background: `linear-gradient(135deg, ${theme.palette.background.paper} 0%, ${theme.palette.background.default} 100%)`
+              }}
+            >
+              <Box display="flex" alignItems="center" gap={1} mb={2}>
+                <AlertTriangle size={20} color={theme.palette.warning.main} />
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  More details
+                </Typography>
+              </Box>
+
+              {details.executiveSummary && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.6 }}>
+                  {details.executiveSummary}
+                </Typography>
+              )}
+
+              {Array.isArray(details.safetyFlags) && details.safetyFlags.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                    Safety flags
+                  </Typography>
+                  <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
+                    {details.safetyFlags.map((item: string, idx: number) => (
+                      <ListItem key={idx} sx={{ py: 0.25 }}>
+                        <ListItemIcon sx={{ minWidth: 20 }}>
+                          <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.warning.main }} />
+                        </ListItemIcon>
+                        <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+              {Array.isArray(details.actionPlan7Days) && details.actionPlan7Days.length > 0 && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                    7-day action plan
+                  </Typography>
+                  <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
+                    {details.actionPlan7Days.map((item: string, idx: number) => (
+                      <ListItem key={idx} sx={{ py: 0.25 }}>
+                        <ListItemIcon sx={{ minWidth: 20 }}>
+                          <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.text.secondary }} />
+                        </ListItemIcon>
+                        <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+              {Array.isArray(details.dataQualityNotes) && details.dataQualityNotes.length > 0 && (
+                <Box>
+                  <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                    Data quality notes
+                  </Typography>
+                  <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
+                    {details.dataQualityNotes.map((item: string, idx: number) => (
+                      <ListItem key={idx} sx={{ py: 0.25 }}>
+                        <ListItemIcon sx={{ minWidth: 20 }}>
+                          <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.divider }} />
+                        </ListItemIcon>
+                        <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+            </Paper>
+          )}
+
           {mealTiming.length > 0 && (
             <Box sx={{ mb: 4 }}>
               <Typography 
@@ -580,7 +662,7 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
                           color: 'transparent',
                         }}
                       >
-                        {timing.mealType}
+                        {timing.mealType || timing.timeOfDay || 'Meal'}
                       </Typography>
                       <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, fontWeight: 500 }}>
                         ⏰ {timing.startHour}:00 - {timing.endHour}:00
@@ -638,6 +720,49 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
               AI Meal Pattern Analysis
             </Typography>
           </Box>
+
+          {details && (
+            <Box sx={{ mb: 3 }}>
+              <details>
+                <summary style={{ cursor: 'pointer', fontWeight: 600 }}>More details</summary>
+                <Box sx={{ mt: 2 }}>
+                  {details.executiveSummary && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      {details.executiveSummary}
+                    </Typography>
+                  )}
+                  {Array.isArray(details.actionPlan7Days) && details.actionPlan7Days.length > 0 && (
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                        7-day action plan
+                      </Typography>
+                      <List dense>
+                        {details.actionPlan7Days.map((item: string, idx: number) => (
+                          <ListItem key={idx} sx={{ px: 0, py: 0.25 }}>
+                            <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Box>
+                  )}
+                  {Array.isArray(details.dataQualityNotes) && details.dataQualityNotes.length > 0 && (
+                    <Box>
+                      <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
+                        Data quality notes
+                      </Typography>
+                      <List dense>
+                        {details.dataQualityNotes.map((item: string, idx: number) => (
+                          <ListItem key={idx} sx={{ px: 0, py: 0.25 }}>
+                            <ListItemText primary={item} primaryTypographyProps={{ variant: 'body2' }} />
+                          </ListItem>
+                        ))}
+                      </List>
+                    </Box>
+                  )}
+                </Box>
+              </details>
+            </Box>
+          )}
 
           <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3} sx={{ mb: 3 }}>
             {insights.length > 0 && (
@@ -778,6 +903,39 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
         <Cookie className="h-6 w-6 text-orange-600 dark:text-orange-400 mr-2" />
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI Meal Pattern Analysis</h3>
       </div>
+
+      {details && (
+        <div className="mb-6">
+          <details className="bg-gray-50 dark:bg-gray-900/20 p-4 rounded-lg">
+            <summary className="cursor-pointer font-medium text-gray-900 dark:text-gray-100">More details</summary>
+            <div className="mt-3 space-y-4">
+              {details.executiveSummary && (
+                <p className="text-sm text-gray-700 dark:text-gray-300">{details.executiveSummary}</p>
+              )}
+              {Array.isArray(details.actionPlan7Days) && details.actionPlan7Days.length > 0 && (
+                <div>
+                  <h5 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">7-day action plan</h5>
+                  <ul className="space-y-1">
+                    {details.actionPlan7Days.map((item: string, idx: number) => (
+                      <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(details.dataQualityNotes) && details.dataQualityNotes.length > 0 && (
+                <div>
+                  <h5 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">Data quality notes</h5>
+                  <ul className="space-y-1">
+                    {details.dataQualityNotes.map((item: string, idx: number) => (
+                      <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </details>
+        </div>
+      )}
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         {insights.length > 0 && (

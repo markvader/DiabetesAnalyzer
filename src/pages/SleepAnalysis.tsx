@@ -655,6 +655,54 @@ const SleepAnalysis = () => {
                 </div>
               )}
             </div>
+
+            {sleepAnalysis?.details && (
+              <div className="mt-6">
+                <details className="bg-gray-50 dark:bg-gray-900/20 p-4 rounded-lg">
+                  <summary className="cursor-pointer font-medium text-gray-900 dark:text-gray-100">More details</summary>
+                  <div className="mt-3 space-y-4">
+                    {sleepAnalysis.details.executiveSummary && (
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        {sleepAnalysis.details.executiveSummary}
+                      </p>
+                    )}
+
+                    {Array.isArray(sleepAnalysis.details.safetyFlags) && sleepAnalysis.details.safetyFlags.length > 0 && (
+                      <div>
+                        <h5 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">Safety flags</h5>
+                        <ul className="space-y-1">
+                          {sleepAnalysis.details.safetyFlags.map((item: string, idx: number) => (
+                            <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(sleepAnalysis.details.actionPlan7Days) && sleepAnalysis.details.actionPlan7Days.length > 0 && (
+                      <div>
+                        <h5 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">7-day action plan</h5>
+                        <ul className="space-y-1">
+                          {sleepAnalysis.details.actionPlan7Days.map((item: string, idx: number) => (
+                            <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {Array.isArray(sleepAnalysis.details.dataQualityNotes) && sleepAnalysis.details.dataQualityNotes.length > 0 && (
+                      <div>
+                        <h5 className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">Data quality notes</h5>
+                        <ul className="space-y-1">
+                          {sleepAnalysis.details.dataQualityNotes.map((item: string, idx: number) => (
+                            <li key={idx} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
           </div>
 
           {/* Sleep Optimization Strategies */}

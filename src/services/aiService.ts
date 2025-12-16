@@ -514,6 +514,78 @@ class AIService {
 
   // Generate management plan
   async generateManagementPlan(readings: any[], _treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
+    // Priority 1: TensorFlow (offline) when available
+    if (this.tensorFlowService.shouldUseTensorFlow()) {
+      try {
+        const stats = this.calculateBasicStats(readings);
+        const timeInRange = this.calculateTimeInRange(readings, customGlucoseRanges);
+
+        const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
+        const ranges = glucoseContext?.getCurrentGlucoseRanges?.() || { TARGET_MIN: 70, TARGET_MAX: 180, LOW_THRESHOLD: 54 };
+
+        const tf = await this.tensorFlowService.analyzeGlucoseData(readings, _treatments);
+
+        const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+        const costUSD = 0;
+        this.storeLastAICost({
+          provider: 'TensorFlow',
+          model: 'local',
+          tokenUsage,
+          costUSD
+        });
+
+        const plan = `# Personalized Diabetes Management Plan (Offline)
+
+## Current Status
+- Time in range: ${timeInRange.inRange.toFixed(1)}% (target >70%)
+- Below range: ${timeInRange.low.toFixed(1)}% (target <4%)
+- Above range: ${timeInRange.high.toFixed(1)}% (target <25%)
+- Average glucose: ${formatValue(stats.mean)}
+- Variability (CV): ${stats.cv.toFixed(1)}%
+- Risk assessment: ${tf.riskAssessment} (confidence ${tf.confidence}%)
+
+## Executive Summary
+${tf.reasoning?.slice(0, 4).map((r: string) => `- ${r}`).join('\n') || '- Local analysis generated from your CGM data'}
+
+## Priority Safety Checks
+${(tf.safetyWarnings && tf.safetyWarnings.length > 0)
+  ? tf.safetyWarnings.map((w: string) => `- ${w}`).join('\n')
+  : '- No urgent safety flags detected in the analyzed window.'}
+
+## Goals (Next 7–14 Days)
+- Increase time in range toward >70% while keeping time below range <4%.
+- Reduce large swings by improving routine consistency (meals, activity, sleep).
+- Identify 1–2 repeatable problem windows (e.g., mornings, after dinner) and focus there first.
+
+## Action Plan (Practical Steps)
+${(tf.recommendations && tf.recommendations.length > 0)
+  ? tf.recommendations.map((rec: string) => `- ${rec}`).join('\n')
+  : '- Keep a consistent routine and review patterns weekly.'}
+- Review post-meal peaks: note what you ate, timing, and whether spikes cluster after specific meals.
+- Review low events: confirm symptoms, check for compression lows, and keep rapid carbs available.
+
+## Monitoring Strategy
+- Review your CGM trends daily for recurring highs/lows and weekly for patterns.
+- Use CGM alerts appropriate to your targets (discuss thresholds with your clinician).
+- If you use a pump, monitor infusion site/supply issues if unexpected highs occur.
+
+## Questions to Discuss With Your Clinician
+- Do my patterns suggest basal/background insulin mismatch in specific time blocks?
+- Are my glucose targets appropriate given my hypoglycemia risk?
+- What strategies should I use for corrections to avoid rebound cycles?
+
+## Data & Limitations
+- This plan was generated locally (TensorFlow) using CGM data and logged treatments.
+- It does not replace medical advice. If you have repeated lows (<${ranges.TARGET_MIN} mg/dL), severe lows (<${ranges.LOW_THRESHOLD} mg/dL), persistent highs, ketones, or feel unwell, seek medical guidance promptly.
+`;
+
+        return plan;
+      } catch (error) {
+        console.error('TensorFlow management plan generation failed:', error);
+        // Fall through to API / fallback
+      }
+    }
+
     // If no API providers are available, use fallback
     if (this.providers.length === 0) {
       return this.getFallbackManagementPlan(glucoseContext);
@@ -631,34 +703,78 @@ class AIService {
       if (this.tensorFlowService.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for meal analysis');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
-          if (result && result.insights && result.insights.length > 0) {
-            // Adapt TensorFlow result for meal analysis format
-            return {
-              insights: result.insights || ["TensorFlow meal pattern analysis completed"],
-              recommendations: result.recommendations || ["Monitor post-meal glucose patterns"],
-              mealTiming: [
-                {
-                  timeOfDay: "Breakfast",
-                  startHour: 7,
-                  endHour: 9,
-                  recommendation: "Morning meals show best glucose control"
-                },
-                {
-                  timeOfDay: "Lunch",
-                  startHour: 12,
-                  endHour: 14,
-                  recommendation: "Midday meals benefit from consistent timing"
-                },
-                {
-                  timeOfDay: "Dinner", 
-                  startHour: 18,
-                  endHour: 20,
-                  recommendation: "Earlier dinners improve overnight stability"
-                }
-              ]
-            };
+          const carbTreatments = treatments.filter(t => t.carbs && t.carbs > 0);
+          const mealStats = carbTreatments.length > 0 ? this.calculateMealStats(carbTreatments, readings) : { avgCarbs: 0, avgGlucoseRise: 0, hypoRate: 0 };
+
+          const formatValue = glucoseContext
+            ? glucoseContext.formatGlucoseValue
+            : (value: number) => `${toMmol(value)} mmol/L`;
+
+          const insights: string[] = [];
+          if (carbTreatments.length === 0) {
+            insights.push('No carbohydrate meal entries were found in the selected time window.');
+          } else {
+            insights.push(`Average carbs per meal: ${mealStats.avgCarbs.toFixed(1)}g.`);
+            insights.push(`Typical glucose rise after meals: ${formatValue(mealStats.avgGlucoseRise)}.`);
+            if (mealStats.hypoRate > 0) insights.push(`Post-meal hypoglycemia signals were detected after ${mealStats.hypoRate.toFixed(1)}% of meals.`);
           }
+
+          const recommendations: string[] = [
+            'Track meal timing and carbs consistently for a few days to identify repeatable triggers.',
+            'If you see frequent post-meal spikes, review meal composition (fat/protein can delay rises) and discuss timing strategies with your clinician.',
+            'If you see post-meal lows, focus on safety: avoid stacking corrections and consider discussing adjustments with your clinician.'
+          ];
+
+          const mealTiming = [
+            { timeOfDay: 'Breakfast', startHour: 7, endHour: 9, recommendation: 'Aim for consistent timing and similar carb/protein balance to compare responses.' },
+            { timeOfDay: 'Lunch', startHour: 12, endHour: 14, recommendation: 'Watch for afternoon activity effects that can change insulin sensitivity.' },
+            { timeOfDay: 'Dinner', startHour: 18, endHour: 20, recommendation: 'Earlier dinners may reduce overnight variability for some people.' }
+          ];
+
+          const details = {
+            executiveSummary: carbTreatments.length === 0
+              ? 'No meal carb entries were available for analysis in this window. Add meal/carb logging to unlock meal response insights.'
+              : `Your average meal is ${mealStats.avgCarbs.toFixed(1)}g carbs with an average post-meal rise of ${formatValue(mealStats.avgGlucoseRise)}.`,
+            likelyDrivers: [
+              'Carb counting variability and hidden carbs',
+              'Meal composition (fat/protein) delaying absorption',
+              'Timing mismatches (meals vs insulin action vs activity)',
+              'Late-night meals impacting overnight stability'
+            ].slice(0, 6),
+            safetyFlags: mealStats.hypoRate > 2
+              ? ['Post-meal hypoglycemia signals appear elevated. If you have repeated lows, discuss your strategy with your clinician.']
+              : [],
+            actionPlan7Days: [
+              'Pick one meal (e.g., breakfast) and keep it consistent for 3 days to compare responses.',
+              'Log meal time + carbs + any exercise within 3 hours to spot common patterns.',
+              'If you have frequent spikes, review whether they cluster after specific foods or timing.',
+              'If you have post-meal lows, prioritize safety and avoid over-correcting.'
+            ],
+            experiments: [
+              'Try swapping a high-GI carb for a lower-GI option at one meal and compare the post-meal peak.',
+              'If dinner spikes late, try earlier dinner timing and compare overnight stability.'
+            ],
+            questionsForClinician: [
+              'Do my post-meal patterns suggest timing or ratio adjustments?',
+              'How should I safely handle high-fat meals that spike later?'
+            ],
+            dataQualityNotes: carbTreatments.length === 0 ? ['No carb meal entries found in treatments.'] : []
+          };
+
+          const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+          const costUSD = 0;
+          this.storeLastAICost({ provider: 'TensorFlow', model: 'local', tokenUsage, costUSD });
+
+          return {
+            insights,
+            recommendations: recommendations.slice(0, 6),
+            mealTiming,
+            details,
+            provider: 'TensorFlow',
+            model: 'local',
+            tokenUsage,
+            costUSD
+          };
         } catch (tfError) {
           console.error('❌ TensorFlow meal analysis failed:', tfError);
         }
@@ -680,18 +796,29 @@ class AIService {
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
+        // Create a more informative prompt
         const prompt = `
-          Analyze meal patterns based on this data:
-          
+          You are a diabetes nutrition assistant. Return ONLY valid JSON.
+
+          Analyze meal patterns based on this summary:
+
           Average carbs per meal: ${mealStats.avgCarbs.toFixed(1)}g
           Average glucose rise: ${formatValue(mealStats.avgGlucoseRise)}
           Post-meal hypoglycemia rate: ${mealStats.hypoRate.toFixed(1)}%
-          
-          Provide JSON with:
-          1. insights: 3-4 observations about meal patterns
-          2. recommendations: 3-4 actionable suggestions
-          3. mealTiming: array of optimal meal timing recommendations with timeOfDay, startHour, endHour, and recommendation
+
+          Return JSON with:
+          1. insights: 3-5 short observations
+          2. recommendations: 4-6 actionable suggestions (no medication dosing)
+          3. mealTiming: array of { timeOfDay, startHour, endHour, recommendation }
+          4. details: {
+             executiveSummary: string,
+             likelyDrivers: string[],
+             safetyFlags: string[],
+             actionPlan7Days: string[],
+             experiments: string[],
+             questionsForClinician: string[],
+             dataQualityNotes: string[]
+          }
         `;
         
         // Try each provider in order
@@ -700,6 +827,31 @@ class AIService {
             console.log(`🔄 Attempting meal analysis with ${provider.name}...`);
             
             let response;
+            let tokenUsage: TokenUsage | null = null;
+
+            if (provider.name === 'Gemini') {
+              const gemini = await this.geminiService.generateJson(provider.model, prompt);
+              const result = gemini.json;
+
+              tokenUsage = {
+                inputTokens: gemini.tokenUsage.prompt,
+                outputTokens: gemini.tokenUsage.completion,
+                totalTokens: gemini.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+
+              return {
+                insights: result.insights || [],
+                recommendations: result.recommendations || [],
+                mealTiming: result.mealTiming || [],
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              };
+            }
             
             if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -714,7 +866,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             } else {
@@ -731,7 +883,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             }
@@ -745,8 +897,18 @@ class AIService {
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -756,10 +918,19 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} meal analysis successful`);
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              }
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
-                mealTiming: result.mealTiming || []
+                mealTiming: result.mealTiming || [],
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);
@@ -796,6 +967,49 @@ class AIService {
         try {
           const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
+            const stats = this.calculateBasicStats(readings);
+            const rapidRises = this.countRapidGlucoseRises(readings);
+            const exerciseTreatments = treatments.filter(t =>
+              t.eventType === 'Exercise' ||
+              (t.notes && (
+                t.notes.toLowerCase().includes('exercise') ||
+                t.notes.toLowerCase().includes('workout') ||
+                t.notes.toLowerCase().includes('running') ||
+                t.notes.toLowerCase().includes('walking') ||
+                t.notes.toLowerCase().includes('cycling') ||
+                t.notes.toLowerCase().includes('swimming')
+              ))
+            );
+
+            const details = {
+              executiveSummary: `Detected ${exerciseTreatments.length} exercise-related events. Mean glucose ${glucoseContext?.formatGlucoseValue ? glucoseContext.formatGlucoseValue(stats.mean, 'mgdl', true) : stats.mean.toFixed(0)} with CV ${stats.cv.toFixed(1)}%.`,
+              likelyDrivers: [
+                'Exercise intensity/type (aerobic often lowers glucose; anaerobic can raise it temporarily)',
+                'Timing relative to insulin action and meals',
+                'Delayed activity effects causing later lows',
+                'Stress/adrenaline response during intense sessions'
+              ].slice(0, 6),
+              safetyFlags: [],
+              actionPlan7Days: [
+                'Log exercise type, duration, and timing (relative to meals/boluses) for a week.',
+                'Watch for delayed lows after activity; consider safer alerts and carry fast carbs.',
+                'If you repeatedly go low during/after exercise, discuss prevention strategies with your clinician.'
+              ],
+              experiments: [
+                'Try similar-intensity activity at the same time-of-day on 2 different days and compare glucose response.',
+                'If you tend to spike during intense workouts, compare warm-up/cool-down inclusion and timing.'
+              ],
+              questionsForClinician: [
+                'What is the safest approach to prevent exercise-related lows for me?',
+                'Do my patterns suggest adjusting timing or meal strategy around activity?'
+              ],
+              dataQualityNotes: exerciseTreatments.length === 0 ? ['No explicit exercise events were logged; analysis is limited without exercise notes.'] : []
+            };
+
+            const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const costUSD = 0;
+            this.storeLastAICost({ provider: 'TensorFlow', model: 'local', tokenUsage, costUSD });
+
             // Adapt TensorFlow result for exercise analysis format
             return {
               insights: result.insights || ["TensorFlow exercise pattern analysis completed"],
@@ -807,8 +1021,13 @@ class AIService {
                   recommendation: "Monitor glucose response to different activities"
                 }
               ],
-              rapidRises: 0,
-              variability: Math.round(Math.random() * 40 + 20) // Basic variability estimate
+              rapidRises,
+              variability: stats.cv,
+              details,
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
             };
           }
         } catch (tfError) {
@@ -840,20 +1059,29 @@ class AIService {
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
+        // Create a more informative prompt
         const prompt = `
-          Analyze exercise impact on diabetes based on this data:
-          
+          You are an exercise physiology assistant for diabetes management. Return ONLY valid JSON.
+
           Mean Glucose: ${formatValue(stats.mean)}
-          Variability: CV ${stats.cv.toFixed(1)}%
-          Exercise events: ${exerciseTreatments.length}
-          
-          Provide JSON with:
-          1. insights: 3-4 observations about exercise impact
-          2. recommendations: 3-4 actionable suggestions
-          3. exerciseTypes: array of exercise types with type, glucoseImpact, and recommendation
-          4. rapidRises: number of rapid glucose rises detected
-          5. variability: overall glucose variability percentage
+          Variability (CV %): ${stats.cv.toFixed(1)}
+          Exercise events logged: ${exerciseTreatments.length}
+
+          Return JSON with:
+          1. insights: 3-5 observations about exercise impact
+          2. recommendations: 4-6 actionable suggestions (no medication dosing)
+          3. exerciseTypes: array of { type, glucoseImpact, recommendation }
+          4. rapidRises: number
+          5. variability: number
+          6. details: {
+             executiveSummary: string,
+             likelyDrivers: string[],
+             safetyFlags: string[],
+             actionPlan7Days: string[],
+             experiments: string[],
+             questionsForClinician: string[],
+             dataQualityNotes: string[]
+          }
         `;
         
         // Try each provider in order
@@ -862,6 +1090,32 @@ class AIService {
             console.log(`🔄 Attempting exercise analysis with ${provider.name}...`);
             
             let response;
+            let tokenUsage: TokenUsage | null = null;
+
+            if (provider.name === 'Gemini') {
+              const gemini = await this.geminiService.generateJson(provider.model, prompt);
+              const result = gemini.json;
+
+              tokenUsage = {
+                inputTokens: gemini.tokenUsage.prompt,
+                outputTokens: gemini.tokenUsage.completion,
+                totalTokens: gemini.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              return {
+                insights: result.insights || [],
+                recommendations: result.recommendations || [],
+                exerciseTypes: result.exerciseTypes || [],
+                rapidRises: result.rapidRises || 0,
+                variability: result.variability || stats.cv,
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              };
+            }
             
             if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -876,7 +1130,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             } else {
@@ -893,7 +1147,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             }
@@ -907,8 +1161,18 @@ class AIService {
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -918,12 +1182,21 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} exercise analysis successful`);
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              }
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
                 exerciseTypes: result.exerciseTypes || [],
                 rapidRises: result.rapidRises || 0,
-                variability: result.variability || stats.cv
+                variability: result.variability || stats.cv,
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);
@@ -959,13 +1232,77 @@ class AIService {
         try {
           const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
+            const nightReadings = readings.filter(r => {
+              const hour = new Date(r.date).getHours();
+              return hour >= 22 || hour < 6;
+            });
+
+            const nightStats = this.calculateBasicStats(nightReadings.length ? nightReadings : readings);
+            const dawnPhenomenon = this.calculateDawnEffect(readings, glucoseContext);
+
+            const sleepQualityScore = (() => {
+              // Heuristic: higher night TIR and lower CV => better score
+              const nightTir = this.calculateTimeInRange(nightReadings.length ? nightReadings : readings);
+              const cvPenalty = Math.min(30, Math.max(0, (nightStats.cv - 25)));
+              const tirBonus = Math.min(40, Math.max(0, (nightTir.inRange - 50)));
+              return Math.max(0, Math.min(100, Math.round(60 + tirBonus - cvPenalty)));
+            })();
+
+            const sleepDisruptions = (() => {
+              if (nightReadings.length < 2) return 0;
+              // Count threshold crossings during night as a proxy for disruptions
+              const values = nightReadings.map(r => r.sgv).filter((v: any) => typeof v === 'number');
+              let crossings = 0;
+              for (let i = 1; i < values.length; i++) {
+                const prev = values[i - 1];
+                const curr = values[i];
+                if ((prev < 70 && curr >= 70) || (prev >= 70 && curr < 70)) crossings++;
+                if ((prev > 180 && curr <= 180) || (prev <= 180 && curr > 180)) crossings++;
+              }
+              return Math.min(6, Math.round(crossings / 2));
+            })();
+
+            const details = {
+              executiveSummary: `Night-time glucose variability CV ${nightStats.cv.toFixed(1)}%. Dawn effect ${dawnPhenomenon >= 0 ? '+' : ''}${glucoseContext?.formatGlucoseValue ? glucoseContext.formatGlucoseValue(dawnPhenomenon, glucoseContext.unit === 'mgdl' ? 'mgdl' : 'mmol', true) : dawnPhenomenon}.`,
+              likelyDrivers: [
+                'Dinner timing/size impacting overnight glucose',
+                'Basal/background insulin mismatch overnight (discuss with clinician)',
+                'Dawn phenomenon or hormonal effects near wake-up',
+                'Compression lows or sensor artifacts during sleep'
+              ].slice(0, 6),
+              safetyFlags: [],
+              actionPlan7Days: [
+                'Review overnight trends (22:00–06:00) for recurring highs/lows.',
+                'If you wake up high, compare dinner timing and composition across days.',
+                'If you see night lows, prioritize safety and discuss prevention strategies with your clinician.'
+              ],
+              experiments: [
+                'Try an earlier dinner on 2–3 days and compare overnight stability.',
+                'If dawn rises occur, track wake time and pre-wake trend to see consistency.'
+              ],
+              questionsForClinician: [
+                'Do these overnight patterns suggest basal/background therapy adjustments?',
+                'How should I manage suspected dawn phenomenon safely?'
+              ],
+              dataQualityNotes: nightReadings.length === 0 ? ['No readings were detected in typical sleep hours; analysis used overall data.'] : []
+            };
+
+            const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const costUSD = 0;
+            this.storeLastAICost({ provider: 'TensorFlow', model: 'local', tokenUsage, costUSD });
+
             // Adapt TensorFlow result for sleep analysis format
             return {
               insights: result.insights || ["TensorFlow sleep pattern analysis completed"],
               recommendations: result.recommendations || ["Monitor overnight glucose stability"],
-              sleepQualityScore: Math.round(Math.random() * 30 + 70), // Basic sleep score
-              dawnPhenomenon: Math.round(Math.random() * 2 - 1), // -1 to 1 mmol/L
-              sleepDisruptions: Math.round(Math.random() * 3) // 0-3 disruptions
+              sleepQualityScore,
+              dawnPhenomenon,
+              sleepDisruptions,
+              details,
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
             };
           }
         } catch (tfError) {
@@ -996,19 +1333,29 @@ class AIService {
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
+        // Create a more informative prompt
         const prompt = `
-          Analyze sleep and diabetes patterns based on this data:
-          
-          Night Glucose: ${formatValue(nightStats.mean)} (CV ${nightStats.cv.toFixed(1)}%)
-          Dawn Phenomenon: ${dawnEffect > 0 ? '+' : ''}${formatValue(dawnEffect)}
-          
-          Provide JSON with:
-          1. insights: 3-4 observations about sleep patterns
-          2. recommendations: 3-4 actionable suggestions
+          You are a sleep-focused diabetes assistant. Return ONLY valid JSON.
+
+          Night Glucose (mean): ${formatValue(nightStats.mean)}
+          Night-time Variability (CV %): ${nightStats.cv.toFixed(1)}
+          Dawn phenomenon effect: ${dawnEffect > 0 ? '+' : ''}${formatValue(dawnEffect)}
+
+          Return JSON with:
+          1. insights: 3-5 observations about sleep patterns
+          2. recommendations: 4-6 actionable suggestions (no medication dosing)
           3. sleepQualityScore: 0-100
-          4. dawnPhenomenon: numeric value of dawn effect
-          5. sleepDisruptions: estimated number of disruptions
+          4. dawnPhenomenon: numeric
+          5. sleepDisruptions: number
+          6. details: {
+             executiveSummary: string,
+             likelyDrivers: string[],
+             safetyFlags: string[],
+             actionPlan7Days: string[],
+             experiments: string[],
+             questionsForClinician: string[],
+             dataQualityNotes: string[]
+          }
         `;
         
         // Try each provider in order
@@ -1017,6 +1364,32 @@ class AIService {
             console.log(`🔄 Attempting sleep analysis with ${provider.name}...`);
             
             let response;
+            let tokenUsage: TokenUsage | null = null;
+
+            if (provider.name === 'Gemini') {
+              const gemini = await this.geminiService.generateJson(provider.model, prompt);
+              const result = gemini.json;
+
+              tokenUsage = {
+                inputTokens: gemini.tokenUsage.prompt,
+                outputTokens: gemini.tokenUsage.completion,
+                totalTokens: gemini.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              return {
+                insights: result.insights || [],
+                recommendations: result.recommendations || [],
+                sleepQualityScore: result.sleepQualityScore || 75,
+                dawnPhenomenon: result.dawnPhenomenon || dawnEffect,
+                sleepDisruptions: result.sleepDisruptions || 1,
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              };
+            }
             
             if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -1031,7 +1404,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             } else {
@@ -1048,7 +1421,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             }
@@ -1062,8 +1435,18 @@ class AIService {
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -1073,12 +1456,21 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} sleep analysis successful`);
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              }
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
                 sleepQualityScore: result.sleepQualityScore || 75,
                 dawnPhenomenon: result.dawnPhenomenon || dawnEffect,
-                sleepDisruptions: result.sleepDisruptions || 1
+                sleepDisruptions: result.sleepDisruptions || 1,
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);
@@ -1114,13 +1506,63 @@ class AIService {
         try {
           const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
-            // Adapt TensorFlow result for stress analysis format
+            const stats = this.calculateBasicStats(readings);
+            const rapidRises = this.countRapidGlucoseRises(readings);
+
+            const stressImpactScore = (() => {
+              // Heuristic score (0-100): higher variability + more rapid rises + more highs
+              const cvScore = Math.min(60, Math.max(0, (stats.cv - 20) * 2));
+              const riseScore = Math.min(25, rapidRises * 3);
+              const highScore = Math.min(20, Math.max(0, stats.high - 10));
+              return Math.max(0, Math.min(100, Math.round(cvScore + riseScore + highScore)));
+            })();
+
+            const potentialStressTimes = this.estimateStressPeriods(readings, stats.cv);
+
+            const details = {
+              executiveSummary: `Glucose variability (CV ${stats.cv.toFixed(1)}%) and ${rapidRises} rapid rises suggest potential stress-related impacts in this window.`,
+              likelyDrivers: [
+                'Acute stress hormones raising glucose (adrenaline/cortisol)',
+                'Disrupted sleep increasing insulin resistance',
+                'Illness/pain/inflammation (can mimic stress effects)',
+                'Caffeine/nicotine and other stimulants',
+                'Work/commute or routine changes coinciding with meals/insulin'
+              ].slice(0, 6),
+              safetyFlags: [],
+              actionPlan7Days: [
+                'Tag stressful events in notes (work, conflict, deadlines) to correlate with glucose trends.',
+                'Use short stress resets (2–5 minutes breathing/walk) when you notice rising trends.',
+                'If you see repeated highs during stress windows, discuss safe strategies with your clinician.',
+                'Protect sleep: consistent schedule and wind-down routines can reduce next-day variability.'
+              ],
+              experiments: [
+                'Try a brief walk or relaxation routine at the start of a typical stress window and compare the next 1–2 hours trend.',
+                'Reduce stimulant intake (if applicable) for 3 days and compare variability.'
+              ],
+              questionsForClinician: [
+                'Do my patterns suggest stress-related insulin resistance at certain times?',
+                'What is the safest approach if I frequently run high during stress?'
+              ],
+              dataQualityNotes: readings?.length < 24 ? ['Limited data volume; results may be less reliable.'] : []
+            };
+
+            const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const costUSD = 0;
+            this.storeLastAICost({ provider: 'TensorFlow', model: 'local', tokenUsage, costUSD });
+
+            // Adapt TensorFlow result for stress analysis format expected by UI
             return {
               insights: result.insights || ["TensorFlow stress pattern analysis completed"],
               recommendations: result.recommendations || ["Monitor glucose patterns during stressful periods"],
-              stressLevel: Math.round(Math.random() * 5 + 3), // 3-8 stress level
-              correlations: ["High glucose variability detected during peak hours"],
-              managementTips: ["Practice relaxation techniques", "Monitor glucose more frequently during stress"]
+              stressImpactScore,
+              rapidRises,
+              variability: stats.cv,
+              potentialStressTimes,
+              details,
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
             };
           }
         } catch (tfError) {
@@ -1139,20 +1581,34 @@ class AIService {
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
+        const rapidRises = this.countRapidGlucoseRises(readings);
+
+        // Create a more informative prompt aligned to UI expectations
         const prompt = `
-          Analyze stress impact on diabetes based on this data:
-          
-          Mean Glucose: ${formatValue(stats.mean)}
-          Variability: CV ${stats.cv.toFixed(1)}%
-          High readings: ${stats.high}%
-          
-          Provide JSON with:
-          1. insights: 3-4 observations about stress patterns
-          2. recommendations: 3-4 actionable suggestions
-          3. stressLevel: 1-10 scale
-          4. correlations: array of stress-glucose correlations
-          5. managementTips: array of stress management suggestions
+          You are a diabetes assistant focused on stress-related glucose patterns. Return ONLY valid JSON.
+
+          Summary:
+          Mean glucose: ${formatValue(stats.mean)}
+          Variability (CV %): ${stats.cv.toFixed(1)}
+          High readings (%): ${stats.high}
+          Rapid rises detected: ${rapidRises}
+
+          Return JSON with:
+          1. insights: 3-5 observations about stress patterns
+          2. recommendations: 4-6 actionable suggestions (no medication dosing)
+          3. stressImpactScore: number 0-100
+          4. rapidRises: number
+          5. variability: number (CV %)
+          6. potentialStressTimes: array of { timeOfDay, startHour, endHour, variability }
+          7. details: {
+             executiveSummary: string,
+             likelyDrivers: string[],
+             safetyFlags: string[],
+             actionPlan7Days: string[],
+             experiments: string[],
+             questionsForClinician: string[],
+             dataQualityNotes: string[]
+          }
         `;
         
         // Try each provider in order
@@ -1161,6 +1617,34 @@ class AIService {
             console.log(`🔄 Attempting stress analysis with ${provider.name}...`);
             
             let response;
+            let tokenUsage: TokenUsage | null = null;
+
+            if (provider.name === 'Gemini') {
+              const gemini = await this.geminiService.generateJson(provider.model, prompt);
+              const result = gemini.json;
+
+              tokenUsage = {
+                inputTokens: gemini.tokenUsage.prompt,
+                outputTokens: gemini.tokenUsage.completion,
+                totalTokens: gemini.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+
+              return {
+                insights: result.insights || [],
+                recommendations: result.recommendations || [],
+                stressImpactScore: result.stressImpactScore ?? 50,
+                rapidRises: result.rapidRises ?? rapidRises,
+                variability: result.variability ?? stats.cv,
+                potentialStressTimes: result.potentialStressTimes || this.estimateStressPeriods(readings, stats.cv),
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              };
+            }
             
             if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -1175,7 +1659,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             } else {
@@ -1192,7 +1676,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             }
@@ -1206,8 +1690,18 @@ class AIService {
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -1217,12 +1711,22 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} stress analysis successful`);
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              }
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
-                stressLevel: result.stressLevel || 5,
-                correlations: result.correlations || [],
-                managementTips: result.managementTips || []
+                stressImpactScore: result.stressImpactScore ?? 50,
+                rapidRises: result.rapidRises ?? rapidRises,
+                variability: result.variability ?? stats.cv,
+                potentialStressTimes: result.potentialStressTimes || this.estimateStressPeriods(readings, stats.cv),
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);
@@ -1259,18 +1763,78 @@ class AIService {
         try {
           const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
-            // Adapt TensorFlow result for ISF optimization format
+            const currentISFSchedule = currentProfile?.sens || [];
+            const stats = this.calculateBasicStats(readings);
+            const tir = this.calculateTimeInRange(readings);
+            const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
+
+            // Heuristic adjustment: more lows => increase ISF; more highs => decrease ISF (for discussion only)
+            const factor = (() => {
+              const low = tir.low;
+              const high = tir.high;
+              const raw = 1 + ((low - high) / 100) * 0.25;
+              return Math.max(0.9, Math.min(1.1, raw));
+            })();
+
+            const isfSuggestions = currentISFSchedule.map((entry: any) => ({
+              time: entry.time,
+              rate: typeof entry.value === 'number' ? Number((entry.value * factor).toFixed(2)) : entry.value
+            }));
+
+            const calculatedISFs = this.estimateISFFromCorrections(readings, treatments, glucoseContext);
+
+            const confidenceLevel = (() => {
+              const base = readings.length >= 288 ? 88 : readings.length >= 144 ? 82 : readings.length >= 72 ? 76 : 68;
+              const bonus = calculatedISFs.length >= 8 ? 6 : calculatedISFs.length >= 3 ? 3 : 0;
+              return Math.max(55, Math.min(95, Math.round(base + bonus - Math.max(0, (stats.cv - 40) * 0.2))));
+            })();
+
+            const details = {
+              executiveSummary: `Based on your data, variability is CV ${stats.cv.toFixed(1)}% with mean glucose ${formatValue(stats.mean)}. Suggested ISF changes are conservative (±10%) and should be reviewed with your clinician before applying.`,
+              likelyDrivers: [
+                'Insulin sensitivity varies by time-of-day (circadian rhythm)',
+                'Exercise and delayed activity effects',
+                'Illness/stress/sleep changes shifting insulin needs',
+                'High-fat meals and absorption delays affecting corrections',
+                'Pump/site issues or sensor artifacts impacting apparent response'
+              ].slice(0, 6),
+              safetyFlags: [],
+              actionPlan7Days: [
+                'If testing ISF, do so under stable conditions and avoid stacking corrections.',
+                'Focus on one time block at a time with small, conservative adjustments (5–10%).',
+                'Track correction outcomes (start glucose, insulin amount, glucose after 3–4 hours).',
+                'If you have repeated lows, prioritize safety and discuss adjustments with your clinician.'
+              ],
+              experiments: [
+                'Choose a single time window and collect a few “clean” correction events (no food/exercise) to estimate ISF response.',
+                'Compare correction outcomes on high-stress vs low-stress days to see sensitivity shifts.'
+              ],
+              questionsForClinician: [
+                'Do my correction outcomes support adjusting ISF in specific time blocks?',
+                'How should I safely test ISF changes given my hypoglycemia risk?'
+              ],
+              dataQualityNotes: [
+                calculatedISFs.length === 0 ? 'No clean correction events were detected; suggestions are based on glucose patterns and profile schedule only.' : ''
+              ].filter(Boolean)
+            };
+
+            const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const costUSD = 0;
+            this.storeLastAICost({ provider: 'TensorFlow', model: 'local', tokenUsage, costUSD });
+
             return {
               insights: result.insights || ["TensorFlow ISF pattern analysis completed"],
-              recommendations: result.recommendations || ["Monitor insulin sensitivity patterns"],
-              currentISF: currentProfile?.isf || 2.5,
-              suggestedISF: (currentProfile?.isf || 2.5) * (1 + (Math.random() - 0.5) * 0.2), // ±10% adjustment
-              confidenceLevel: Math.round(Math.random() * 20 + 70), // 70-90% confidence
-              timeBasedFactors: [
-                { time: "06:00-12:00", factor: 1.0, recommendation: "Standard ISF during morning hours" },
-                { time: "12:00-18:00", factor: 0.9, recommendation: "Slightly higher sensitivity afternoon" },
-                { time: "18:00-06:00", factor: 1.1, recommendation: "Reduced sensitivity evening/night" }
-              ]
+              recommendations: (result.recommendations || ["Review ISF patterns with your clinician"])
+                .map((r: string) => r.replace(/dose|bolus|units?/gi, 'strategy'))
+                .slice(0, 6),
+              isfSuggestions,
+              calculatedISFs,
+              confidenceLevel,
+              details,
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
             };
           }
         } catch (tfError) {
@@ -1291,22 +1855,39 @@ class AIService {
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
+        const currentSchedule = currentProfile?.sens || [];
+        const correctionCandidates = this.estimateISFFromCorrections(readings, treatments, glucoseContext);
+
+        // Create a more informative prompt aligned to UI expectations
         const prompt = `
-          Optimize insulin sensitivity factor (ISF) based on this data:
-          
-          Current ISF: ${current_isf}
-          Mean Glucose: ${formatValue(stats.mean)}
-          Variability: CV ${stats.cv.toFixed(1)}%
-          Treatments: ${treatments.length} recorded
-          
-          Provide JSON with:
-          1. insights: 3-4 observations about ISF patterns
-          2. recommendations: 3-4 actionable suggestions
-          3. currentISF: current factor
-          4. suggestedISF: optimized factor
+          You are a diabetes insulin-therapy assistant. Return ONLY valid JSON.
+          Important: Do not provide dosing instructions. This is for discussion and should be reviewed by a clinician.
+
+          Data summary:
+          Mean glucose: ${formatValue(stats.mean)}
+          Variability (CV %): ${stats.cv.toFixed(1)}
+          Treatments recorded: ${treatments.length}
+          Current ISF schedule entries: ${currentSchedule.length}
+          Clean correction examples detected: ${correctionCandidates.length}
+
+          Current ISF schedule (time/value):
+          ${currentSchedule.slice(0, 12).map((s: any) => `- ${s.time}: ${s.value}`).join('\n')}
+
+          Return JSON with:
+          1. insights: 3-5 observations
+          2. recommendations: 4-6 safe suggestions (no dosing)
+          3. isfSuggestions: array of { time: string, rate: number } (same times as schedule, updated rates)
+          4. calculatedISFs: array of { time: string, insulin: number, preGlucose: number, postGlucose: number, drop: number, calculatedISF: number }
           5. confidenceLevel: 0-100
-          6. timeBasedFactors: array of time periods with factors and recommendations
+          6. details: {
+             executiveSummary: string,
+             likelyDrivers: string[],
+             safetyFlags: string[],
+             actionPlan7Days: string[],
+             experiments: string[],
+             questionsForClinician: string[],
+             dataQualityNotes: string[]
+          }
         `;
         
         // Try each provider in order
@@ -1315,6 +1896,32 @@ class AIService {
             console.log(`🔄 Attempting ISF optimization with ${provider.name}...`);
             
             let response;
+            let tokenUsage: TokenUsage | null = null;
+
+            if (provider.name === 'Gemini') {
+              const gemini = await this.geminiService.generateJson(provider.model, prompt);
+              const result = gemini.json;
+              tokenUsage = {
+                inputTokens: gemini.tokenUsage.prompt,
+                outputTokens: gemini.tokenUsage.completion,
+                totalTokens: gemini.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+
+              return {
+                insights: result.insights || [],
+                recommendations: result.recommendations || [],
+                isfSuggestions: result.isfSuggestions || currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
+                calculatedISFs: result.calculatedISFs || correctionCandidates,
+                confidenceLevel: result.confidenceLevel || 75,
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              };
+            }
             
             if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -1329,7 +1936,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             } else {
@@ -1346,7 +1953,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                  max_tokens: 900
                 })
               });
             }
@@ -1360,8 +1967,18 @@ class AIService {
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -1371,13 +1988,21 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} ISF optimization successful`);
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+              }
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
-                currentISF: result.currentISF || current_isf,
-                suggestedISF: result.suggestedISF || current_isf,
+                isfSuggestions: result.isfSuggestions || currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
+                calculatedISFs: result.calculatedISFs || correctionCandidates,
                 confidenceLevel: result.confidenceLevel || 75,
-                timeBasedFactors: result.timeBasedFactors || []
+                details: result.details || null,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);
@@ -1437,6 +2062,116 @@ class AIService {
       cv: (stdDev / mean) * 100,
       high: Math.round(highPercentage) // High percentage rounded
     };
+  }
+
+  private estimateStressPeriods(readings: any[], overallCv: number) {
+    if (!readings || readings.length < 12) return [];
+
+    // Split day into coarse blocks and pick the most variable ones.
+    const blocks = [
+      { label: 'Morning', start: 6, end: 12 },
+      { label: 'Afternoon', start: 12, end: 18 },
+      { label: 'Evening', start: 18, end: 24 },
+      { label: 'Overnight', start: 0, end: 6 }
+    ];
+
+    const perBlock = blocks
+      .map((b) => {
+        const inBlock = readings.filter((r: any) => {
+          const d = new Date(r.dateString || r.date);
+          const h = d.getHours();
+          if (b.start < b.end) return h >= b.start && h < b.end;
+          return h >= b.start || h < b.end;
+        });
+        const stats = this.calculateBasicStats(inBlock);
+        return {
+          timeOfDay: b.label,
+          startHour: b.start,
+          endHour: b.end,
+          variability: Number.isFinite(stats.cv) ? stats.cv : overallCv,
+          points: inBlock.length
+        };
+      })
+      .filter((x) => x.points >= 6)
+      .sort((a, b) => b.variability - a.variability)
+      .slice(0, 3)
+      .map(({ points, ...rest }) => rest);
+
+    return perBlock;
+  }
+
+  private estimateISFFromCorrections(readings: any[], treatments: any[], glucoseContext?: any) {
+    if (!readings || readings.length < 12 || !treatments || treatments.length === 0) return [];
+
+    const unit: 'mgdl' | 'mmol' = glucoseContext?.unit === 'mgdl' ? 'mgdl' : 'mmol';
+    const convertGlucose = (mgdlValue: number) => (unit === 'mmol' ? toMmol(mgdlValue) : mgdlValue);
+
+    // Very conservative heuristic: look for correction boluses and estimate drop over 3 hours.
+    const boluses = treatments
+      .filter((t: any) => (t.eventType === 'Correction Bolus' || t.eventType === 'Bolus') && typeof t.insulin === 'number')
+      .slice(0, 25);
+
+    const byTime = (a: any, b: any) => new Date(a.dateString || a.date).getTime() - new Date(b.dateString || b.date).getTime();
+    const sortedReadings = [...readings].sort(byTime);
+
+    const findNearestReading = (timeMs: number) => {
+      // Linear scan is ok for small lists; keep it simple.
+      let best: any = null;
+      let bestDelta = Infinity;
+      for (const r of sortedReadings) {
+        const t = new Date(r.dateString || r.date).getTime();
+        const d = Math.abs(t - timeMs);
+        if (d < bestDelta) {
+          best = r;
+          bestDelta = d;
+        }
+      }
+      return { reading: best, deltaMs: bestDelta };
+    };
+
+    const results: Array<any> = [];
+
+    for (const b of boluses) {
+      const bolusTime = new Date(b.dateString || b.created_at || b.timestamp || b.date).getTime();
+      if (!Number.isFinite(bolusTime)) continue;
+
+      const pre = findNearestReading(bolusTime);
+      const post = findNearestReading(bolusTime + 3 * 60 * 60 * 1000);
+
+      // Require readings within ~20 minutes.
+      if (!pre.reading || !post.reading) continue;
+      if (pre.deltaMs > 20 * 60 * 1000 || post.deltaMs > 20 * 60 * 1000) continue;
+
+      const preGlucoseMgdl = Number(pre.reading.sgv ?? pre.reading.glucose ?? pre.reading.value);
+      const postGlucoseMgdl = Number(post.reading.sgv ?? post.reading.glucose ?? post.reading.value);
+      if (!Number.isFinite(preGlucoseMgdl) || !Number.isFinite(postGlucoseMgdl)) continue;
+
+      const dropMgdl = preGlucoseMgdl - postGlucoseMgdl;
+      if (dropMgdl <= 10) continue;
+
+      const insulin = Number(b.insulin);
+      if (!Number.isFinite(insulin) || insulin <= 0) continue;
+
+      // ISF in mmol/L per U (or mg/dL per U if unit=mgdl)
+      const calculatedISF = unit === 'mmol' ? toMmol(dropMgdl) / insulin : dropMgdl / insulin;
+
+      const d = new Date(bolusTime);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+
+      results.push({
+        time: `${hh}:${mm}`,
+        insulin: Number(insulin.toFixed(2)),
+        preGlucose: Number(convertGlucose(preGlucoseMgdl).toFixed(unit === 'mmol' ? 1 : 0)),
+        postGlucose: Number(convertGlucose(postGlucoseMgdl).toFixed(unit === 'mmol' ? 1 : 0)),
+        drop: Number((unit === 'mmol' ? toMmol(dropMgdl) : dropMgdl).toFixed(unit === 'mmol' ? 1 : 0)),
+        calculatedISF: Number(calculatedISF.toFixed(2))
+      });
+
+      if (results.length >= 12) break;
+    }
+
+    return results;
   }
 
   private coerceTimeInRangePercent(timeInRange: any, fallbackFromTensorFlow?: any): { low: number; inRange: number; high: number } {
