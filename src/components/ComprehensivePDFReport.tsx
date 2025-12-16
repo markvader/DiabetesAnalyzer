@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { FileText, Download, Settings, Loader2 } from 'lucide-react';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 interface ComprehensivePDFReportProps {
   data: any;
@@ -483,71 +486,196 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       // PAGE 3: TIME IN RANGE ANALYSIS
       yPos = addNewPage();
       yPos = addHeader('TIME IN RANGE ANALYSIS', 3);
-      
-      // Time in range visualization
-      const barWidth = 160;
-      const barHeight = 20;
-      
-      // Color-coded time in range bar
-      const veryLowWidth = (stats.timeMetrics.veryLowPercentage / 100) * barWidth;
-      const lowWidth = ((stats.timeMetrics.lowPercentage - stats.timeMetrics.veryLowPercentage) / 100) * barWidth;
-      const inRangeWidth = (stats.basic.timeInRange / 100) * barWidth;
-      const highWidth = ((stats.timeMetrics.highPercentage - stats.timeMetrics.veryHighPercentage) / 100) * barWidth;
-      const veryHighWidth = (stats.timeMetrics.veryHighPercentage / 100) * barWidth;
-      
-      let xPos = 15;
-      
-      // Very Low
-      pdf.setFillColor(156, 39, 176);
-      pdf.rect(xPos, yPos, veryLowWidth, barHeight, 'F');
-      xPos += veryLowWidth;
-      
-      // Low
-      pdf.setFillColor(239, 68, 68);
-      pdf.rect(xPos, yPos, lowWidth, barHeight, 'F');
-      xPos += lowWidth;
-      
-      // In Range
-      pdf.setFillColor(34, 197, 94);
-      pdf.rect(xPos, yPos, inRangeWidth, barHeight, 'F');
-      xPos += inRangeWidth;
-      
-      // High
-      pdf.setFillColor(251, 191, 36);
-      pdf.rect(xPos, yPos, highWidth, barHeight, 'F');
-      xPos += highWidth;
-      
-      // Very High
-      pdf.setFillColor(245, 101, 101);
-      pdf.rect(xPos, yPos, veryHighWidth, barHeight, 'F');
-      
-      // Border
-      pdf.setDrawColor(200, 200, 200);
-      pdf.rect(15, yPos, barWidth, barHeight, 'S');
-      
-      yPos += 30;
-      
-      // Legend and statistics
-      const ranges: Array<[string, number, [number, number, number]]> = [
-        [`Very Low (<${formatGlucoseValue(54, 'mgdl', false)} ${getUnitLabel()})`, stats.timeMetrics.veryLowPercentage, [156, 39, 176]],
-        [`Low (${formatGlucoseValue(54, 'mgdl', false)}–${targetRanges.TARGET_MIN.toFixed(1)} ${getUnitLabel()})`, stats.timeMetrics.lowPercentage - stats.timeMetrics.veryLowPercentage, [239, 68, 68]],
-        [`In Range (${targetRanges.TARGET_MIN.toFixed(1)}–${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()})`, stats.basic.timeInRange, [34, 197, 94]],
-        [`High (${targetRanges.TARGET_MAX.toFixed(1)}–${formatGlucoseValue(250, 'mgdl', false)} ${getUnitLabel()})`, stats.timeMetrics.highPercentage - stats.timeMetrics.veryHighPercentage, [251, 191, 36]],
-        [`Very High (>${formatGlucoseValue(250, 'mgdl', false)} ${getUnitLabel()})`, stats.timeMetrics.veryHighPercentage, [245, 101, 101]]
+
+      // Chart.js: stacked Low / In Range / High over time
+      const lowPctTotal = Math.max(0, (stats.timeMetrics.veryLowPercentage || 0) + (stats.timeMetrics.lowPercentage || 0));
+      const highPctTotal = Math.max(0, (stats.timeMetrics.highPercentage || 0) + (stats.timeMetrics.veryHighPercentage || 0));
+      const tirPct = Math.max(0, stats.basic.timeInRange || 0);
+
+      const byDay = new Map<string, { low: number; inRange: number; high: number; n: number }>();
+      readingPoints.forEach(p => {
+        const key = format(new Date(p.ts), 'yyyy-MM-dd');
+        const row = byDay.get(key) ?? { low: 0, inRange: 0, high: 0, n: 0 };
+        row.n += 1;
+        if (p.v < targetRanges.TARGET_MIN) row.low += 1;
+        else if (p.v > targetRanges.TARGET_MAX) row.high += 1;
+        else row.inRange += 1;
+        byDay.set(key, row);
+      });
+
+      const dayKeys = [...byDay.keys()].sort((a, b) => (a < b ? -1 : 1));
+      const labels = dayKeys.map(k => format(new Date(k), 'MMM dd'));
+      const lowSeries = dayKeys.map(k => {
+        const r = byDay.get(k)!;
+        return r.n ? (r.low / r.n) * 100 : 0;
+      });
+      const inRangeSeries = dayKeys.map(k => {
+        const r = byDay.get(k)!;
+        return r.n ? (r.inRange / r.n) * 100 : 0;
+      });
+      const highSeries = dayKeys.map(k => {
+        const r = byDay.get(k)!;
+        return r.n ? (r.high / r.n) * 100 : 0;
+      });
+
+      const renderTirChart = async () => {
+        try {
+          if (typeof document === 'undefined') return null;
+          const canvas = document.createElement('canvas');
+          // Higher resolution for crisp PDF
+          canvas.width = 1400;
+          canvas.height = 650;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          const labelStep = Math.max(1, Math.ceil(labels.length / 10));
+          const chart = new ChartJS(ctx, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: 'Low',
+                  data: lowSeries,
+                  backgroundColor: `rgb(${colors.danger[0]}, ${colors.danger[1]}, ${colors.danger[2]})`,
+                  borderWidth: 0,
+                  stack: 'bg'
+                },
+                {
+                  label: 'In Range',
+                  data: inRangeSeries,
+                  backgroundColor: `rgb(${colors.success[0]}, ${colors.success[1]}, ${colors.success[2]})`,
+                  borderWidth: 0,
+                  stack: 'bg'
+                },
+                {
+                  label: 'High',
+                  data: highSeries,
+                  backgroundColor: `rgb(${colors.warning[0]}, ${colors.warning[1]}, ${colors.warning[2]})`,
+                  borderWidth: 0,
+                  stack: 'bg'
+                }
+              ]
+            },
+            options: {
+              responsive: false,
+              animation: false,
+              layout: { padding: { top: 10, right: 16, bottom: 0, left: 16 } },
+              plugins: {
+                legend: {
+                  position: 'bottom',
+                  labels: {
+                    boxWidth: 14,
+                    boxHeight: 10,
+                    color: '#111827',
+                    font: { size: 12 }
+                  }
+                },
+                tooltip: {
+                  callbacks: {
+                    label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%`
+                  }
+                }
+              },
+              scales: {
+                x: {
+                  stacked: true,
+                  grid: { display: false },
+                  ticks: {
+                    color: '#334155',
+                    maxRotation: 0,
+                    autoSkip: false,
+                    callback: (_val, idx) => (idx % labelStep === 0 ? labels[idx] : '')
+                  }
+                },
+                y: {
+                  stacked: true,
+                  min: 0,
+                  max: 100,
+                  grid: { color: '#E5E7EB' },
+                  ticks: {
+                    color: '#334155',
+                    callback: (v) => `${v}%`
+                  },
+                  title: {
+                    display: true,
+                    text: 'Percent of readings',
+                    color: '#334155',
+                    font: { size: 12, weight: 'normal' }
+                  }
+                }
+              }
+            }
+          });
+
+          chart.update();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const dataUrl = canvas.toDataURL('image/png', 1.0);
+          chart.destroy();
+          canvas.remove();
+          return dataUrl;
+        } catch {
+          return null;
+        }
+      };
+
+      pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.text(`Period: ${analysisLabel}`, 15, yPos);
+      yPos += 6;
+      pdf.setFontSize(10);
+      pdf.text(
+        `Targets: ${targetRanges.TARGET_MIN.toFixed(1)}–${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()}  •  Low ${lowPctTotal.toFixed(1)}%  •  In Range ${tirPct.toFixed(1)}%  •  High ${highPctTotal.toFixed(1)}%`,
+        15,
+        yPos
+      );
+      yPos += 8;
+
+      const chartImg = labels.length >= 2 ? await renderTirChart() : null;
+      if (chartImg) {
+        // Fill most of the page with the chart
+        pdf.addImage(chartImg, 'PNG', 15, yPos, 180, 110);
+        yPos += 120;
+      } else {
+        // Fallback: simple summary bar (Low / In Range / High)
+        const barWidth = 180;
+        const barHeight = 18;
+        const lowW = (lowPctTotal / 100) * barWidth;
+        const tirW = (tirPct / 100) * barWidth;
+        const highW = (highPctTotal / 100) * barWidth;
+        let xPos = 15;
+        pdf.setFillColor(colors.danger[0], colors.danger[1], colors.danger[2]);
+        pdf.rect(xPos, yPos, lowW, barHeight, 'F');
+        xPos += lowW;
+        pdf.setFillColor(colors.success[0], colors.success[1], colors.success[2]);
+        pdf.rect(xPos, yPos, tirW, barHeight, 'F');
+        xPos += tirW;
+        pdf.setFillColor(colors.warning[0], colors.warning[1], colors.warning[2]);
+        pdf.rect(xPos, yPos, highW, barHeight, 'F');
+        pdf.setDrawColor(200, 200, 200);
+        pdf.rect(15, yPos, barWidth, barHeight, 'S');
+        yPos += 28;
+      }
+
+      // Compact legend (Low / In Range / High)
+      const bands: Array<[string, number, [number, number, number]]> = [
+        [`Low (<${targetRanges.TARGET_MIN.toFixed(1)} ${getUnitLabel()})`, lowPctTotal, colors.danger],
+        [`In Range (${targetRanges.TARGET_MIN.toFixed(1)}–${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()})`, tirPct, colors.success],
+        [`High (>${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()})`, highPctTotal, colors.warning]
       ];
-      
-      ranges.forEach((range, index) => {
-        const y = yPos + (index * 15);
-        
-        // Color indicator
-        const color = range[2];
-        pdf.setFillColor(color[0], color[1], color[2]);
-        pdf.rect(20, y, 8, 8, 'F');
-        
-        // Text
+
+      pdf.setFontSize(10);
+      bands.forEach((b, idx) => {
+        const y = yPos + idx * 12;
+        const c = b[2];
+        pdf.setFillColor(c[0], c[1], c[2]);
+        pdf.rect(15, y - 4, 6, 6, 'F');
         pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
-        pdf.setFontSize(10);
-        pdf.text(`${range[0]}: ${range[1].toFixed(1)}%`, 35, y + 6);
+        pdf.text(`${b[0]}: ${b[1].toFixed(1)}%`, 25, y);
       });
 
       // PAGE 4: HYPOGLYCEMIA ANALYSIS
