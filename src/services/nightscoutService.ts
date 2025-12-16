@@ -638,25 +638,31 @@ export const fetchData = async (
       // But we'll cap at 10000 to avoid timeout issues
       const optimizedLimit = Math.min(countLimit, 10000);
       
-      // Single optimized entries request using date timestamp (most reliable across all versions)
+      // Build endpoints
       const v1EntriesPath = `/api/v1/entries?find[date][$gte]=${startTimestamp}&find[date][$lte]=${endTimestamp}&count=${optimizedLimit}`;
       console.log(`🔗 API v1 entries endpoint: ${v1EntriesPath}`);
-      
-      entries = await makeProxyRequestWithFallback(url, v1EntriesPath, token, signal, 'v1');
-      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-      
-      // Single optimized treatments request using created_at timestamp
-      const v1TreatmentsPath = `/api/v1/treatments?find[created_at][$gte]=${startDate}&count=${Math.min(optimizedLimit, 5000)}`;
-      treatments = await makeProxyRequestWithFallback(url, v1TreatmentsPath, token, signal, 'v1');
-      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-      
-      // Profile and device status - these are simple single requests
+
+      // Keep treatments bounded to the same requested time range
+      const v1TreatmentsPath = `/api/v1/treatments?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${Math.min(optimizedLimit, 5000)}`;
       const v1ProfilePath = '/api/v1/profile';
-      profiles = await makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1');
-      console.log(`👤 Profile result: ${Array.isArray(profiles) ? profiles.length + ' items' : typeof profiles}`);
-      
       const v1DeviceStatusPath = '/api/v1/devicestatus?count=1';
-      const deviceStatus = await makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1');
+
+      // Parallelize the 4 requests to reduce overall wait time
+      const [entriesRes, treatmentsRes, profilesRes, deviceStatusRes] = await Promise.all([
+        makeProxyRequestWithFallback(url, v1EntriesPath, token, signal, 'v1'),
+        makeProxyRequestWithFallback(url, v1TreatmentsPath, token, signal, 'v1'),
+        makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1'),
+        makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1')
+      ]);
+
+      entries = entriesRes;
+      treatments = treatmentsRes;
+      profiles = profilesRes;
+      const deviceStatus = deviceStatusRes;
+
+      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
+      console.log(`👤 Profile result: ${Array.isArray(profiles) ? profiles.length + ' items' : typeof profiles}`);
       console.log(`📱 Device status result: ${Array.isArray(deviceStatus) ? deviceStatus.length + ' items' : typeof deviceStatus}`);
       
       console.log('✅ Successfully fetched data using API v1 (4 optimized requests)');
@@ -690,8 +696,26 @@ export const fetchData = async (
       // Fetch entries - API v3 uses sort$desc=date syntax
       let v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=date`;
       console.log(`🔗 API v3 entries endpoint: ${v3EntriesPath}`);
-      entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
+
+      // Fetch other resources in parallel with the first entries page
+      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
+      const v3ProfilePath = '/api/v3/profile/current';
+      const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort$desc=created_at';
+
+      const [entriesFirstPage, treatmentsRes, profilesRes, deviceStatusRes] = await Promise.all([
+        makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3'),
+        makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3'),
+        makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3'),
+        makeProxyRequestWithFallback(url, v3DeviceStatusPath, token, signal, 'v3')
+      ]);
+
+      entries = entriesFirstPage;
+      treatments = treatmentsRes;
+      profiles = profilesRes;
+      const deviceStatus = deviceStatusRes;
+
       console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
       
       // If we got exactly maxV3Limit items, there might be more data - fetch additional pages
       // But limit to a maximum of 3 additional requests to keep costs down
@@ -723,19 +747,6 @@ export const fetchData = async (
         entries = allEntries;
         console.log(`📋 Total entries after pagination: ${entries.length} items`);
       }
-
-      // Fetch treatments - same approach
-      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
-      console.log(`🔗 API v3 treatments endpoint: ${v3TreatmentsPath}`);
-      treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
-      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-
-      // Fetch profile and device status (these are typically small - single requests)
-      const v3ProfilePath = '/api/v3/profile/current';
-      const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort$desc=created_at';
-
-      profiles = await makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3');
-      const deviceStatus = await makeProxyRequestWithFallback(url, v3DeviceStatusPath, token, signal, 'v3');
       
       console.log('✅ Successfully fetched data using API v3 with optimized requests');
       

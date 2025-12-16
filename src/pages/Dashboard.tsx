@@ -49,6 +49,7 @@ const Dashboard = () => {
     loading, 
     error, 
     fetchDataForDays, 
+    prefetchDataForDays,
     url, 
     lastFetchTime, 
     refreshNow,
@@ -57,6 +58,7 @@ const Dashboard = () => {
     autoRefreshInterval,
     setAutoRefreshInterval,
     forceRefresh
+    ,analysisPeriod
   } = useNightscout();
   const { isSubscribed } = useSubscription();
   const { showDeviceStatus } = useDashboardDisplay();
@@ -456,19 +458,81 @@ const Dashboard = () => {
   const [lastTimeWindow, setLastTimeWindow] = useState<number | null>(null);
   const [lastCustomRange, setLastCustomRange] = useState<{startDate: string, endDate: string} | null>(null);
   
-  // Simple initial data fetch
+  // Fast initial fetch: load just enough data to render the dashboard quickly.
+  // Then prefetch the full analysis range in the background.
+  const didPrefetchRef = useRef(false);
+  const prefetchTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    // Reset prefetch state when URL changes
+    didPrefetchRef.current = false;
+    if (prefetchTimerRef.current !== null) {
+      clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
+    }
+  }, [url]);
+
   useEffect(() => {
     if (url && !data && !loading) {
-      fetchDataForDays(14);
+      fetchDataForDays(1);
     }
   }, [url, data, loading, fetchDataForDays]);
-  
-  // Simple analysis results calculation
+
   useEffect(() => {
-    if (data && !loading) {
+    if (!url || !data || loading) return;
+    if (didPrefetchRef.current) return;
+
+    didPrefetchRef.current = true;
+
+    const daysToPrefetch = Math.min(Math.max(analysisPeriod || 14, 1), 90);
+    if (daysToPrefetch <= 1) return;
+
+    // NightscoutContext rate-limits fetches; wait a moment after the initial load.
+    prefetchTimerRef.current = window.setTimeout(() => {
+      prefetchDataForDays(daysToPrefetch);
+    }, 5500);
+
+    return () => {
+      if (prefetchTimerRef.current !== null) {
+        clearTimeout(prefetchTimerRef.current);
+        prefetchTimerRef.current = null;
+      }
+    };
+  }, [url, data, loading, analysisPeriod, prefetchDataForDays]);
+  
+  // Defer expensive analysis work so rendering stays responsive.
+  useEffect(() => {
+    if (!data || loading) return;
+
+    let cancelled = false;
+    const run = () => {
+      if (cancelled) return;
       const results = analyzeData(data);
-      setAnalysisResults(results);
+      if (!cancelled) {
+        setAnalysisResults(results);
+      }
+    };
+
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(run, { timeout: 1200 });
+      return () => {
+        cancelled = true;
+        if (typeof w.cancelIdleCallback === 'function') {
+          w.cancelIdleCallback(id);
+        }
+      };
     }
+
+    const timeoutId = window.setTimeout(run, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
   }, [data, loading]);
   
   const recentReading = useMemo(() => {

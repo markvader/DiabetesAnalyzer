@@ -17,6 +17,7 @@ interface NightscoutContextType {
   loading: boolean;
   error: string | null;
   fetchDataForDays: (days: number) => Promise<void>;
+  prefetchDataForDays: (days: number) => Promise<void>;
   lastFetchTime: Date | null;
   autoRefreshEnabled: boolean;
   setAutoRefreshEnabled: (enabled: boolean) => void;
@@ -39,6 +40,7 @@ const NightscoutContext = createContext<NightscoutContextType>({
   loading: false,
   error: null,
   fetchDataForDays: async () => {},
+  prefetchDataForDays: async () => {},
   lastFetchTime: null,
   autoRefreshEnabled: true,
   setAutoRefreshEnabled: () => {},
@@ -438,6 +440,10 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [url, token, cleanup, detectedApiVersion, setDetectedApiVersion]);
 
+  const prefetchDataForDays = useCallback(async (requestedDays: number) => {
+    await fetchDataInBackground(requestedDays);
+  }, [fetchDataInBackground]);
+
   // Function to manually refresh data
   const refreshNow = useCallback(async () => {
     console.log('🔄 Manual refresh triggered');
@@ -488,6 +494,7 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
     loading,
     error,
     fetchDataForDays,
+    prefetchDataForDays,
     lastFetchTime,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
@@ -501,7 +508,7 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
     setAnalysisPeriod
   }), [url, token, data, loading, error, lastFetchTime, 
        autoRefreshEnabled, autoRefreshInterval, 
-       detectedApiVersion, analysisPeriod]);
+       detectedApiVersion, analysisPeriod, fetchDataForDays, prefetchDataForDays, refreshNow, forceRefresh, setUrl, setToken, setDetectedApiVersion, setAnalysisPeriod, setAutoRefreshEnabled, setAutoRefreshInterval]);
 
   return (
     <NightscoutContext.Provider value={contextValue}>
