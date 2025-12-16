@@ -74,6 +74,9 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
   const lastSuccessfulFetchRef = useRef<number>(0);
   const mountedRef = useRef<boolean>(true);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const backgroundAbortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef<number>(0);
+  const activeBackgroundRequestIdRef = useRef<number>(0);
   const initializingRef = useRef<boolean>(true);
   const autoRefreshTimerRef = useRef<number | null>(null);
   const backgroundFetchingRef = useRef<boolean>(false);
@@ -119,6 +122,15 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       abortControllerRef.current.abort('Cleanup');
       abortControllerRef.current = null;
     }
+
+    if (backgroundAbortControllerRef.current) {
+      backgroundAbortControllerRef.current.abort('Cleanup');
+      backgroundAbortControllerRef.current = null;
+    }
+
+    // Bump request IDs so any in-flight responses become stale
+    activeRequestIdRef.current += 1;
+    activeBackgroundRequestIdRef.current += 1;
     isFetchingRef.current = false;
   }, []);
 
@@ -224,6 +236,12 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    // Never run background fetch while a foreground fetch is active
+    if (isFetchingRef.current) {
+      console.log('⏭️ Foreground fetch in progress, skipping background fetch');
+      return;
+    }
+
     if (backgroundFetchingRef.current) {
       console.log('⏭️ Background fetch already in progress, skipping');
       return;
@@ -239,8 +257,15 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
-    // Create a new abort controller for this request
+    // Cancel any prior background request
+    if (backgroundAbortControllerRef.current) {
+      backgroundAbortControllerRef.current.abort('Superseded');
+    }
+
+    // Create a new abort controller + request id for this request
     const controller = new AbortController();
+    backgroundAbortControllerRef.current = controller;
+    const requestId = (activeBackgroundRequestIdRef.current += 1);
     backgroundFetchingRef.current = true;
     
     try {
@@ -253,8 +278,13 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
         controller.signal,
         detectedApiVersion || 'v1'
       );
-      
+
       if (!mountedRef.current || result === null) {
+        return;
+      }
+
+      // Stale-request guard
+      if (requestId !== activeBackgroundRequestIdRef.current) {
         return;
       }
 
@@ -294,6 +324,11 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       if (mountedRef.current) {
         backgroundFetchingRef.current = false;
       }
+
+      // Only clear if we're still the latest background controller
+      if (backgroundAbortControllerRef.current === controller) {
+        backgroundAbortControllerRef.current = null;
+      }
       controller.abort('Cleanup');
     }
   }, [url, token, detectedApiVersion, setDetectedApiVersion]);
@@ -321,8 +356,15 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
 
+    // Cancel any background request to prevent data overwrite races
+    if (backgroundAbortControllerRef.current) {
+      backgroundAbortControllerRef.current.abort('Foreground fetch started');
+      backgroundAbortControllerRef.current = null;
+    }
+
     cleanup();
     abortControllerRef.current = new AbortController();
+    const requestId = (activeRequestIdRef.current += 1);
     isFetchingRef.current = true;
     
     try {
@@ -340,6 +382,11 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       );
       
       if (!mountedRef.current || result === null) {
+        return;
+      }
+
+      // Stale-request guard
+      if (requestId !== activeRequestIdRef.current) {
         return;
       }
 
@@ -365,6 +412,11 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
       }
     } catch (err) {
       if (!mountedRef.current) return;
+
+      // Stale-request guard
+      if (requestId !== activeRequestIdRef.current) {
+        return;
+      }
       
       if (err instanceof Error && err.name === 'AbortError') {
         console.log('Request aborted:', err.message);
@@ -378,7 +430,8 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
         setData(null);
       }
     } finally {
-      if (mountedRef.current) {
+      // Only the latest request should be able to flip loading/isFetching
+      if (mountedRef.current && requestId === activeRequestIdRef.current) {
         setLoading(false);
         isFetchingRef.current = false;
       }

@@ -1,8 +1,18 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import TensorFlowAIService from '../services/tensorFlowAIService';
 
-// Create a singleton instance
-const tensorFlowService = new TensorFlowAIService();
+let tensorFlowService: any | null = null;
+let tensorFlowServicePromise: Promise<any> | null = null;
+
+const getTensorFlowService = async () => {
+  if (tensorFlowService) return tensorFlowService;
+  if (!tensorFlowServicePromise) {
+    tensorFlowServicePromise = import('../services/tensorFlowAIService').then(mod => {
+      tensorFlowService = new mod.default();
+      return tensorFlowService;
+    });
+  }
+  return tensorFlowServicePromise;
+};
 
 interface TensorFlowContextType {
   isReady: boolean;
@@ -48,14 +58,15 @@ export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children
       console.log('🤖 TensorFlow Context: Initializing...');
       
       // Initialize the service
-      await tensorFlowService.initialize();
+      const svc = await getTensorFlowService();
+      await svc.initialize();
       
       // Check if it's ready
-      const ready = tensorFlowService.isReady();
+      const ready = svc.isReady();
       setIsReady(ready);
       
       if (ready) {
-        const info = tensorFlowService.getModelInfo();
+        const info = svc.getModelInfo();
         setModelInfo(info);
         console.log('✅ TensorFlow Context: Initialization successful', info);
       } else {
@@ -96,7 +107,8 @@ export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children
     }
 
     try {
-      return await tensorFlowService.analyzeGlucosePatterns(readings);
+      const svc = await getTensorFlowService();
+      return await svc.analyzeGlucosePatterns(readings);
     } catch (error) {
       console.error('TensorFlow analysis failed:', error);
       throw error;

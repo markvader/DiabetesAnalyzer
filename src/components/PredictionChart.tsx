@@ -8,6 +8,8 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { predictGlucose } from '../services/patternDetectionService';
 import { aiService } from '../services/aiService';
+import { safeJsonParseFromText } from '../utils/safeJson';
+import { asNumber } from '../services/aiValidation';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -233,15 +235,28 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
         
         // Try to parse JSON from the response
         try {
-          // Extract JSON if it's wrapped in markdown code blocks
-          const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/) || content.match(/\[([\s\S]*?)\]/);
-          const jsonString = jsonMatch ? jsonMatch[0] : content;
-          const result = JSON.parse(jsonString);
+          const parsed = safeJsonParseFromText(String(content ?? ''));
+          if (!parsed.ok) {
+            console.error(`Failed to parse ${provider.name} prediction response:`, parsed.error);
+            continue;
+          }
+
+          const value = parsed.value as any;
+          const candidateArray: unknown[] = Array.isArray(value)
+            ? value
+            : Array.isArray(value?.predictions)
+              ? value.predictions
+              : Array.isArray(value?.prediction)
+                ? value.prediction
+                : [];
           
           console.log(`${provider.name} prediction successful`);
           
           // Ensure we have exactly 36 predictions
-          const validPredictions = Array.isArray(result) ? result.slice(0, 36) : [];
+          const lastSgv = recentReadings[recentReadings.length - 1]?.sgv ?? 100;
+          const validPredictions = candidateArray
+            .map(v => asNumber(v, lastSgv, 40, 400))
+            .slice(0, 36);
           while (validPredictions.length < 36) {
             // If we don't have enough predictions, extrapolate from the last ones
             if (validPredictions.length >= 2) {

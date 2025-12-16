@@ -19,6 +19,16 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // This repo currently uses `any` extensively (Nightscout payloads, ML outputs, etc.).
+      // Treating it as an error produces excessive noise and hides actionable issues.
+      '@typescript-eslint/no-explicit-any': 'off',
+      // Allow intentionally-unused variables/args when prefixed with `_`.
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }
+      ],
+      // Empty catch blocks are sometimes used to ignore localStorage access failures.
+      'no-empty': ['error', { allowEmptyCatch: true }],
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },

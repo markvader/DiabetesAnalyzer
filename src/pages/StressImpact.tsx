@@ -4,7 +4,6 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Brain, Calendar, Clock, AlertTriangle, Activity, TrendingUp, Heart, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { toMmol } from '../utils/glucoseUtils';
 import { aiService } from '../services/aiService';
 import { formatCostEstimate, getModelById } from '../constants/openaiModels';
 
@@ -79,7 +78,7 @@ const StressImpact = () => {
     };
     
     analyzeStress();
-  }, [filteredReadings, manualRefresh]);
+  }, [filteredReadings, manualRefresh, stressAnalysis, unit, formatGlucoseValue, getUnitLabel]);
 
   // Helper functions
   const getUsageLabel = () => {

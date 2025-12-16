@@ -62,6 +62,8 @@ const Dashboard = () => {
   const { showDeviceStatus } = useDashboardDisplay();
   const { formatGlucoseValue, convertToCurrentUnit, getCurrentGlucoseRanges, getUnitLabel } = useGlucoseFormatting();
   const { isReady: tensorFlowReady, isEnabled: tensorFlowEnabled } = useTensorFlow();
+
+  const currentRanges = useMemo(() => getCurrentGlucoseRanges(), [getCurrentGlucoseRanges]);
   
   // State for advanced prediction chart
   const [hasApiKey, setHasApiKey] = useState(false);
@@ -84,25 +86,74 @@ const Dashboard = () => {
   }, []);
 
   // Generate prediction context from Nightscout data
-  const getDefaultTimeOfDay = (): 'morning' | 'afternoon' | 'evening' | 'night' => {
+  const getDefaultTimeOfDay = useCallback((): 'morning' | 'afternoon' | 'evening' | 'night' => {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) return 'morning';
     if (hour >= 12 && hour < 17) return 'afternoon';
     if (hour >= 17 && hour < 21) return 'evening';
     return 'night';
-  };
+  }, []);
 
-  const predictionContext = parsedNightscoutData ? {
-    recentMeals: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentMeals || [] : [],
-    recentInsulin: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentInsulin || [] : [],
-    recentExercise: parsedNightscoutData ? nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).recentExercise || [] : [],
-    timeOfDay: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).timeOfDay || getDefaultTimeOfDay(),
-    dayOfWeek: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).dayOfWeek || new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-    isWeekend: nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData).isWeekend ?? [0, 6].includes(new Date().getDay()),
-  } : undefined;
+  const generatedPredictionContext = useMemo(() => {
+    if (!parsedNightscoutData) return undefined;
+    return nightscoutTreatmentParser.generatePredictionContext(parsedNightscoutData);
+  }, [parsedNightscoutData]);
+
+  const predictionContext = useMemo(() => {
+    if (!generatedPredictionContext) return undefined;
+    const now = new Date();
+    return {
+      recentMeals: generatedPredictionContext.recentMeals || [],
+      recentInsulin: generatedPredictionContext.recentInsulin || [],
+      recentExercise: generatedPredictionContext.recentExercise || [],
+      timeOfDay: generatedPredictionContext.timeOfDay || getDefaultTimeOfDay(),
+      dayOfWeek: generatedPredictionContext.dayOfWeek || now.toLocaleDateString('en-US', { weekday: 'long' }),
+      isWeekend: generatedPredictionContext.isWeekend ?? [0, 6].includes(now.getDay()),
+    };
+  }, [generatedPredictionContext, getDefaultTimeOfDay]);
+
+  const entriesSortedAsc = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const lowerBoundByDate = useCallback((entries: Array<{ date: number }>, cutoffTime: number) => {
+    let low = 0;
+    let high = entries.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (entries[mid].date < cutoffTime) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }, []);
+
+  const upperBoundByDate = useCallback((entries: Array<{ date: number }>, cutoffTime: number) => {
+    let low = 0;
+    let high = entries.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (entries[mid].date <= cutoffTime) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }, []);
+
+  const sliceEntriesByDateRange = useCallback((entries: Array<{ date: number }>, startTime: number, endTime: number) => {
+    if (entries.length === 0) return [];
+    const startIndex = lowerBoundByDate(entries, startTime);
+    const endIndex = upperBoundByDate(entries, endTime);
+    return entries.slice(startIndex, endIndex);
+  }, [lowerBoundByDate, upperBoundByDate]);
 
   // Generate treatment timeline data
-  const generateTimelineData = () => {
+  const timelineData = useMemo(() => {
     if (!data?.treatments || !parsedNightscoutData) return [];
 
     const timelineItems: Array<{
@@ -198,27 +249,28 @@ const Dashboard = () => {
     });
 
     return timelineItems.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  };
+  }, [data?.treatments, parsedNightscoutData]);
 
-  const timelineData = generateTimelineData();
+  const predictionInsights = useMemo(() => {
+    if (entriesSortedAsc.length === 0) return {};
 
-  // Calculate prediction insights
-  const calculatePredictionInsights = () => {
-    if (!data?.entries || data.entries.length === 0) return {};
+    const currentGlucoseMgdl = entriesSortedAsc[entriesSortedAsc.length - 1]?.sgv || 0;
+    const currentGlucoseCurrentUnit = convertToCurrentUnit(currentGlucoseMgdl, 'mgdl');
 
-    const ranges = getCurrentGlucoseRanges();
-    const currentGlucose = data.entries[data.entries.length - 1]?.sgv || 0;
-    const last24Hours = data.entries.slice(-288); // 24 hours of 5-min readings
-    const inRangeReadings = last24Hours.filter(r => r.sgv >= ranges.TARGET_MIN && r.sgv <= ranges.TARGET_MAX);
-    const timeInRange = Math.round((inRangeReadings.length / last24Hours.length) * 100);
+    const last24Hours = entriesSortedAsc.slice(-288); // 24 hours of ~5-min readings
+    const inRangeReadings = last24Hours.filter(r => {
+      const glucoseInCurrentUnit = convertToCurrentUnit(r.sgv, 'mgdl');
+      return glucoseInCurrentUnit >= currentRanges.TARGET_MIN && glucoseInCurrentUnit <= currentRanges.TARGET_MAX;
+    });
+    const timeInRange = Math.round((inRangeReadings.length / Math.max(1, last24Hours.length)) * 100);
 
     // Simple trend calculation
-    const recentReadings = data.entries.slice(-6); // Last 30 minutes
+    const recentReadings = entriesSortedAsc.slice(-6); // Last ~30 minutes
     if (recentReadings.length >= 2) {
       const latest = recentReadings[recentReadings.length - 1];
       const previous = recentReadings[0];
       const change = latest.sgv - previous.sgv;
-      const rate = change / 30; // per minute
+      const rate = change / 30; // mg/dL per minute
 
       return {
         timeInRange,
@@ -226,22 +278,20 @@ const Dashboard = () => {
         recentTrends: {
           direction: (Math.abs(change) < 10 ? 'stable' : change > 0 ? 'rising' : 'falling') as 'stable' | 'rising' | 'falling',
           rate,
-          prediction1h: currentGlucose + (rate * 60),
-          prediction3h: currentGlucose + (rate * 180)
+          prediction1h: currentGlucoseMgdl + (rate * 60),
+          prediction3h: currentGlucoseMgdl + (rate * 180)
         },
         riskLevel: 
-          currentGlucose < ranges.LOW_THRESHOLD || currentGlucose > ranges.HIGH_THRESHOLD 
+          currentGlucoseCurrentUnit < currentRanges.LOW_THRESHOLD || currentGlucoseCurrentUnit > currentRanges.HIGH_THRESHOLD 
             ? 'high' as const
-            : currentGlucose < ranges.TARGET_MIN || currentGlucose > ranges.TARGET_MAX 
+            : currentGlucoseCurrentUnit < currentRanges.TARGET_MIN || currentGlucoseCurrentUnit > currentRanges.TARGET_MAX 
             ? 'moderate' as const
             : 'low' as const
       };
     }
 
     return { timeInRange, confidence: 75 };
-  };
-
-  const predictionInsights = calculatePredictionInsights();
+  }, [entriesSortedAsc, convertToCurrentUnit, currentRanges]);
   
   // Cache for CAGE and SAGE values to prevent them from disappearing during refresh
   const lastKnownCageRef = useRef<number | null>(null);
@@ -421,33 +471,29 @@ const Dashboard = () => {
     }
   }, [data, loading]);
   
-  const getMostRecentReading = useCallback(() => {
-    if (!data?.entries?.length) return null;
-    return [...data.entries].sort((a, b) => b.date - a.date)[0];
-  }, [data?.entries]);
-  
-  const recentReading = useMemo(() => getMostRecentReading(), [getMostRecentReading]);
+  const recentReading = useMemo(() => {
+    if (entriesSortedAsc.length === 0) return null;
+    return entriesSortedAsc[entriesSortedAsc.length - 1];
+  }, [entriesSortedAsc]);
 
   // Calculate delta (change from previous reading)
-  const getDelta = useCallback(() => {
-    if (!data?.entries?.length || data.entries.length < 2) return null;
-    
-    const sortedEntries = [...data.entries].sort((a, b) => b.date - a.date);
-    const current = sortedEntries[0];
-    const previous = sortedEntries[1];
-    
+  const delta = useMemo(() => {
+    if (entriesSortedAsc.length < 2) return null;
+
+    const current = entriesSortedAsc[entriesSortedAsc.length - 1];
+    const previous = entriesSortedAsc[entriesSortedAsc.length - 2];
     if (!current || !previous) return null;
-    
+
     const deltaValue = current.sgv - previous.sgv;
     const deltaInCurrentUnit = convertToCurrentUnit(deltaValue, 'mgdl');
-    
+
     return {
       value: deltaValue,
       valueInCurrentUnit: deltaInCurrentUnit,
       formatted: `${deltaValue > 0 ? '+' : ''}${formatGlucoseValue(deltaValue, 'mgdl', false)}`,
       formattedInCurrentUnit: `${deltaInCurrentUnit > 0 ? '+' : ''}${deltaInCurrentUnit.toFixed(1)} ${getUnitLabel()}`
     };
-  }, [data?.entries, convertToCurrentUnit, formatGlucoseValue, getUnitLabel]);
+  }, [entriesSortedAsc, convertToCurrentUnit, formatGlucoseValue, getUnitLabel]);
 
   // Get most recent device status
   const getMostRecentDeviceStatus = useCallback(() => {
@@ -459,6 +505,7 @@ const Dashboard = () => {
   
   // Debug: Log device status to console to see what data is available
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     console.log('🚀 Dashboard Debug - Checking data:', {
       hasData: !!data,
       hasDeviceStatus: !!data?.deviceStatus,
@@ -530,20 +577,19 @@ const Dashboard = () => {
   }, [recentDeviceStatus, data]);
   // Calculate available data span
   const dataSpanInfo = useMemo(() => {
-    if (!data?.entries?.length) return null;
-    
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    if (entriesSortedAsc.length === 0) return null;
+
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
     
     return {
       oldestDate: new Date(oldestEntry.date),
       newestDate: new Date(newestEntry.date),
       spanDays,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
 
   // Check if we have enough data for the requested time window
   const hasEnoughData = useCallback((requestedDays: number) => {
@@ -554,31 +600,34 @@ const Dashboard = () => {
     return dataSpanInfo.spanDays >= requiredDays;
   }, [dataSpanInfo]);
 
-  // Ultra-fast filtering with intelligent sampling - FOR STATISTICS
-  const filteredReadings = useMemo(() => {
-    if (!data?.entries?.length) {
-      return [];
-    }
+  const baseWindowReadings = useMemo(() => {
+    if (entriesSortedAsc.length === 0) return [];
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    let filtered;
-    
     if (isCustomRange) {
       const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
       const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      filtered = sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      filtered = sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
+      return sliceEntriesByDateRange(entriesSortedAsc, startTime, endTime);
     }
+
+    const now = Date.now();
+    const timeWindowMs = timeWindow * 60 * 60 * 1000;
+    const cutoffTime = now - timeWindowMs;
+    const startIndex = lowerBoundByDate(entriesSortedAsc, cutoffTime);
+    return entriesSortedAsc.slice(startIndex);
+  }, [
+    entriesSortedAsc,
+    isCustomRange,
+    customDateRange,
+    timeWindow,
+    lowerBoundByDate,
+    sliceEntriesByDateRange,
+  ]);
+
+  // Ultra-fast filtering with intelligent sampling - FOR STATISTICS
+  const filteredReadings = useMemo(() => {
+    if (baseWindowReadings.length === 0) return [];
+
+    const filtered = baseWindowReadings;
 
     // For very large datasets, intelligently sample for UI responsiveness
     if (filtered.length > 5000) {
@@ -587,54 +636,52 @@ const Dashboard = () => {
       for (let i = 0; i < filtered.length; i += step) {
         sampled.push(filtered[i]);
       }
-      console.log(`📊 Dashboard: Sampled ${sampled.length} from ${filtered.length} readings for UI performance`);
+      if (import.meta.env.DEV) {
+        console.log(`📊 Dashboard: Sampled ${sampled.length} from ${filtered.length} readings for UI performance`);
+      }
       return sampled;
     }
 
     return filtered;
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+  }, [baseWindowReadings]);
 
   // NEW: Chart-specific filtering - ALWAYS LIMITED TO 2 WEEKS MAX
   const chartReadings = useMemo(() => {
-    if (!data?.entries?.length) {
-      return [];
-    }
+    if (entriesSortedAsc.length === 0) return [];
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
     const now = Date.now();
-    
-    // Calculate the effective time window for charts (max 14 days = 336 hours)
-    let chartTimeWindow = timeWindow;
-    
+    const max14DaysMs = 14 * 24 * 60 * 60 * 1000;
+    const chartCutoffTime = now - max14DaysMs;
+
+    let chartFiltered = baseWindowReadings;
+
     if (isCustomRange) {
       const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
       const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
       const rangeDays = Math.round((endTime - startTime) / (1000 * 60 * 60 * 24));
-      
-      // If custom range is more than 14 days, show only the last 14 days
+
+      // If custom range is more than 14 days, show only the last 14 days (preserve prior behavior)
       if (rangeDays > 14) {
-        chartTimeWindow = 336; // 14 days in hours
-        console.log(`📊 Chart limit: Custom range is ${rangeDays} days, limiting charts to last 14 days`);
+        if (import.meta.env.DEV) {
+          console.log(`📊 Chart limit: Custom range is ${rangeDays} days, limiting charts to last 14 days`);
+        }
+        const startIndex = lowerBoundByDate(entriesSortedAsc, chartCutoffTime);
+        chartFiltered = entriesSortedAsc.slice(startIndex);
       } else {
         // For custom ranges <= 14 days, use the actual range
-        const startTime14Days = Math.max(startTime, now - (14 * 24 * 60 * 60 * 1000));
-        return sortedEntries.filter(reading => {
-          return reading.date >= startTime14Days && reading.date <= endTime;
-        });
+        const startTime14Days = Math.max(startTime, chartCutoffTime);
+        chartFiltered = sliceEntriesByDateRange(baseWindowReadings, startTime14Days, endTime);
       }
     } else {
-      // For time window selections, limit to max 14 days (336 hours)
+      // For time window selections, limit to max 14 days
       if (timeWindow > 336) {
-        chartTimeWindow = 336; // 14 days in hours
-        console.log(`📊 Chart limit: Selected ${timeWindow/24} days, limiting charts to 14 days`);
+        if (import.meta.env.DEV) {
+          console.log(`📊 Chart limit: Selected ${timeWindow/24} days, limiting charts to 14 days`);
+        }
+        const startIndex = lowerBoundByDate(baseWindowReadings, chartCutoffTime);
+        chartFiltered = baseWindowReadings.slice(startIndex);
       }
     }
-    
-    // Apply the chart time window (max 14 days)
-    const chartTimeWindowMs = chartTimeWindow * 60 * 60 * 1000;
-    const chartCutoffTime = now - chartTimeWindowMs;
-    
-    const chartFiltered = sortedEntries.filter(reading => reading.date >= chartCutoffTime);
     
     // For very large datasets, intelligently sample for chart performance
     if (chartFiltered.length > 3000) {
@@ -643,12 +690,22 @@ const Dashboard = () => {
       for (let i = 0; i < chartFiltered.length; i += step) {
         sampled.push(chartFiltered[i]);
       }
-      console.log(`📊 Chart sampling: ${sampled.length} from ${chartFiltered.length} readings for optimal chart performance`);
+      if (import.meta.env.DEV) {
+        console.log(`📊 Chart sampling: ${sampled.length} from ${chartFiltered.length} readings for optimal chart performance`);
+      }
       return sampled;
     }
 
     return chartFiltered;
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+  }, [
+    entriesSortedAsc,
+    baseWindowReadings,
+    timeWindow,
+    isCustomRange,
+    customDateRange,
+    lowerBoundByDate,
+    sliceEntriesByDateRange,
+  ]);
 
   // Ultra-fast stats calculation - uses full filtered data for accuracy
   const filteredStats = useMemo(() => {
@@ -665,8 +722,7 @@ const Dashboard = () => {
     let inRange = 0, high = 0, low = 0;
     let totalGlucose = 0;
     
-    // Get current glucose ranges for the selected unit
-    const ranges = getCurrentGlucoseRanges();
+    const ranges = currentRanges;
 
     // Use for loop for maximum performance
     for (let i = 0; i < filteredReadings.length; i++) {
@@ -701,16 +757,18 @@ const Dashboard = () => {
     };
     
     // Debug logging to ensure we're not returning objects
-    console.log('📊 filteredStats calculation result:', {
-      timeInRange: { value: result.timeInRange, type: typeof result.timeInRange },
-      highPercentage: { value: result.highPercentage, type: typeof result.highPercentage },
-      lowPercentage: { value: result.lowPercentage, type: typeof result.lowPercentage },
-      averageBG: { value: result.averageBG, type: typeof result.averageBG },
-      totalReadings: { value: result.totalReadings, type: typeof result.totalReadings }
-    });
+    if (import.meta.env.DEV) {
+      console.log('📊 filteredStats calculation result:', {
+        timeInRange: { value: result.timeInRange, type: typeof result.timeInRange },
+        highPercentage: { value: result.highPercentage, type: typeof result.highPercentage },
+        lowPercentage: { value: result.lowPercentage, type: typeof result.lowPercentage },
+        averageBG: { value: result.averageBG, type: typeof result.averageBG },
+        totalReadings: { value: result.totalReadings, type: typeof result.totalReadings }
+      });
+    }
     
     return result;
-  }, [filteredReadings]);
+  }, [filteredReadings, convertToCurrentUnit, currentRanges]);
 
   const handleAlertSettingsSave = (settings: any) => {
     console.log('Alert settings saved:', settings);
@@ -2301,7 +2359,6 @@ const Dashboard = () => {
           value={ultraSafeRender(recentReading ? formatGlucoseValue(recentReading.sgv, 'mgdl', true) : 'N/A')} 
           icon={<Activity className="h-6 w-6" />}
           description={(() => {
-            const delta = getDelta();
             const timeDesc = recentReading ? `As of ${format(new Date(recentReading.date), 'HH:mm')}` : '';
             const deltaDesc = delta ? ` (${delta.formattedInCurrentUnit})` : '';
             return timeDesc + deltaDesc;
@@ -2321,7 +2378,7 @@ const Dashboard = () => {
           title="Time in Range" 
           value={ultraSafeRender(filteredStats.totalReadings > 0 ? safePercentage(filteredStats.timeInRange) : 'N/A')} 
           icon={<Clock className="h-6 w-6" />}
-          description={`${getCurrentGlucoseRanges().TARGET_MIN}-${getCurrentGlucoseRanges().TARGET_MAX} ${getUnitLabel()} (${getDisplayLabel()})`}
+          description={`${currentRanges.TARGET_MIN}-${currentRanges.TARGET_MAX} ${getUnitLabel()} (${getDisplayLabel()})`}
         />
         <StatCard 
           title={`Readings`}
@@ -2418,7 +2475,7 @@ const Dashboard = () => {
                     margin: '0 0 4px 0'
                   }}>
                     {ultraSafeRender((() => {
-                      let iobValue = recentDeviceStatus.iob || 
+                      const iobValue = recentDeviceStatus.iob || 
                                    recentDeviceStatus.openaps?.iob || 
                                    recentDeviceStatus.loop?.iob ||
                                    recentDeviceStatus.pump?.iob;
@@ -2483,7 +2540,7 @@ const Dashboard = () => {
                     margin: '0 0 4px 0'
                   }}>
                     {ultraSafeRender((() => {
-                      let cobValue = recentDeviceStatus.cob || 
+                      const cobValue = recentDeviceStatus.cob || 
                                    recentDeviceStatus.openaps?.cob || 
                                    recentDeviceStatus.loop?.cob ||
                                    recentDeviceStatus.pump?.cob;
@@ -2545,7 +2602,7 @@ const Dashboard = () => {
                     margin: '0 0 4px 0'
                   }}>
                     {ultraSafeRender((() => {
-                      let basalValue = recentDeviceStatus.basalRate || 
+                      const basalValue = recentDeviceStatus.basalRate || 
                                      recentDeviceStatus.openaps?.basal || 
                                      recentDeviceStatus.loop?.basal ||
                                      recentDeviceStatus.pump?.basal;
@@ -2601,7 +2658,7 @@ const Dashboard = () => {
                     margin: '0 0 4px 0'
                   }}>
                     {ultraSafeRender((() => {
-                      let cageValue = recentDeviceStatus.cage || 
+                      const cageValue = recentDeviceStatus.cage || 
                                     recentDeviceStatus.openaps?.cage || 
                                     recentDeviceStatus.loop?.cage ||
                                     recentDeviceStatus.pump?.cage;
@@ -2660,7 +2717,7 @@ const Dashboard = () => {
                     margin: '0 0 4px 0'
                   }}>
                     {ultraSafeRender((() => {
-                      let sageValue = recentDeviceStatus.sage || 
+                      const sageValue = recentDeviceStatus.sage || 
                                     recentDeviceStatus.openaps?.sage || 
                                     recentDeviceStatus.loop?.sage ||
                                     recentDeviceStatus.pump?.sage;
@@ -2695,7 +2752,7 @@ const Dashboard = () => {
               <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">IOB</h4>
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
                 {ultraSafeRender((() => {
-                  let iobValue = recentDeviceStatus.iob || 
+                  const iobValue = recentDeviceStatus.iob || 
                                recentDeviceStatus.openaps?.iob || 
                                recentDeviceStatus.loop?.iob ||
                                recentDeviceStatus.pump?.iob;

@@ -1,4 +1,6 @@
 import { aiService } from './aiService';
+import { safeJsonParseFromText } from '../utils/safeJson';
+import { asNumber, asStringArray } from './aiValidation';
 
 export interface GlucoseReading {
   sgv: number;
@@ -221,28 +223,30 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
 
   private parseAIResponse(response: string, readings: GlucoseReading[]): PredictionResult {
     try {
-      // Extract JSON from the response
-      const jsonMatch = response.match(/\{[\s\S]*\}/) || response.match(/```json\n([\s\S]*?)\n```/);
-      const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : response;
-      const parsed = JSON.parse(jsonString);
+      const parsedJson = safeJsonParseFromText(String(response ?? ''));
+      if (!parsedJson.ok) {
+        throw new Error(parsedJson.error);
+      }
+
+      const parsed = (typeof parsedJson.value === 'object' && parsedJson.value !== null) ? (parsedJson.value as any) : {};
       
       // Validate and sanitize the parsed data
       return {
         predictions: this.validatePredictionArray(parsed.predictions, readings),
         highScenario: this.validatePredictionArray(parsed.highScenario, readings),
         lowScenario: this.validatePredictionArray(parsed.lowScenario, readings),
-        confidence: Math.min(100, Math.max(0, parsed.confidence || 75)),
-        riskFactors: Array.isArray(parsed.riskFactors) ? parsed.riskFactors : [],
-        recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
+        confidence: asNumber(parsed.confidence, 75, 0, 100),
+        riskFactors: asStringArray(parsed.riskFactors, 12),
+        recommendations: asStringArray(parsed.recommendations, 12),
         trendAnalysis: {
           shortTerm: this.validateTrend(parsed.trendAnalysis?.shortTerm),
           mediumTerm: this.validateTrend(parsed.trendAnalysis?.mediumTerm),
           longTerm: this.validateTrend(parsed.trendAnalysis?.longTerm)
         },
         timeInRangePrediction: {
-          next1Hour: Math.min(100, Math.max(0, parsed.timeInRangePrediction?.next1Hour || 80)),
-          next2Hours: Math.min(100, Math.max(0, parsed.timeInRangePrediction?.next2Hours || 75)),
-          next3Hours: Math.min(100, Math.max(0, parsed.timeInRangePrediction?.next3Hours || 70))
+          next1Hour: asNumber(parsed.timeInRangePrediction?.next1Hour, 80, 0, 100),
+          next2Hours: asNumber(parsed.timeInRangePrediction?.next2Hours, 75, 0, 100),
+          next3Hours: asNumber(parsed.timeInRangePrediction?.next3Hours, 70, 0, 100)
         },
         alertPredictions: {
           lowAlerts: this.validateAlerts(parsed.alertPredictions?.lowAlerts),

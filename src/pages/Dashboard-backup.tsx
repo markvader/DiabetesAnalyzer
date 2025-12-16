@@ -1270,7 +1270,7 @@ const Dashboard = () => {
               <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">IOB</h4>
               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
                 {ultraSafeRender((() => {
-                  let iobValue = recentDeviceStatus.iob || 
+                  const iobValue = recentDeviceStatus.iob || 
                                recentDeviceStatus.openaps?.iob || 
                                recentDeviceStatus.loop?.iob ||
                                recentDeviceStatus.pump?.iob;

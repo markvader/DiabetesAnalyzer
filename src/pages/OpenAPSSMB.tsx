@@ -78,7 +78,7 @@ const OpenAPSSMB = () => {
     };
   }, [data, timeWindow, isCustomRange, customDateRange]);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     // Run automatically on initial load (default 2 weeks) or when manual refresh is triggered
     if (filteredData && (!hasInitialLoad || manualRefresh)) {

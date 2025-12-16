@@ -1,6 +1,8 @@
 import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
-import TensorFlowAIService from './tensorFlowAIService';
+import type TensorFlowAIService from './tensorFlowAIService';
 import GeminiService from './geminiService';
+import { safeJsonParseFromText } from '../utils/safeJson';
+import { asNumber, asRiskAssessment, asStringArray, normalizeDetails } from './aiValidation';
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -19,7 +21,8 @@ export interface CustomGlucoseRanges {
 
 class AIService {
   providers: any[] = [];
-  private tensorFlowService: TensorFlowAIService;
+  private tensorFlowService: TensorFlowAIService | null = null;
+  private tensorFlowServicePromise: Promise<TensorFlowAIService> | null = null;
   private geminiService: GeminiService;
 
   private storeLastAICost(info: {
@@ -42,9 +45,28 @@ class AIService {
   }
 
   constructor() {
-    this.tensorFlowService = new TensorFlowAIService();
     this.geminiService = new GeminiService();
     this.initializeProviders();
+  }
+
+  private isTensorFlowEnabledByUserPref(): boolean {
+    const stored = localStorage.getItem('tensorflow_enabled');
+    return stored === null ? true : stored === 'true';
+  }
+
+  private async getTensorFlowServiceAsync(): Promise<TensorFlowAIService | null> {
+    if (!this.isTensorFlowEnabledByUserPref()) return null;
+    if (this.tensorFlowService) return this.tensorFlowService;
+
+    if (!this.tensorFlowServicePromise) {
+      this.tensorFlowServicePromise = import('./tensorFlowAIService').then(mod => {
+        const svc = new mod.default();
+        this.tensorFlowService = svc;
+        return svc;
+      });
+    }
+
+    return this.tensorFlowServicePromise;
   }
 
   private initializeProviders() {
@@ -112,13 +134,15 @@ class AIService {
   async testAPIKeys() {
     // Reinitialize providers to get the latest API keys
     this.initializeProviders();
+
+    const tfService = await this.getTensorFlowServiceAsync();
     
     const results = {
       openai: false,
       gemini: false,
       deepseek: false,
       anthropic: false,
-      tensorflow: this.tensorFlowService.isReady()
+      tensorflow: tfService?.isReady?.() ?? false
     };
 
     console.log(`TensorFlow AI Service status: ${results.tensorflow ? 'Ready' : 'Not Ready'}`);
@@ -222,7 +246,7 @@ class AIService {
   }
 
   // Get TensorFlow service for settings access
-  getTensorFlowService(): TensorFlowAIService {
+  getTensorFlowService(): TensorFlowAIService | null {
     return this.tensorFlowService;
   }
 
@@ -238,11 +262,12 @@ class AIService {
 
   // Get TensorFlow info
   getTensorFlowInfo(): any {
+    const svc = this.tensorFlowService;
     return {
-      isReady: this.tensorFlowService.isReady(),
-      isEnabled: this.tensorFlowService.isTensorFlowEnabledByUser(),
-      shouldUse: this.tensorFlowService.shouldUseTensorFlow(),
-      modelInfo: this.tensorFlowService.getModelInfo()
+      isReady: svc?.isReady?.() ?? false,
+      isEnabled: svc?.isTensorFlowEnabledByUser?.() ?? this.isTensorFlowEnabledByUserPref(),
+      shouldUse: svc?.shouldUseTensorFlow?.() ?? false,
+      modelInfo: svc?.getModelInfo?.() ?? null
     };
   }
 
@@ -259,10 +284,11 @@ class AIService {
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for glucose pattern analysis');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
+          const result = await tfService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
             const stats = this.calculateBasicStats(readings);
             const tir = this.coerceTimeInRangePercent(timeInRange, result?.patterns?.timeInRange);
@@ -462,39 +488,43 @@ class AIService {
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} glucose analysis successful`);
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} glucose analysis: non-JSON response; using safe fallback`);
+            }
 
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({
-                  provider: provider.name,
-                  model: provider.model,
-                  tokenUsage,
-                  costUSD
-                });
-              }
-              
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                riskAssessment: result.riskAssessment || 'medium',
-                confidence: result.confidence || 70,
-                    details: result.details || null,
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} glucose analysis successful`);
+
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
                 costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+              });
             }
+            
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              riskAssessment: asRiskAssessment(result.riskAssessment, 'medium'),
+              confidence: asNumber(result.confidence, 70, 0, 100),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} analysis failed:`, error);
             continue;
@@ -515,7 +545,8 @@ class AIService {
   // Generate management plan
   async generateManagementPlan(readings: any[], _treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
     // Priority 1: TensorFlow (offline) when available
-    if (this.tensorFlowService.shouldUseTensorFlow()) {
+    const tfService = await this.getTensorFlowServiceAsync();
+    if (tfService?.shouldUseTensorFlow()) {
       try {
         const stats = this.calculateBasicStats(readings);
         const timeInRange = this.calculateTimeInRange(readings, customGlucoseRanges);
@@ -523,7 +554,7 @@ class AIService {
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
         const ranges = glucoseContext?.getCurrentGlucoseRanges?.() || { TARGET_MIN: 70, TARGET_MAX: 180, LOW_THRESHOLD: 54 };
 
-        const tf = await this.tensorFlowService.analyzeGlucoseData(readings, _treatments);
+  const tf = await tfService.analyzeGlucoseData(readings, _treatments);
 
         const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
         const costUSD = 0;
@@ -700,7 +731,8 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for meal analysis');
         try {
           const carbTreatments = treatments.filter(t => t.carbs && t.carbs > 0);
@@ -911,31 +943,35 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} meal analysis successful`);
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
-              }
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                mealTiming: result.mealTiming || [],
-                details: result.details || null,
-                provider: provider.name,
-                model: provider.model,
-                tokenUsage,
-                costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} meal analysis: non-JSON response; using safe fallback`);
             }
+
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} meal analysis successful`);
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+            }
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              mealTiming: asStringArray(result.mealTiming, 12),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} meal analysis failed:`, error);
             continue;
@@ -962,10 +998,11 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for exercise analysis');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
+          const result = await tfService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
             const stats = this.calculateBasicStats(readings);
             const rapidRises = this.countRapidGlucoseRises(readings);
@@ -1175,33 +1212,37 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} exercise analysis successful`);
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
-              }
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                exerciseTypes: result.exerciseTypes || [],
-                rapidRises: result.rapidRises || 0,
-                variability: result.variability || stats.cv,
-                details: result.details || null,
-                provider: provider.name,
-                model: provider.model,
-                tokenUsage,
-                costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} exercise analysis: non-JSON response; using safe fallback`);
             }
+
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} exercise analysis successful`);
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+            }
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              exerciseTypes: asStringArray(result.exerciseTypes, 12),
+              rapidRises: asNumber(result.rapidRises, 0, 0),
+              variability: asNumber(result.variability, stats.cv, 0),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} exercise analysis failed:`, error);
             continue;
@@ -1227,10 +1268,11 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for sleep analysis');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
+          const result = await tfService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
             const nightReadings = readings.filter(r => {
               const hour = new Date(r.date).getHours();
@@ -1449,33 +1491,37 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} sleep analysis successful`);
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
-              }
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                sleepQualityScore: result.sleepQualityScore || 75,
-                dawnPhenomenon: result.dawnPhenomenon || dawnEffect,
-                sleepDisruptions: result.sleepDisruptions || 1,
-                details: result.details || null,
-                provider: provider.name,
-                model: provider.model,
-                tokenUsage,
-                costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} sleep analysis: non-JSON response; using safe fallback`);
             }
+
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} sleep analysis successful`);
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+            }
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              sleepQualityScore: asNumber(result.sleepQualityScore, 75, 0, 100),
+              dawnPhenomenon: asNumber(result.dawnPhenomenon, dawnEffect),
+              sleepDisruptions: asNumber(result.sleepDisruptions, 1, 0),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} sleep analysis failed:`, error);
             continue;
@@ -1501,10 +1547,11 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for stress analysis');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
+          const result = await tfService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
             const stats = this.calculateBasicStats(readings);
             const rapidRises = this.countRapidGlucoseRises(readings);
@@ -1704,34 +1751,43 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} stress analysis successful`);
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
-              }
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                stressImpactScore: result.stressImpactScore ?? 50,
-                rapidRises: result.rapidRises ?? rapidRises,
-                variability: result.variability ?? stats.cv,
-                potentialStressTimes: result.potentialStressTimes || this.estimateStressPeriods(readings, stats.cv),
-                details: result.details || null,
-                provider: provider.name,
-                model: provider.model,
-                tokenUsage,
-                costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} stress analysis: non-JSON response; using safe fallback`);
             }
+
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} stress analysis successful`);
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+            }
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              stressImpactScore: asNumber(result.stressImpactScore, 50, 0, 100),
+              rapidRises: asNumber(result.rapidRises, rapidRises, 0),
+              variability: asNumber(result.variability, stats.cv, 0),
+              potentialStressTimes: asStringArray(
+                result.potentialStressTimes,
+                12
+              ).length
+                ? asStringArray(result.potentialStressTimes, 12)
+                : this.estimateStressPeriods(readings, stats.cv),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} stress analysis failed:`, error);
             continue;
@@ -1758,10 +1814,11 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     try {
       // Priority 1: TensorFlow (if enabled and ready)
-      if (this.tensorFlowService.shouldUseTensorFlow()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.shouldUseTensorFlow()) {
         console.log('🤖 Using TensorFlow for ISF optimization');
         try {
-          const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
+          const result = await tfService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
             const currentISFSchedule = currentProfile?.sens || [];
             const stats = this.calculateBasicStats(readings);
@@ -1850,7 +1907,6 @@ ${(tf.recommendations && tf.recommendations.length > 0)
         
         // Calculate basic stats
         const stats = this.calculateBasicStats(readings);
-        const current_isf = currentProfile?.isf || 2.5;
         
         // Format values based on context
         const formatValue = glucoseContext ? glucoseContext.formatGlucoseValue : (value: number) => `${toMmol(value)} mmol/L`;
@@ -1981,33 +2037,50 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               };
             }
             
-            // Try to parse JSON from the response
-            try {
-              const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-              const jsonString = jsonMatch ? jsonMatch[1] : content;
-              const result = JSON.parse(jsonString);
-              
-              console.log(`✅ ${provider.name} ISF optimization successful`);
-              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
-              if (tokenUsage) {
-                this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
-              }
-              return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                isfSuggestions: result.isfSuggestions || currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
-                calculatedISFs: result.calculatedISFs || correctionCandidates,
-                confidenceLevel: result.confidenceLevel || 75,
-                details: result.details || null,
-                provider: provider.name,
-                model: provider.model,
-                tokenUsage,
-                costUSD
-              };
-            } catch (parseError) {
-              console.error(`Failed to parse ${provider.name} response:`, parseError);
-              continue;
+            const parsed = safeJsonParseFromText(String(content ?? ''));
+            if (!parsed.ok) {
+              console.warn(`⚠️ ${provider.name} ISF optimization: non-JSON response; using safe fallback`);
             }
+
+            const rawResult: unknown = parsed.ok
+              ? parsed.value
+              : {
+                  insights: String(content ?? '').trim().slice(0, 800),
+                  recommendations: []
+                };
+
+            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+
+            console.log(`✅ ${provider.name} ISF optimization successful`);
+            const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+            if (tokenUsage) {
+              this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
+            }
+
+            const isfSuggestions = Array.isArray(result.isfSuggestions)
+              ? result.isfSuggestions
+                  .map((s: any) => ({
+                    time: typeof s?.time === 'string' ? s.time : undefined,
+                    rate: typeof s?.rate === 'number' ? s.rate : Number(s?.rate)
+                  }))
+                  .filter((s: any) => typeof s.time === 'string' && Number.isFinite(s.rate))
+              : [];
+
+            const calculatedISFs = Array.isArray(result.calculatedISFs) ? result.calculatedISFs : null;
+            return {
+              insights: asStringArray(result.insights, 12),
+              recommendations: asStringArray(result.recommendations, 12),
+              isfSuggestions: isfSuggestions.length
+                ? isfSuggestions
+                : currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
+              calculatedISFs: calculatedISFs ?? correctionCandidates,
+              confidenceLevel: asNumber(result.confidenceLevel, 75, 0, 100),
+              details: normalizeDetails(result.details),
+              provider: provider.name,
+              model: provider.model,
+              tokenUsage,
+              costUSD
+            };
           } catch (error) {
             console.error(`${provider.name} ISF optimization failed:`, error);
             continue;
@@ -2095,7 +2168,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
       .filter((x) => x.points >= 6)
       .sort((a, b) => b.variability - a.variability)
       .slice(0, 3)
-      .map(({ points, ...rest }) => rest);
+      .map(({ points: _points, ...rest }) => rest);
 
     return perBlock;
   }

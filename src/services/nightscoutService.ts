@@ -85,7 +85,28 @@ const getProxyUrl = (): string => {
   }
 };
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) {
+    reject(new DOMException(String(signal.reason || 'Aborted'), 'AbortError'));
+    return;
+  }
+
+  const timeoutId = setTimeout(() => {
+    if (signal) {
+      signal.removeEventListener('abort', onAbort);
+    }
+    resolve();
+  }, ms);
+
+  const onAbort = () => {
+    clearTimeout(timeoutId);
+    reject(new DOMException(String(signal?.reason || 'Aborted'), 'AbortError'));
+  };
+
+  if (signal) {
+    signal.addEventListener('abort', onAbort, { once: true });
+  }
+});
 
 // Enhanced error message extraction
 const getErrorMessage = (error: unknown): string => {
@@ -208,13 +229,16 @@ const makeProxyRequest = async (
           return null;
         }
 
-        // If this isn't the first attempt, wait with exponential backoff
+        // If this isn't the first attempt, wait with exponential backoff + jitter
         if (attempt > 0) {
-          const delay = Math.min(
+          const baseDelay = Math.min(
             INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1),
             MAX_RETRY_DELAY
           );
-          await sleep(delay);
+
+          // Equal-jitter: base/2 .. base
+          const jitteredDelay = Math.floor(baseDelay / 2 + Math.random() * (baseDelay / 2));
+          await sleep(jitteredDelay, signal);
         }
 
         // Format and validate URL before making request
@@ -599,7 +623,7 @@ export const fetchData = async (
 
     // Use the specified API version - no fallback logic
     let entries, treatments, profiles;
-    let apiVersion = preferredApiVersion || 'v1'; // Default to v1 if not specified
+    const apiVersion = preferredApiVersion || 'v1'; // Default to v1 if not specified
     let result;
     
     if (apiVersion === 'v1') {
@@ -701,7 +725,7 @@ export const fetchData = async (
       }
 
       // Fetch treatments - same approach
-      let v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
+      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
       console.log(`🔗 API v3 treatments endpoint: ${v3TreatmentsPath}`);
       treatments = await makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3');
       console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);

@@ -1,8 +1,10 @@
 // AI-Enhanced Analysis Service with TensorFlow as Primary and API Fallbacks
 import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { roundToDecimal } from '../utils/mathUtils';
-import TensorFlowAIService from './tensorFlowAIService';
+import type TensorFlowAIService from './tensorFlowAIService';
 import { DEFAULT_OPENAI_MODEL, getModelById } from '../constants/openaiModels';
+import { safeJsonParseFromText } from '../utils/safeJson';
+import { asNumber, asRiskAssessment, asStringArray } from './aiValidation';
 
 interface AIProvider {
   name: string;
@@ -27,7 +29,8 @@ interface RetryOptions {
 
 class AIAnalysisService {
   private providers: AIProvider[] = [];
-  private tensorFlowService: TensorFlowAIService;
+  private tensorFlowService: TensorFlowAIService | null = null;
+  private tensorFlowServicePromise: Promise<TensorFlowAIService> | null = null;
   private defaultRetryOptions: RetryOptions = {
     maxRetries: 3,
     baseDelay: 1000, // 1 second
@@ -35,8 +38,27 @@ class AIAnalysisService {
   };
 
   constructor() {
-    this.tensorFlowService = new TensorFlowAIService();
     this.initializeProviders();
+  }
+
+  private isTensorFlowEnabledByUserPref(): boolean {
+    const stored = localStorage.getItem('tensorflow_enabled');
+    return stored === null ? true : stored === 'true';
+  }
+
+  private async getTensorFlowServiceAsync(): Promise<TensorFlowAIService | null> {
+    if (!this.isTensorFlowEnabledByUserPref()) return null;
+    if (this.tensorFlowService) return this.tensorFlowService;
+
+    if (!this.tensorFlowServicePromise) {
+      this.tensorFlowServicePromise = import('./tensorFlowAIService').then(mod => {
+        const svc = new mod.default();
+        this.tensorFlowService = svc;
+        return svc;
+      });
+    }
+
+    return this.tensorFlowServicePromise;
   }
 
   private initializeProviders() {
@@ -186,9 +208,10 @@ class AIAnalysisService {
     
     // PRIORITY 2: TensorFlow AI Service (fallback when no API keys, or API keys failed)
     try {
-      if (this.tensorFlowService.isReady()) {
+      const tfService = await this.getTensorFlowServiceAsync();
+      if (tfService?.isReady?.()) {
         console.log('Using TensorFlow AI Service');
-        const tensorFlowResult = await this.tensorFlowService.analyzeGlucoseData(readings, treatments);
+        const tensorFlowResult = await tfService.analyzeGlucoseData(readings, treatments);
         
         // Convert TensorFlow result to our expected format
         const result: AIAnalysisResult = {
@@ -202,8 +225,7 @@ class AIAnalysisService {
         console.log('TensorFlow AI analysis completed successfully');
         return result;
       } else {
-        const tfStatus = this.tensorFlowService.isTensorFlowEnabledByUser() ? 
-          'initializing...' : 'disabled by user';
+        const tfStatus = this.isTensorFlowEnabledByUserPref() ? 'initializing...' : 'disabled by user';
         console.log(`TensorFlow not ready (${tfStatus})`);
       }
     } catch (error) {
@@ -269,25 +291,22 @@ class AIAnalysisService {
       
       const data = await response.json();
       const content = data.choices[0].message.content;
-      
-      // Try to parse JSON from the response
-      try {
-        // Extract JSON if it's wrapped in markdown code blocks
-        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-        const jsonString = jsonMatch ? jsonMatch[1] : content;
-        const result = JSON.parse(jsonString);
-        
-        return {
-          recommendations: result.recommendations || [],
-          riskAssessment: result.riskAssessment || 'medium',
-          confidence: result.confidence || 70,
-          reasoning: result.reasoning || [],
-          safetyWarnings: result.safetyWarnings || []
-        };
-      } catch (parseError) {
-        console.error('Failed to parse OpenAI response:', parseError);
+
+      const parsed = safeJsonParseFromText(String(content ?? ''));
+      if (!parsed.ok) {
+        console.error('Failed to parse OpenAI response:', parsed.error);
         throw new Error('Invalid response format from OpenAI');
       }
+
+      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+
+      return {
+        recommendations: asStringArray(result.recommendations, 8),
+        riskAssessment: asRiskAssessment(result.riskAssessment, 'medium'),
+        confidence: asNumber(result.confidence, 70, 0, 100),
+        reasoning: asStringArray(result.reasoning, 8),
+        safetyWarnings: asStringArray(result.safetyWarnings, 8)
+      };
     } catch (error) {
       console.error('OpenAI API call failed:', error);
       throw error;
@@ -348,25 +367,22 @@ class AIAnalysisService {
       
       const data = await response.json();
       const content = data.choices[0].message.content;
-      
-      // Try to parse JSON from the response
-      try {
-        // Extract JSON if it's wrapped in markdown code blocks
-        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-        const jsonString = jsonMatch ? jsonMatch[1] : content;
-        const result = JSON.parse(jsonString);
-        
-        return {
-          recommendations: result.recommendations || [],
-          riskAssessment: result.riskAssessment || 'medium',
-          confidence: result.confidence || 70,
-          reasoning: result.reasoning || [],
-          safetyWarnings: result.safetyWarnings || []
-        };
-      } catch (parseError) {
-        console.error('Failed to parse DeepSeek response:', parseError);
+
+      const parsed = safeJsonParseFromText(String(content ?? ''));
+      if (!parsed.ok) {
+        console.error('Failed to parse DeepSeek response:', parsed.error);
         throw new Error('Invalid response format from DeepSeek');
       }
+
+      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+
+      return {
+        recommendations: asStringArray(result.recommendations, 8),
+        riskAssessment: asRiskAssessment(result.riskAssessment, 'medium'),
+        confidence: asNumber(result.confidence, 70, 0, 100),
+        reasoning: asStringArray(result.reasoning, 8),
+        safetyWarnings: asStringArray(result.safetyWarnings, 8)
+      };
     } catch (error) {
       console.error('DeepSeek API call failed:', error);
       throw error;
@@ -426,25 +442,22 @@ class AIAnalysisService {
       
       const data = await response.json();
       const content = data.content[0].text;
-      
-      // Try to parse JSON from the response
-      try {
-        // Extract JSON if it's wrapped in markdown code blocks
-        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || content.match(/```\n([\s\S]*?)\n```/);
-        const jsonString = jsonMatch ? jsonMatch[1] : content;
-        const result = JSON.parse(jsonString);
-        
-        return {
-          recommendations: result.recommendations || [],
-          riskAssessment: result.riskAssessment || 'medium',
-          confidence: result.confidence || 70,
-          reasoning: result.reasoning || [],
-          safetyWarnings: result.safetyWarnings || []
-        };
-      } catch (parseError) {
-        console.error('Failed to parse Anthropic response:', parseError);
+
+      const parsed = safeJsonParseFromText(String(content ?? ''));
+      if (!parsed.ok) {
+        console.error('Failed to parse Anthropic response:', parsed.error);
         throw new Error('Invalid response format from Anthropic');
       }
+
+      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+
+      return {
+        recommendations: asStringArray(result.recommendations, 8),
+        riskAssessment: asRiskAssessment(result.riskAssessment, 'medium'),
+        confidence: asNumber(result.confidence, 70, 0, 100),
+        reasoning: asStringArray(result.reasoning, 8),
+        safetyWarnings: asStringArray(result.safetyWarnings, 8)
+      };
     } catch (error) {
       console.error('Anthropic API call failed:', error);
       throw error;
@@ -537,12 +550,14 @@ class AIAnalysisService {
   async testAPIKeys(): Promise<{openai: boolean, deepseek: boolean, anthropic: boolean, tensorflow: boolean}> {
     // Reinitialize providers to get the latest API keys
     this.reinitializeProviders();
+
+    const tfService = await this.getTensorFlowServiceAsync();
     
     const results = {
       openai: false,
       deepseek: false,
       anthropic: false,
-      tensorflow: this.tensorFlowService.isReady()
+      tensorflow: tfService?.isReady?.() ?? false
     };
 
     console.log(`TensorFlow AI Service status: ${results.tensorflow ? 'Ready' : 'Not Ready'}`);
@@ -611,16 +626,17 @@ class AIAnalysisService {
 
   // Get TensorFlow model info
   getTensorFlowInfo(): any {
+    const svc = this.tensorFlowService;
     return {
-      isReady: this.tensorFlowService.isReady(),
-      isEnabled: this.tensorFlowService.isTensorFlowEnabledByUser(),
-      shouldUse: this.tensorFlowService.shouldUseTensorFlow(),
-      modelInfo: this.tensorFlowService.getModelInfo()
+      isReady: svc?.isReady?.() ?? false,
+      isEnabled: svc?.isTensorFlowEnabledByUser?.() ?? this.isTensorFlowEnabledByUserPref(),
+      shouldUse: svc?.shouldUseTensorFlow?.() ?? false,
+      modelInfo: svc?.getModelInfo?.() ?? null
     };
   }
 
   // Get TensorFlow service for settings access
-  getTensorFlowService(): TensorFlowAIService {
+  getTensorFlowService(): TensorFlowAIService | null {
     return this.tensorFlowService;
   }
 }

@@ -1,5 +1,7 @@
 // Google Gemini AI Service
 import { DEFAULT_GEMINI_MODEL, getModelById } from '../constants/openaiModels';
+import { safeJsonParseFromText } from '../utils/safeJson';
+import { asNumber, asRiskAssessment, asStringArray, normalizeDetails } from './aiValidation';
 
 interface GeminiResponse {
   candidates: {
@@ -162,17 +164,13 @@ class GeminiService {
     const response = await this.generateContent(modelId, prompt);
     const responseText = response.text;
 
-    let parsed: any;
-    try {
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      const jsonStr = jsonMatch ? jsonMatch[0] : responseText;
-      parsed = JSON.parse(jsonStr);
-    } catch (error) {
-      throw new Error(`Gemini returned non-JSON response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    const parsedJson = safeJsonParseFromText(String(responseText ?? ''));
+    if (!parsedJson.ok) {
+      throw new Error(`Gemini returned non-JSON response: ${parsedJson.error}`);
     }
 
     return {
-      json: parsed,
+      json: parsedJson.value,
       tokenUsage: {
         prompt: response.usageMetadata?.promptTokenCount ?? 0,
         completion: response.usageMetadata?.candidatesTokenCount ?? 0,
@@ -274,10 +272,11 @@ Respond only with the JSON object, no additional text.`;
       // Try to parse JSON response
       let analysisResult;
       try {
-        // Extract JSON from response if it's wrapped in other text
-        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : responseText;
-        analysisResult = JSON.parse(jsonStr);
+        const parsedJson = safeJsonParseFromText(String(responseText ?? ''));
+        if (!parsedJson.ok) {
+          throw new Error(parsedJson.error);
+        }
+        analysisResult = parsedJson.value;
       } catch (parseError) {
         // If JSON parsing fails, create a structured response from the text
         analysisResult = {
@@ -289,15 +288,21 @@ Respond only with the JSON object, no additional text.`;
         };
       }
 
+      const resultObj = (typeof analysisResult === 'object' && analysisResult !== null) ? (analysisResult as any) : {};
+
       // Validate and ensure required fields
       const result: GeminiAnalysisResult = {
-        insights: Array.isArray(analysisResult.insights) ? analysisResult.insights : undefined,
-        recommendations: Array.isArray(analysisResult.recommendations) ? analysisResult.recommendations : [analysisResult.recommendations || 'Monitor glucose levels closely'],
-        riskAssessment: ['low', 'medium', 'high', 'critical'].includes(analysisResult.riskAssessment) ? analysisResult.riskAssessment : 'medium',
-        confidence: typeof analysisResult.confidence === 'number' ? Math.max(0, Math.min(1, analysisResult.confidence)) : 0.7,
-        reasoning: Array.isArray(analysisResult.reasoning) ? analysisResult.reasoning : [analysisResult.reasoning || 'Based on glucose data analysis'],
-        safetyWarnings: Array.isArray(analysisResult.safetyWarnings) ? analysisResult.safetyWarnings : [],
-        details: typeof analysisResult.details === 'object' ? analysisResult.details : null,
+        insights: asStringArray(resultObj.insights, 8).length ? asStringArray(resultObj.insights, 8) : undefined,
+        recommendations: asStringArray(resultObj.recommendations, 8).length
+          ? asStringArray(resultObj.recommendations, 8)
+          : ['Monitor glucose levels closely'],
+        riskAssessment: asRiskAssessment(resultObj.riskAssessment, 'medium'),
+        confidence: asNumber(resultObj.confidence, 0.7, 0, 1),
+        reasoning: asStringArray(resultObj.reasoning, 8).length
+          ? asStringArray(resultObj.reasoning, 8)
+          : ['Based on glucose data analysis'],
+        safetyWarnings: asStringArray(resultObj.safetyWarnings, 8),
+        details: normalizeDetails(resultObj.details),
         tokenUsage: {
           prompt: response.usageMetadata?.promptTokenCount ?? 0,
           completion: response.usageMetadata?.candidatesTokenCount ?? 0,

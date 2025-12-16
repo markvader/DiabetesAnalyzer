@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react';
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { useTimeInRange } from '../contexts/TimeInRangeContext';
 import { getGlucoseColor, getGlucoseRanges, toMmol, toMgdl } from '../utils/glucoseUtils';
@@ -7,33 +8,33 @@ export const useGlucoseFormatting = () => {
   const { settings: timeInRangeSettings } = useTimeInRange();
 
   // Get color based on glucose value in current units using custom settings
-  const getGlucoseColorForValue = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl'): string => {
+  const getGlucoseColorForValue = useCallback((value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl'): string => {
     return getGlucoseColor(value, fromUnit, {
       lowThreshold: timeInRangeSettings.lowThreshold,
       highThreshold: timeInRangeSettings.highThreshold
     });
-  };
+  }, [timeInRangeSettings.highThreshold, timeInRangeSettings.lowThreshold]);
 
   // Get glucose ranges in current unit using custom settings
-  const getCurrentGlucoseRanges = () => {
+  const getCurrentGlucoseRanges = useCallback(() => {
     return getGlucoseRanges(unit, timeInRangeSettings);
-  };
+  }, [unit, timeInRangeSettings]);
 
   // Convert glucose value to current unit and format it
-  const formatGlucoseValue = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl', showUnit: boolean = true): string => {
+  const formatGlucoseValue = useCallback((value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl', showUnit: boolean = true): string => {
     return formatGlucose(value, fromUnit, showUnit);
-  };
+  }, [formatGlucose]);
 
   // Convert glucose value to current unit
-  const convertToCurrentUnit = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl'): number => {
+  const convertToCurrentUnit = useCallback((value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl'): number => {
     return convertGlucose(value, fromUnit);
-  };
+  }, [convertGlucose]);
 
   // Legacy conversion functions (for backwards compatibility)
-  const toMmolValue = (mgdl: number): number => toMmol(mgdl);
-  const toMgdlValue = (mmol: number): number => toMgdl(mmol);
+  const toMmolValue = useCallback((mgdl: number): number => toMmol(mgdl), []);
+  const toMgdlValue = useCallback((mmol: number): number => toMgdl(mmol), []);
 
-  return {
+  return useMemo(() => ({
     unit,
     getUnitLabel,
     formatGlucoseValue,
@@ -42,5 +43,14 @@ export const useGlucoseFormatting = () => {
     getCurrentGlucoseRanges,
     toMmolValue,
     toMgdlValue
-  };
+  }), [
+    unit,
+    getUnitLabel,
+    formatGlucoseValue,
+    convertToCurrentUnit,
+    getGlucoseColorForValue,
+    getCurrentGlucoseRanges,
+    toMmolValue,
+    toMgdlValue
+  ]);
 };

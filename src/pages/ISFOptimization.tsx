@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
-import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
-import { format, subDays, startOfDay, endOfDay, parseISO, isValid } from 'date-fns';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Brain, Calendar, Clock, AlertTriangle, Thermometer, Calculator, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { aiService } from '../services/aiService';
@@ -135,7 +134,7 @@ const ISFOptimization = () => {
     };
     
     analyzeISF();
-  }, [filteredReadings, filteredTreatments, data?.profile, manualRefresh, hasInitialLoad, unit]);
+  }, [filteredReadings, filteredTreatments, data?.profile, manualRefresh, hasInitialLoad, unit, formatGlucoseValue, getUnitLabel]);
 
   // Convert ISF values to current unit
   const convertedISFAnalysis = React.useMemo(() => {
