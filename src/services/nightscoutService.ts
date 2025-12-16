@@ -697,22 +697,54 @@ export const fetchData = async (
       let v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=date`;
       console.log(`🔗 API v3 entries endpoint: ${v3EntriesPath}`);
 
-      // Fetch other resources in parallel with the first entries page
-      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startTimestamp}&created_at$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=created_at`;
-      const v3ProfilePath = '/api/v3/profile/current';
-      const v3DeviceStatusPath = '/api/v3/devicestatus?limit=1&sort$desc=created_at';
+      // Some Nightscout v3 installations are picky about timestamp formats.
+      // Use ISO strings for created_at filters (encoded), which tends to be the most compatible.
+      const startDateIsoEncoded = encodeURIComponent(startDate);
+      const endDateIsoEncoded = encodeURIComponent(endDate);
 
-      const [entriesFirstPage, treatmentsRes, profilesRes, deviceStatusRes] = await Promise.all([
+      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startDateIsoEncoded}&created_at$lte=${endDateIsoEncoded}&limit=${maxV3Limit}&sort$desc=created_at`;
+
+      const fetchV3Profile = async () => {
+        try {
+          return await makeProxyRequestWithFallback(url, '/api/v3/profile/current', token, signal, 'v3');
+        } catch (err) {
+          if (err instanceof Error && err.name === 'NotFoundError') {
+            return await makeProxyRequestWithFallback(url, '/api/v3/profile', token, signal, 'v3');
+          }
+          throw err;
+        }
+      };
+
+      const fetchV3DeviceStatus = async () => {
+        try {
+          return await makeProxyRequestWithFallback(url, '/api/v3/devicestatus?limit=1&sort$desc=created_at', token, signal, 'v3');
+        } catch (err) {
+          if (err instanceof Error && (err.name === 'NotFoundError' || err.name === 'BadRequestError')) {
+            return await makeProxyRequestWithFallback(url, '/api/v3/devicestatus?limit=1&sort$desc=date', token, signal, 'v3');
+          }
+          throw err;
+        }
+      };
+
+      // Entries + treatments are required; profile/devicestatus are best-effort.
+      const [entriesSettled, treatmentsSettled, profilesSettled, deviceStatusSettled] = await Promise.allSettled([
         makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3'),
         makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3'),
-        makeProxyRequestWithFallback(url, v3ProfilePath, token, signal, 'v3'),
-        makeProxyRequestWithFallback(url, v3DeviceStatusPath, token, signal, 'v3')
+        fetchV3Profile(),
+        fetchV3DeviceStatus()
       ]);
 
-      entries = entriesFirstPage;
-      treatments = treatmentsRes;
-      profiles = profilesRes;
-      const deviceStatus = deviceStatusRes;
+      if (entriesSettled.status === 'rejected') {
+        throw entriesSettled.reason;
+      }
+      if (treatmentsSettled.status === 'rejected') {
+        throw treatmentsSettled.reason;
+      }
+
+      entries = entriesSettled.value;
+      treatments = treatmentsSettled.value;
+      profiles = profilesSettled.status === 'fulfilled' ? profilesSettled.value : [];
+      const deviceStatus = deviceStatusSettled.status === 'fulfilled' ? deviceStatusSettled.value : [];
 
       console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
       console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
@@ -783,7 +815,7 @@ export const fetchData = async (
     }
 
     // Check if any request was aborted
-    if ([entries, treatments, profiles].some(result => result === null)) {
+    if ([entries, treatments].some(result => result === null)) {
       console.log('One or more requests were aborted');
       return null;
     }

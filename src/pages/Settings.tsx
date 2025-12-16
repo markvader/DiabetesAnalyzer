@@ -1368,7 +1368,8 @@ const Settings = () => {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
               />
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Enter the URL of your Nightscout site without any paths or API endpoints
+                Enter the base URL of your Nightscout site (do not include /api/v1 or /api/v3).
+                If your Nightscout is hosted under a subpath, include it (e.g., https://example.com/nightscout).
               </p>
             </div>
 
@@ -1407,10 +1408,10 @@ const Settings = () => {
                   <p className="mb-2"><strong>For API v3 (Nightscout 15+):</strong></p>
                   <ol className="list-decimal list-inside space-y-1 ml-2">
                     <li>Log into your Nightscout site</li>
-                    <li>Go to Admin Tools → Data Tools → Authentication</li>
-                    <li>Click "Add new subject" or "Generate Token"</li>
-                    <li>Set permissions: <strong>api:entries:read</strong>, <strong>api:treatments:read</strong>, <strong>api:profile:read</strong>, <strong>api:devicestatus:read</strong></li>
-                    <li>Copy the generated Bearer token and paste it here</li>
+                    <li>Open the admin/auth section where tokens/subjects are managed (wording differs by host)</li>
+                    <li>Create/generate a <strong>Bearer token</strong> with read permissions</li>
+                    <li>Ensure it includes: <strong>api:entries:read</strong>, <strong>api:treatments:read</strong>, <strong>api:profile:read</strong>, <strong>api:devicestatus:read</strong></li>
+                    <li>Paste the token here <strong>without</strong> the "Bearer " prefix</li>
                   </ol>
                   <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
                     <p className="text-blue-700 dark:text-blue-300 font-medium">⚠️ Important for API v3:</p>
@@ -1419,10 +1420,11 @@ const Settings = () => {
                       <li>• Bearer token must have all 4 permissions listed above</li>
                       <li>• If you get 401/403 errors, check token permissions</li>
                       <li>• If you get 404 errors, your Nightscout may not support v3 - try v1</li>
+                      <li>• If your Nightscout runs under a subpath, make sure the URL includes it (e.g., /nightscout)</li>
                     </ul>
                   </div>
                   <p className="mt-2 text-blue-600 dark:text-blue-400">
-                    <strong>Note:</strong> Bearer tokens start with a long string of characters and are used with API v3.
+                    <strong>Note:</strong> Paste only the token value. This app adds the Authorization header automatically.
                   </p>
                 </div>
               ) : (
@@ -1430,13 +1432,13 @@ const Settings = () => {
                   <p className="mb-2"><strong>For API v1 (Older Nightscout versions):</strong></p>
                   <ol className="list-decimal list-inside space-y-1 ml-2">
                     <li>Log into your Nightscout site</li>
-                    <li>Go to Admin Tools → Data Tools</li>
-                    <li>Look for "Access Token" or "Token" section</li>
-                    <li>Generate a new access token with read permissions</li>
-                    <li>Copy the access token and paste it here</li>
+                    <li>Open the admin/security section (wording differs by host)</li>
+                    <li>Prefer generating an <strong>Access Token</strong> with read permissions (if your UI supports it)</li>
+                    <li>Paste the token value here (no prefix)</li>
                   </ol>
                   <p className="mt-2 text-blue-600 dark:text-blue-400">
-                    <strong>Note:</strong> Access tokens are shorter than Bearer tokens and are used with API v1. Do NOT use your API_SECRET here.
+                    <strong>Note:</strong> Some older Nightscout setups only have a classic API secret. If you don't have access-token support, API v1 may still require that secret.
+                    Treat it as highly sensitive and only use read-only sharing when possible.
                   </p>
                 </div>
               )}
@@ -1448,12 +1450,13 @@ const Settings = () => {
                 <div>
                   <h4 className="font-medium text-yellow-900 dark:text-yellow-100 mb-1">Important Security Notice</h4>
                   <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    <strong>Never use your API_SECRET here!</strong> API_SECRET provides full administrative access to your Nightscout site.
+                    <strong>Security:</strong> Use the least-privileged token available (read-only).
+                    If your instance only provides a classic API secret, treat it as highly sensitive.
                   </p>
                   <ul className="mt-2 space-y-1 text-sm text-yellow-800 dark:text-yellow-200 list-disc list-inside">
                     <li><strong>API v1:</strong> Use Access Tokens (read-only permissions)</li>
                     <li><strong>API v3:</strong> Use Bearer Tokens (with specific permissions)</li>
-                    <li><strong>Both:</strong> Never share your API_SECRET with third-party applications</li>
+                    <li><strong>Both:</strong> Paste only the token value (no "Bearer " prefix)</li>
                   </ul>
                   <p className="mt-2 text-sm text-yellow-800 dark:text-yellow-200">
                     This application only needs read access to your glucose data and treatments.

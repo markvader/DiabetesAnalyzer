@@ -69,11 +69,18 @@ serve(async (req) => {
     }
 
     // Validate and construct the target URL
+    // IMPORTANT: preserve base pathname so instances hosted under a subpath work.
+    // Example base: https://example.com/nightscout
+    // Example path: /api/v3/entries?...  -> https://example.com/nightscout/api/v3/entries?...
     let targetUrl: string;
     try {
       const baseUrl = new URL(url);
       const fullPath = path || '';
-      targetUrl = `${baseUrl.origin}${fullPath}`;
+
+      const basePath = baseUrl.pathname === '/' ? '' : baseUrl.pathname.replace(/\/+$/, '');
+      const normalizedPath = fullPath.startsWith('/') ? fullPath : `/${fullPath}`;
+
+      targetUrl = `${baseUrl.origin}${basePath}${normalizedPath}`;
     } catch (error) {
       return new Response(
         JSON.stringify({ 
