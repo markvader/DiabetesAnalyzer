@@ -10,6 +10,8 @@ interface ComprehensivePDFReportProps {
   formatGlucoseValue: (value: number, unit: string, includeUnit?: boolean) => string;
   getUnitLabel: () => string;
   unit: string;
+  convertToCurrentUnit?: (value: number, fromUnit?: 'mmol' | 'mgdl') => number;
+  getCurrentGlucoseRanges?: () => { TARGET_MIN: number; TARGET_MAX: number };
 }
 
 export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
@@ -18,7 +20,9 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
   filteredReadings,
   formatGlucoseValue,
   getUnitLabel,
-  unit
+  unit,
+  convertToCurrentUnit,
+  getCurrentGlucoseRanges
 }) => {
   const [exporting, setExporting] = useState(false);
   const [reportConfig, setReportConfig] = useState({
@@ -58,57 +62,104 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       };
     }
 
-    const values = filteredReadings.map(r => r.sgv);
-    const total = values.length;
-    const sum = values.reduce((a, b) => a + b, 0);
-    const avg = sum / total;
+    const sortedReadings = [...filteredReadings]
+      .filter(r => r && typeof r.sgv === 'number')
+      .sort((a, b) => (a.date ?? 0) - (b.date ?? 0));
+
+    const valuesMgdl = sortedReadings.map(r => r.sgv).filter(v => Number.isFinite(v));
+    const total = valuesMgdl.length;
+    const sumMgdl = valuesMgdl.reduce((a, b) => a + b, 0);
+    const avgMgdl = total > 0 ? sumMgdl / total : 0;
+
+    const convert = (value: number, fromUnit: 'mmol' | 'mgdl' = 'mgdl') => {
+      if (convertToCurrentUnit) return convertToCurrentUnit(value, fromUnit);
+      // Fallback conversion if the parent doesn't provide the helper
+      if (fromUnit === unit) return value;
+      if (fromUnit === 'mgdl' && unit === 'mmol') return value / 18.0182;
+      if (fromUnit === 'mmol' && unit === 'mgdl') return value * 18.0182;
+      return value;
+    };
+
+    const ranges = getCurrentGlucoseRanges
+      ? getCurrentGlucoseRanges()
+      : unit === 'mmol'
+        ? { TARGET_MIN: 3.9, TARGET_MAX: 10.0 }
+        : { TARGET_MIN: 70, TARGET_MAX: 180 };
+    const veryLowThreshold = convert(54, 'mgdl');
+    const veryHighThreshold = convert(250, 'mgdl');
+    const valuesCurrent = valuesMgdl.map(v => convert(v, 'mgdl'));
     
     // Basic stats
-    const sortedValues = [...values].sort((a, b) => a - b);
-    const median = sortedValues[Math.floor(sortedValues.length / 2)];
+    const sortedValues = [...valuesMgdl].sort((a, b) => a - b);
+    const medianMgdl = sortedValues[Math.floor(sortedValues.length / 2)] ?? 0;
     
     // Variability
-    const variance = values.reduce((acc, val) => acc + Math.pow(val - avg, 2), 0) / total;
-    const standardDeviation = Math.sqrt(variance);
-    const cv = (standardDeviation / avg) * 100;
+    const variance = total > 0 ? valuesMgdl.reduce((acc, val) => acc + Math.pow(val - avgMgdl, 2), 0) / total : 0;
+    const standardDeviationMgdl = Math.sqrt(variance);
+    const cv = avgMgdl > 0 ? (standardDeviationMgdl / avgMgdl) * 100 : 0;
     
     // Time in ranges
-    const veryLow = values.filter(v => v < 54).length;
-    const low = values.filter(v => v >= 54 && v < 70).length;
-    const inRange = values.filter(v => v >= 70 && v <= 180).length;
-    const high = values.filter(v => v > 180 && v <= 250).length;
-    const veryHigh = values.filter(v => v > 250).length;
+    const veryLow = valuesCurrent.filter(v => v < veryLowThreshold).length;
+    const low = valuesCurrent.filter(v => v >= veryLowThreshold && v < ranges.TARGET_MIN).length;
+    const inRange = valuesCurrent.filter(v => v >= ranges.TARGET_MIN && v <= ranges.TARGET_MAX).length;
+    const high = valuesCurrent.filter(v => v > ranges.TARGET_MAX && v <= veryHighThreshold).length;
+    const veryHigh = valuesCurrent.filter(v => v > veryHighThreshold).length;
     
-    const timeInRange = (inRange / total) * 100;
-    const estimatedA1C = (avg + 46.7) / 28.7;
-    const gmi = 3.31 + (0.02392 * avg);
+    const timeInRange = total > 0 ? (inRange / total) * 100 : 0;
+    const estimatedA1C = (avgMgdl + 46.7) / 28.7;
+    const gmi = 3.31 + (0.02392 * avgMgdl);
     
     // GRI calculation
     const gri = (3.0 * (veryLow / total * 100)) + (2.4 * (low / total * 100)) + 
                 (1.6 * (high / total * 100)) + (0.8 * (veryHigh / total * 100));
 
+    // Data completeness (estimate expected points from median sampling interval)
+    const timestamps = sortedReadings
+      .map(r => r.date)
+      .filter((t): t is number => typeof t === 'number' && Number.isFinite(t));
+
+    let dataCompleteness = 0;
+    if (timestamps.length >= 2) {
+      const diffsMin: number[] = [];
+      for (let i = 1; i < timestamps.length; i++) {
+        const diff = (timestamps[i] - timestamps[i - 1]) / 60000;
+        if (Number.isFinite(diff) && diff > 0 && diff <= 60) diffsMin.push(diff);
+      }
+      diffsMin.sort((a, b) => a - b);
+      const medianInterval = diffsMin.length
+        ? diffsMin[Math.floor(diffsMin.length / 2)]
+        : 5;
+      const interval = Math.min(30, Math.max(4, medianInterval));
+
+      const spanMinutes = (timestamps[timestamps.length - 1] - timestamps[0]) / 60000;
+      const expected = spanMinutes > 0 ? (spanMinutes / interval) + 1 : timestamps.length;
+      dataCompleteness = expected > 0 ? Math.min(100, (total / expected) * 100) : 0;
+    } else {
+      dataCompleteness = total > 0 ? 100 : 0;
+    }
+
     return {
       basic: {
         totalReadings: total,
-        averageGlucose: avg,
-        median,
+        averageGlucose: avgMgdl,
+        median: medianMgdl,
         timeInRange,
         estimatedA1C,
         gmi
       },
       variabilityMetrics: {
-        standardDeviation,
+        standardDeviation: standardDeviationMgdl,
         cv,
         gri
       },
       timeMetrics: {
-        veryLowPercentage: (veryLow / total) * 100,
-        lowPercentage: (low / total) * 100,
-        highPercentage: (high / total) * 100,
-        veryHighPercentage: (veryHigh / total) * 100
+        veryLowPercentage: total > 0 ? (veryLow / total) * 100 : 0,
+        lowPercentage: total > 0 ? (low / total) * 100 : 0,
+        highPercentage: total > 0 ? (high / total) * 100 : 0,
+        veryHighPercentage: total > 0 ? (veryHigh / total) * 100 : 0
       },
       qualityMetrics: {
-        dataCompleteness: 95.2 // Mock value
+        dataCompleteness
       }
     };
   };
@@ -119,6 +170,14 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
     try {
       const pdf = new jsPDF('portrait', 'mm', 'a4');
       const stats = calculateAdvancedStats();
+
+      const sortedReadings = [...filteredReadings].sort((a, b) => (a.date ?? 0) - (b.date ?? 0));
+      const firstTs = sortedReadings[0]?.date;
+      const lastTs = sortedReadings[sortedReadings.length - 1]?.date;
+      const analysisLabel =
+        typeof firstTs === 'number' && typeof lastTs === 'number'
+          ? `${format(new Date(firstTs), 'MMM dd, yyyy')} – ${format(new Date(lastTs), 'MMM dd, yyyy')}`
+          : 'Selected Period';
       
       // Theme colors
       const colors = {
@@ -177,7 +236,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'normal');
       pdf.text(`Generated: ${format(new Date(), 'EEEE, MMMM dd, yyyy')}`, 15, yPos + 50);
-      pdf.text(`Analysis Period: Last 30 Days`, 15, yPos + 60);
+      pdf.text(`Analysis Period: ${analysisLabel}`, 15, yPos + 60);
       pdf.text(`Total Readings: ${stats.basic.totalReadings.toLocaleString()}`, 15, yPos + 70);
 
       // Key metrics summary
@@ -185,7 +244,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       
       const keyMetrics = [
         ['Time in Range', `${stats.basic.timeInRange.toFixed(1)}%`, 'Target: >70%'],
-        ['Average Glucose', `${formatGlucoseValue(stats.basic.averageGlucose, 'mgdl', true)} ${getUnitLabel()}`, '70-180 mg/dL'],
+        ['Average Glucose', `${formatGlucoseValue(stats.basic.averageGlucose, 'mgdl', true)}`, 'Target range configured'],
         ['Estimated A1C', `${stats.basic.estimatedA1C.toFixed(1)}%`, 'Target: <7%'],
         ['Glucose Variability', `${stats.variabilityMetrics.cv.toFixed(1)}%`, 'Target: <36%']
       ];
@@ -217,9 +276,9 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       const detailedStats = [
         ['Metric', 'Value', 'Target/Normal'],
         ['Total Readings', `${stats.basic.totalReadings.toLocaleString()}`, 'Varies'],
-        ['Average Glucose', `${formatGlucoseValue(stats.basic.averageGlucose, 'mgdl', true)} ${getUnitLabel()}`, '70-180 mg/dL'],
-        ['Median Glucose', `${formatGlucoseValue(stats.basic.median, 'mgdl', true)} ${getUnitLabel()}`, '70-180 mg/dL'],
-        ['Standard Deviation', `${formatGlucoseValue(stats.variabilityMetrics.standardDeviation, 'mgdl', false)} ${getUnitLabel()}`, '<40 mg/dL'],
+        ['Average Glucose', `${formatGlucoseValue(stats.basic.averageGlucose, 'mgdl', true)}`, 'Target range configured'],
+        ['Median Glucose', `${formatGlucoseValue(stats.basic.median, 'mgdl', true)}`, 'Target range configured'],
+        ['Standard Deviation', `${formatGlucoseValue(stats.variabilityMetrics.standardDeviation, 'mgdl', false)} ${getUnitLabel()}`, 'Lower is better'],
         ['Coefficient of Variation', `${stats.variabilityMetrics.cv.toFixed(1)}%`, '<36%'],
         ['Glycemic Risk Index', `${stats.variabilityMetrics.gri.toFixed(1)}`, '<40'],
         ['Estimated A1C', `${stats.basic.estimatedA1C.toFixed(1)}%`, '<7%'],
@@ -589,7 +648,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
         pdf.setFontSize(9);
         pdf.setFont('helvetica', 'normal');
-        pdf.text(`Avg Glucose: ${formatGlucoseValue(season.avgGlucose, 'mgdl', true)} ${getUnitLabel()}`, 20, cardY + 18);
+        pdf.text(`Avg Glucose: ${formatGlucoseValue(season.avgGlucose, 'mgdl', true)}`, 20, cardY + 18);
         pdf.text(`Time in Range: ${Math.min(season.tir, 100).toFixed(1)}%`, 20, cardY + 25);
         
         // Notes and analysis

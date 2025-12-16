@@ -481,6 +481,15 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         personal: { primary: [106, 90, 205], secondary: [255, 140, 0], accent: [50, 205, 50] }
       };
       const colors = themeColors[reportTheme];
+
+      const lighten = (rgb: [number, number, number], amount: number) => {
+        const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+        return [
+          clamp(rgb[0] + (255 - rgb[0]) * amount),
+          clamp(rgb[1] + (255 - rgb[1]) * amount),
+          clamp(rgb[2] + (255 - rgb[2]) * amount)
+        ] as [number, number, number];
+      };
       
       // Add professional header with logo area
       pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
@@ -555,7 +564,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(41, 82, 163); // Dark blue
+      pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
       pdf.text('DIABETES MANAGEMENT SUMMARY', 15, yPos);
       
       yPos += 10;
@@ -563,7 +572,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       // Add key metrics section with colored boxes
       const addMetricBox = (title: string, value: string, subtext: string, color: [number, number, number], x: number, y: number, width: number) => {
         // Background
-        pdf.setFillColor(color[0], color[1], color[2], 0.1);
+        const bg = lighten(color, 0.9);
+        pdf.setFillColor(bg[0], bg[1], bg[2]);
         pdf.roundedRect(x, y, width, 20, 2, 2, 'F');
         
         // Border
@@ -574,7 +584,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Title
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(8);
-        pdf.setTextColor(200, 200, 200);
+        pdf.setTextColor(71, 85, 105);
         pdf.text(title, x + 4, y + 5);
         
         // Value
@@ -586,7 +596,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Subtext
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(7);
-        pdf.setTextColor(220, 220, 220);
+        pdf.setTextColor(100, 116, 139);
         pdf.text(subtext, x + 4, y + 18);
       };
       
@@ -613,7 +623,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       // Time in Range visualization
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(41, 82, 163);
+      pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
       pdf.text('TIME IN RANGE ANALYSIS', 15, yPos);
       
       yPos += 10;
@@ -707,7 +717,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'bold');
-      pdf.setTextColor(41, 82, 163);
+      pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
       pdf.text('TARGET RANGES', 20, yPos + 10);
       
       // Get the correct target ranges from current settings
@@ -736,7 +746,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       
       // Add comprehensive clinical assessment with better styling
       pdf.setFillColor(248, 249, 250);
-      pdf.setDrawColor(41, 82, 163);
+      pdf.setDrawColor(colors.primary[0], colors.primary[1], colors.primary[2]);
       pdf.setLineWidth(1);
       pdf.roundedRect(15, yPos - 5, 180, 8, 2, 2, 'FD');
       
@@ -750,7 +760,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       // Assessment cards with better visual hierarchy and improved spacing
       const createAssessmentCard = (title: string, score: number, description: string, recommendations: string[], color: [number, number, number], y: number) => {
         // Card background with reduced height
-        pdf.setFillColor(color[0], color[1], color[2], 0.05);
+        const cardBg = lighten(color, 0.93);
+        pdf.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
         pdf.setDrawColor(color[0], color[1], color[2]);
         pdf.setLineWidth(0.5);
         pdf.roundedRect(15, y, 180, 40, 3, 3, 'FD'); // Reduced from 50 to 40
@@ -773,19 +784,19 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(8);
-        pdf.setTextColor(200, 200, 200);
+        pdf.setTextColor(71, 85, 105);
         pdf.text(`${Math.round(score)}%`, 185, y + 7);
         
         // Description
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(9); // Reduced font size slightly
-        pdf.setTextColor(255, 255, 255);
+        pdf.setTextColor(15, 23, 42);
         pdf.text(description, 20, y + 18);
         
         // Recommendations (limited to 1 line each)
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(8); // Smaller font for recommendations
-        pdf.setTextColor(220, 220, 220);
+        pdf.setTextColor(51, 65, 85);
         recommendations.forEach((rec, index) => {
           if (index < 2) { // Limit to 2 recommendations per card
             // Truncate long recommendations
@@ -898,7 +909,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         pdf.addPage();
         
         // Add modern header to second page
-        pdf.setFillColor(41, 82, 163);
+        pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
         pdf.rect(0, 0, 210, 25, 'F');
         
         pdf.setTextColor(255, 255, 255);
@@ -909,7 +920,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         yPos = 35;
         
         // Add glucose trends analysis
-        pdf.setTextColor(41, 82, 163);
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
         pdf.setFontSize(14);
         pdf.setFont('helvetica', 'bold');
         pdf.text('GLUCOSE TRENDS & PATTERNS', 15, yPos);
@@ -919,7 +930,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Create trend indicators
         const createTrendCard = (title: string, value: string, trend: 'up' | 'down' | 'stable', color: [number, number, number], x: number, y: number, width: number) => {
           // Card background with gradient effect
-          pdf.setFillColor(color[0], color[1], color[2], 0.1);
+          const cardBg = lighten(color, 0.9);
+          pdf.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
           pdf.roundedRect(x, y, width, 35, 3, 3, 'F');
           
           // Border
@@ -930,7 +942,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           // Title
           pdf.setFont('helvetica', 'normal');
           pdf.setFontSize(9);
-          pdf.setTextColor(200, 200, 200);
+          pdf.setTextColor(71, 85, 105);
           pdf.text(title, x + 5, y + 8);
           
           // Value
@@ -950,7 +962,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           // Trend label
           pdf.setFont('helvetica', 'normal');
           pdf.setFontSize(8);
-          pdf.setTextColor(220, 220, 220);
+          pdf.setTextColor(100, 116, 139);
           const trendLabel = trend === 'up' ? 'Increasing' : trend === 'down' ? 'Decreasing' : 'Stable';
           pdf.text(trendLabel, x + 5, y + 30);
         };
@@ -1164,7 +1176,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
               color = [211, 84, 0]; // Orange for very high
             }
             
-            pdf.setFillColor(color[0], color[1], color[2], 0.7);
+            pdf.setFillColor(color[0], color[1], color[2]);
             pdf.rect(barX, barY, barWidth - 0.5, barHeight, 'F');
           });
           
@@ -1199,7 +1211,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         checkPageBreak(120);
         
         // Add personalized insights section
-        pdf.setTextColor(41, 82, 163);
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
         pdf.setFontSize(14);
         pdf.setFont('helvetica', 'bold');
         pdf.text('PERSONALIZED INSIGHTS & PATTERNS', 15, yPos);
@@ -1288,7 +1300,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           const color = priorityColors[insight.priority as keyof typeof priorityColors] || [100, 100, 100];
           
           // Card background
-          pdf.setFillColor(color[0], color[1], color[2], 0.05);
+          const cardBg = lighten(color as [number, number, number], 0.93);
+          pdf.setFillColor(cardBg[0], cardBg[1], cardBg[2]);
           pdf.setDrawColor(color[0], color[1], color[2]);
           pdf.setLineWidth(0.5);
           pdf.roundedRect(15, cardY, 180, 20, 2, 2, 'FD');
@@ -1302,7 +1315,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           // Description
           pdf.setFont('helvetica', 'normal');
           pdf.setFontSize(9);
-          pdf.setTextColor(220, 220, 220);
+          pdf.setTextColor(51, 65, 85);
           const wrappedText = insight.description.length > 90 ? 
             insight.description.substring(0, 87) + '...' : insight.description;
           pdf.text(wrappedText, 20, cardY + 16);
@@ -1323,7 +1336,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         }
         
         // Daily patterns section
-        pdf.setTextColor(41, 82, 163);
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
         pdf.setFontSize(14);
         pdf.text('DAILY PATTERNS & ADVANCED METRICS', 15, yPos);
         
@@ -1553,7 +1566,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           pdf.addPage();
           
           // Add header
-          pdf.setFillColor(41, 82, 163);
+          pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
           pdf.rect(0, 0, 210, 20, 'F');
           
           pdf.setTextColor(255, 255, 255);
@@ -1567,7 +1580,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         }
         
         // Treatment summary section
-        pdf.setTextColor(41, 82, 163);
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
         pdf.setFontSize(14);
         pdf.text('INSULIN & CARBOHYDRATE SUMMARY', 15, yPos);
         
@@ -1579,7 +1592,8 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         const boxSpacing = 10;
         
         // Insulin box
-        pdf.setFillColor(41, 128, 185, 0.1); // Light blue
+        const insulinBg = lighten([41, 128, 185], 0.9);
+        pdf.setFillColor(insulinBg[0], insulinBg[1], insulinBg[2]);
         pdf.setDrawColor(41, 128, 185);
         pdf.setLineWidth(0.5);
         pdf.roundedRect(15, yPos, boxWidth, boxHeight, 3, 3, 'FD');
@@ -1591,14 +1605,15 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
-        pdf.setTextColor(220, 220, 220);
+        pdf.setTextColor(51, 65, 85);
         pdf.text(`Total Insulin: ${treatmentStats.totalInsulin.toFixed(1)} U`, 20, yPos + 20);
         pdf.text(`Daily Average: ${treatmentStats.dailyInsulin.toFixed(1)} U/day`, 20, yPos + 28);
         pdf.text(`Meal Boluses: ${treatmentStats.mealBoluses}`, 20, yPos + 36);
         pdf.text(`Correction Boluses: ${treatmentStats.correctionBoluses}`, 20, yPos + 44);
         
         // Carbohydrate box
-        pdf.setFillColor(46, 184, 89, 0.1); // Light green
+        const carbBg = lighten([46, 184, 89], 0.9);
+        pdf.setFillColor(carbBg[0], carbBg[1], carbBg[2]);
         pdf.setDrawColor(46, 184, 89);
         pdf.roundedRect(15 + boxWidth + boxSpacing, yPos, boxWidth, boxHeight, 3, 3, 'FD');
         
@@ -1609,7 +1624,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
-        pdf.setTextColor(220, 220, 220);
+        pdf.setTextColor(51, 65, 85);
         pdf.text(`Total Carbs: ${treatmentStats.totalCarbs.toFixed(0)} g`, 20 + boxWidth + boxSpacing, yPos + 20);
         pdf.text(`Daily Average: ${treatmentStats.dailyCarbs.toFixed(0)} g/day`, 20 + boxWidth + boxSpacing, yPos + 28);
         pdf.text(`Avg. Meal Size: ${treatmentStats.avgCarbs.toFixed(0)} g`, 20 + boxWidth + boxSpacing, yPos + 36);
@@ -1625,7 +1640,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
           pdf.addPage();
           
           // Add header
-          pdf.setFillColor(41, 82, 163);
+          pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
           pdf.rect(0, 0, 210, 20, 'F');
           
           pdf.setTextColor(255, 255, 255);

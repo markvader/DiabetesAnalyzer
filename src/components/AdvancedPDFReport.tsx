@@ -120,11 +120,14 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
     const median = sortedValues[Math.floor(sortedValues.length / 2)];
     
     // Time in range calculations
-    const veryLowCount = values.filter(v => convertToCurrentUnit(v, unit) < convertToCurrentUnit(54, 'mgdl')).length;
-    const lowCount = values.filter(v => v >= convertToCurrentUnit(54, 'mgdl') && v < ranges.TARGET_MIN).length;
+    const veryLowThreshold = convertToCurrentUnit(54, 'mgdl');
+    const veryHighThreshold = convertToCurrentUnit(250, 'mgdl');
+
+    const veryLowCount = values.filter(v => v < veryLowThreshold).length;
+    const lowCount = values.filter(v => v >= veryLowThreshold && v < ranges.TARGET_MIN).length;
     const inRangeCount = values.filter(v => v >= ranges.TARGET_MIN && v <= ranges.TARGET_MAX).length;
-    const highCount = values.filter(v => v > ranges.TARGET_MAX && v <= convertToCurrentUnit(250, 'mgdl')).length;
-    const veryHighCount = values.filter(v => convertToCurrentUnit(v, unit) > convertToCurrentUnit(250, 'mgdl')).length;
+    const highCount = values.filter(v => v > ranges.TARGET_MAX && v <= veryHighThreshold).length;
+    const veryHighCount = values.filter(v => v > veryHighThreshold).length;
     
     const veryLowPercentage = (veryLowCount / totalReadings) * 100;
     const lowPercentage = (lowCount / totalReadings) * 100;
@@ -164,10 +167,61 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
     const estimatedA1C = ((averageGlucose * (unit === 'mmol' ? 18 : 1)) + 46.7) / 28.7;
     const gmi = (3.31 + (0.02392 * (averageGlucose * (unit === 'mmol' ? 18 : 1)))); // Glucose Management Indicator
     
-    // Data quality metrics
-    const timeSpan = (filteredReadings[filteredReadings.length - 1]?.date - filteredReadings[0]?.date) / (1000 * 60 * 60 * 24);
-    const expectedReadings = timeSpan * 24 * 3; // Assuming 3 readings per hour for CGM
-    const dataCompleteness = (totalReadings / expectedReadings) * 100;
+    // Data quality metrics (estimate sampling interval from median consecutive diff)
+    const sortedByTime = [...filteredReadings].sort((a, b) => a.date - b.date);
+    const timeSpanDays = (sortedByTime[sortedByTime.length - 1]?.date - sortedByTime[0]?.date) / (1000 * 60 * 60 * 24);
+
+    const diffsMin: number[] = [];
+    for (let i = 1; i < sortedByTime.length; i++) {
+      const diff = (sortedByTime[i].date - sortedByTime[i - 1].date) / 60000;
+      if (Number.isFinite(diff) && diff > 0 && diff <= 60) diffsMin.push(diff);
+    }
+    diffsMin.sort((a, b) => a - b);
+    const medianInterval = diffsMin.length ? diffsMin[Math.floor(diffsMin.length / 2)] : 5;
+    const interval = Math.min(30, Math.max(4, medianInterval));
+    const spanMinutes = (sortedByTime[sortedByTime.length - 1]?.date - sortedByTime[0]?.date) / 60000;
+    const expectedReadings = spanMinutes > 0 ? (spanMinutes / interval) + 1 : totalReadings;
+    const dataCompleteness = expectedReadings > 0 ? Math.min(100, (totalReadings / expectedReadings) * 100) : 0;
+
+    // Weekday vs weekend variation (current unit)
+    const weekdayVals: number[] = [];
+    const weekendVals: number[] = [];
+    filteredReadings.forEach(r => {
+      const day = new Date(r.date).getDay();
+      const v = convertToCurrentUnit(r.sgv, 'mgdl');
+      if (day === 0 || day === 6) weekendVals.push(v);
+      else weekdayVals.push(v);
+    });
+    const weekdayAvg = weekdayVals.length ? weekdayVals.reduce((a, b) => a + b, 0) / weekdayVals.length : 0;
+    const weekendAvg = weekendVals.length ? weekendVals.reduce((a, b) => a + b, 0) / weekendVals.length : 0;
+    const weekdayWeekendVariation = Math.abs(weekdayAvg - weekendAvg);
+
+    // Basic meal-time patterns from treatments (carbs + bolus by day-part)
+    const mealBuckets: Record<'Breakfast' | 'Lunch' | 'Dinner' | 'Late Night', { carbs: number; bolus: number; count: number }> = {
+      Breakfast: { carbs: 0, bolus: 0, count: 0 },
+      Lunch: { carbs: 0, bolus: 0, count: 0 },
+      Dinner: { carbs: 0, bolus: 0, count: 0 },
+      'Late Night': { carbs: 0, bolus: 0, count: 0 }
+    };
+
+    filteredTreatments.forEach(t => {
+      const ts = new Date(t.created_at).getTime();
+      if (!Number.isFinite(ts)) return;
+      const hour = new Date(ts).getHours();
+      const carbs = typeof t.carbs === 'number' ? t.carbs : 0;
+      const bolus = typeof t.insulin === 'number' ? t.insulin : 0;
+      if (carbs <= 0 && bolus <= 0) return;
+
+      const key: keyof typeof mealBuckets =
+        hour >= 5 && hour < 10 ? 'Breakfast'
+        : hour >= 10 && hour < 15 ? 'Lunch'
+        : hour >= 15 && hour < 21 ? 'Dinner'
+        : 'Late Night';
+
+      mealBuckets[key].carbs += carbs;
+      mealBuckets[key].bolus += bolus;
+      mealBuckets[key].count += 1;
+    });
     
     return {
       basic: {
@@ -177,7 +231,7 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
         timeInRange,
         estimatedA1C,
         gmi,
-        timeSpan
+        timeSpan: timeSpanDays
       },
       timeMetrics: {
         veryLowPercentage,
@@ -201,13 +255,12 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       },
       patternMetrics: {
         dawnPhenomenon,
-        weekdayWeekendVariation: 0, // Will calculate separately
-        mealTimePatterns: {}, // Will calculate with treatments
+        weekdayWeekendVariation,
+        mealTimePatterns: mealBuckets,
         exerciseCorrelation: 0
       },
       qualityMetrics: {
         dataCompleteness,
-        sensorAccuracy: 95, // Placeholder - would need calibration data
         consistencyScore: Math.max(0, 100 - (cv * 2))
       },
       predictiveMetrics: {
@@ -247,6 +300,24 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
     try {
       const pdf = new jsPDF('portrait', 'mm', 'a4');
       const stats = calculateAdvancedStats();
+
+      const ranges = getCurrentGlucoseRanges();
+      const thresholdLabel = (mgdl: number) => `${formatGlucoseValue(mgdl, 'mgdl', false)} ${getUnitLabel()}`;
+
+      let managementPlan: string | null = null;
+      if (reportConfig.includeAIInsights) {
+        try {
+          managementPlan = await aiService.generateManagementPlan(filteredReadings, filteredTreatments, {
+            unit,
+            formatGlucoseValue,
+            getUnitLabel,
+            getCurrentGlucoseRanges
+          });
+        } catch (e) {
+          console.warn('AI management plan generation failed; continuing without AI insights.', e);
+          managementPlan = null;
+        }
+      }
       
       // Theme colors
       const colors = {
@@ -260,9 +331,31 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       };
 
       // Helper function to add a new page
+      let currentSectionTitle = 'Advanced Diabetes Analytics';
+
+      const addSectionHeader = (title: string) => {
+        pdf.setFillColor(248, 250, 252);
+        pdf.rect(0, 0, 210, 18, 'F');
+        pdf.setDrawColor(226, 232, 240);
+        pdf.line(0, 18, 210, 18);
+
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFontSize(11);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(title, 15, 12);
+
+        pdf.setTextColor(colors.textLight[0], colors.textLight[1], colors.textLight[2]);
+        pdf.setFontSize(8);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(getDisplayLabel(), 195, 12, { align: 'right' });
+
+        return 28;
+      };
+
       const addNewPage = () => {
         pdf.addPage();
-        return 20; // Reset Y position
+        currentPageNumber += 1;
+        return addSectionHeader(currentSectionTitle);
       };
 
       // Helper function to check if we need a new page
@@ -408,7 +501,7 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       const summaryData = [
         ['Analysis Period:', getDisplayLabel()],
         ['Total Readings:', `${(stats.basic.totalReadings || 0).toLocaleString()}`],
-        ['Average Glucose:', `${formatGlucoseValue((stats.basic.averageGlucose || 0), 'mgdl', true)} ${getUnitLabel()}`],
+        ['Average Glucose:', `${formatGlucoseValue((stats.basic.averageGlucose || 0), 'mgdl', true)}`],
         ['Data Completeness:', `${(stats.qualityMetrics.dataCompleteness || 0).toFixed(1)}%`]
       ];
       
@@ -469,11 +562,11 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       
       // Legend
       const legendItems: Array<[string, [number, number, number]]> = [
-        ['Very Low (<54)', [156, 39, 176]],
-        ['Low (54-70)', [239, 68, 68]],
-        ['In Range (70-180)', [34, 197, 94]],
-        ['High (181-250)', [251, 191, 36]],
-        ['Very High (>250)', [245, 101, 101]]
+        [`Very Low (<${thresholdLabel(54)})`, [156, 39, 176]],
+        [`Low (${thresholdLabel(54)}–${ranges.TARGET_MIN.toFixed(1)} ${getUnitLabel()})`, [239, 68, 68]],
+        [`In Range (${ranges.TARGET_MIN.toFixed(1)}–${ranges.TARGET_MAX.toFixed(1)} ${getUnitLabel()})`, [34, 197, 94]],
+        [`High (${ranges.TARGET_MAX.toFixed(1)}–${thresholdLabel(250)})`, [251, 191, 36]],
+        [`Very High (>${thresholdLabel(250)})`, [245, 101, 101]]
       ];
       
       legendItems.forEach((item, index) => {
@@ -492,6 +585,7 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       yPos += 25;
       
       // Page 2: Detailed Analysis
+      currentSectionTitle = 'Detailed Analysis';
       yPos = addNewPage();
       
       // Detailed Statistics
@@ -505,9 +599,9 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       // Statistics table
       const detailedStats = [
         ['Metric', 'Value', 'Target/Normal'],
-        ['Average Glucose', `${formatGlucoseValue((stats.basic.averageGlucose || 0), 'mgdl', true)} ${getUnitLabel()}`, '70-180 mg/dL'],
-        ['Median Glucose', `${formatGlucoseValue((stats.basic.median || 0), 'mgdl', true)} ${getUnitLabel()}`, '70-180 mg/dL'],
-        ['Standard Deviation', `${formatGlucoseValue((stats.variabilityMetrics.standardDeviation || 0), 'mgdl', false)} ${getUnitLabel()}`, '<40 mg/dL'],
+        ['Average Glucose', `${formatGlucoseValue((stats.basic.averageGlucose || 0), 'mgdl', true)}`, 'Target range configured'],
+        ['Median Glucose', `${formatGlucoseValue((stats.basic.median || 0), 'mgdl', true)}`, 'Target range configured'],
+        ['Standard Deviation', `${formatGlucoseValue((stats.variabilityMetrics.standardDeviation || 0), 'mgdl', false)} ${getUnitLabel()}`, 'Lower is better'],
         ['Coefficient of Variation', `${(stats.variabilityMetrics.cv || 0).toFixed(1)}%`, '<36%'],
         ['Glycemic Risk Index', `${(stats.variabilityMetrics.gri || 0).toFixed(1)}`, '<40'],
         ['Estimated A1C', `${(stats.basic.estimatedA1C || 0).toFixed(1)}%`, '<7%'],
@@ -628,6 +722,142 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       });
       
       yPos += 50;
+
+      // Page 3: Optional Pattern Analysis
+      if (reportConfig.includePatternAnalysis) {
+        currentSectionTitle = 'Pattern Analysis';
+        yPos = addNewPage();
+
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFontSize(16);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('PATTERN ANALYSIS', 15, yPos);
+        yPos += 12;
+
+        // Day-part / circadian notes
+        pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(`Dawn phenomenon (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(stats.timeMetrics.dawnPhenomenon || 0, unit as any, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
+        yPos += 8;
+        pdf.text(`Weekday vs weekend variation: ${formatGlucoseValue(stats.patternMetrics.weekdayWeekendVariation || 0, unit as any, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
+        yPos += 12;
+
+        // Hourly averages chart (simple bars)
+        const hourly = (stats.timeMetrics.hourlyAverages || []).map(v => (typeof v === 'number' ? v : null));
+        const points = hourly.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+        if (points.length > 0) {
+          const chartX = 15;
+          const chartY = yPos;
+          const chartW = 180;
+          const chartH = 55;
+          const minV = Math.min(...points);
+          const maxV = Math.max(...points);
+          const span = Math.max(1e-6, maxV - minV);
+
+          pdf.setFillColor(245, 245, 245);
+          pdf.rect(chartX, chartY, chartW, chartH, 'F');
+          pdf.setDrawColor(220, 220, 220);
+          pdf.rect(chartX, chartY, chartW, chartH, 'S');
+
+          // Bars
+          const barW = chartW / 24;
+          hourly.forEach((v, hour) => {
+            if (typeof v !== 'number' || !Number.isFinite(v)) return;
+            const h = ((v - minV) / span) * (chartH - 10);
+            pdf.setFillColor(colors.secondary[0], colors.secondary[1], colors.secondary[2]);
+            pdf.rect(chartX + hour * barW + 0.5, chartY + chartH - 5 - h, Math.max(1, barW - 1), h, 'F');
+          });
+
+          // Axis labels
+          pdf.setTextColor(colors.textLight[0], colors.textLight[1], colors.textLight[2]);
+          pdf.setFontSize(7);
+          pdf.text(`Min: ${formatGlucoseValue(minV, unit as any, false)} ${getUnitLabel()}`, chartX, chartY + chartH + 6);
+          pdf.text(`Max: ${formatGlucoseValue(maxV, unit as any, false)} ${getUnitLabel()}`, chartX + 60, chartY + chartH + 6);
+          pdf.text('00', chartX, chartY + chartH + 14);
+          pdf.text('06', chartX + chartW * 0.25, chartY + chartH + 14);
+          pdf.text('12', chartX + chartW * 0.50, chartY + chartH + 14);
+          pdf.text('18', chartX + chartW * 0.75, chartY + chartH + 14);
+          pdf.text('23', chartX + chartW - 8, chartY + chartH + 14);
+
+          yPos += chartH + 22;
+        }
+
+        // Meal-time treatment summary
+        const meal = stats.patternMetrics.mealTimePatterns as any;
+        if (meal && typeof meal === 'object') {
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFontSize(14);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text('MEAL/TREATMENT SUMMARY (LOGGED)', 15, yPos);
+          yPos += 10;
+
+          const rows: Array<[string, string, string]> = [
+            ['Day Part', 'Carbs', 'Bolus'],
+            ['Breakfast', `${(meal.Breakfast?.carbs ?? 0).toFixed(0)} g`, `${(meal.Breakfast?.bolus ?? 0).toFixed(1)} U`],
+            ['Lunch', `${(meal.Lunch?.carbs ?? 0).toFixed(0)} g`, `${(meal.Lunch?.bolus ?? 0).toFixed(1)} U`],
+            ['Dinner', `${(meal.Dinner?.carbs ?? 0).toFixed(0)} g`, `${(meal.Dinner?.bolus ?? 0).toFixed(1)} U`],
+            ['Late Night', `${(meal['Late Night']?.carbs ?? 0).toFixed(0)} g`, `${(meal['Late Night']?.bolus ?? 0).toFixed(1)} U`]
+          ];
+
+          // Header
+          pdf.setFillColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.rect(15, yPos, 180, 8, 'F');
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(9);
+          pdf.setFont('helvetica', 'bold');
+          pdf.text(rows[0][0], 20, yPos + 5);
+          pdf.text(rows[0][1], 100, yPos + 5);
+          pdf.text(rows[0][2], 150, yPos + 5);
+          yPos += 8;
+
+          rows.slice(1).forEach((row, idx) => {
+            const rowY = yPos + idx * 8;
+            if (idx % 2 === 0) {
+              pdf.setFillColor(248, 250, 252);
+              pdf.rect(15, rowY, 180, 8, 'F');
+            }
+            pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+            pdf.setFontSize(8);
+            pdf.setFont('helvetica', 'normal');
+            pdf.text(row[0], 20, rowY + 5);
+            pdf.text(row[1], 100, rowY + 5);
+            pdf.text(row[2], 150, rowY + 5);
+          });
+
+          yPos += 8 * (rows.length - 1) + 10;
+        }
+      }
+
+      // Page 4: Optional AI Insights (compact)
+      if (reportConfig.includeAIInsights && managementPlan) {
+        currentSectionTitle = 'AI Insights';
+        yPos = addNewPage();
+
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFontSize(16);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text('AI-POWERED INSIGHTS (SUMMARY)', 15, yPos);
+        yPos += 10;
+
+        const lines = managementPlan
+          .split(/\r?\n/)
+          .map(l => l.trim())
+          .filter(Boolean);
+
+        const bullets = lines
+          .filter(l => l.startsWith('- ') || l.startsWith('• '))
+          .slice(0, 10)
+          .map(l => (l.startsWith('- ') ? `• ${l.slice(2)}` : l));
+
+        const body = bullets.length ? bullets : lines.slice(0, 10).map(l => (l.startsWith('#') ? '' : l)).filter(Boolean);
+        const wrapped = pdf.splitTextToSize(body.join('\n'), 175);
+
+        pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+        pdf.setFontSize(10);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(wrapped, 15, yPos);
+      }
       
       // Footer
       const pageCount = pdf.getNumberOfPages();

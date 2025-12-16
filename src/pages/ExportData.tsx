@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Database, Activity, Brain, Sparkles, Award, TrendingUp, Share, FileDown } from 'lucide-react';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import PDFExport from '../components/PDFExport';
 import AdvancedPDFReport from '../components/AdvancedPDFReport';
 import ComprehensivePDFReport from '../components/ComprehensivePDFReport';
@@ -14,6 +15,8 @@ const ExportData: React.FC = () => {
     loading,
     error
   } = useNightscout();
+
+  const { formatGlucoseValue, getUnitLabel, unit, convertToCurrentUnit, getCurrentGlucoseRanges } = useGlucoseFormatting();
 
   const [activeTab, setActiveTab] = useState<'comprehensive' | 'advanced' | 'standard' | 'data'>('comprehensive');
 
@@ -141,11 +144,11 @@ const ExportData: React.FC = () => {
                 data={data} 
                 basicStats={{}} 
                 filteredReadings={data?.entries || []}
-                formatGlucoseValue={(value: number, unit: string, includeUnit?: boolean) => {
-                  return includeUnit ? `${value.toFixed(0)} ${unit}` : value.toFixed(0);
-                }}
-                getUnitLabel={() => 'mg/dL'}
-                unit="mgdl"
+                formatGlucoseValue={formatGlucoseValue}
+                getUnitLabel={getUnitLabel}
+                unit={unit}
+                convertToCurrentUnit={convertToCurrentUnit}
+                getCurrentGlucoseRanges={getCurrentGlucoseRanges}
               />
             </div>
           )}
