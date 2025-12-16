@@ -2,6 +2,7 @@
 import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { roundToDecimal } from '../utils/mathUtils';
 import TensorFlowAIService from './tensorFlowAIService';
+import { DEFAULT_OPENAI_MODEL, getModelById } from '../constants/openaiModels';
 
 interface AIProvider {
   name: string;
@@ -44,12 +45,16 @@ class AIAnalysisService {
     const deepseekKey = localStorage.getItem('deepseek_api_key');
     const anthropicKey = localStorage.getItem('anthropic_api_key');
 
-    // OpenAI - UPDATED TO USE GPT-4o MINI
+    const selectedOpenAIModel = localStorage.getItem('openai_selected_model') || DEFAULT_OPENAI_MODEL;
+    const selectedModel = localStorage.getItem('selected_model') || selectedOpenAIModel;
+    const selectedModelInfo = getModelById(selectedModel);
+
+    // OpenAI
     if (openaiKey) {
       this.providers.push({
         name: 'OpenAI',
         endpoint: 'https://api.openai.com/v1/chat/completions',
-        model: 'gpt-4o-mini', // Changed from gpt-4 to gpt-4o-mini
+        model: selectedModelInfo?.provider === 'openai' ? selectedModel : selectedOpenAIModel,
         apiKey: openaiKey
       });
     }
@@ -59,7 +64,7 @@ class AIAnalysisService {
       this.providers.push({
         name: 'DeepSeek',
         endpoint: 'https://api.deepseek.com/v1/chat/completions',
-        model: 'deepseek-chat',
+        model: selectedModelInfo?.provider === 'deepseek' ? selectedModel : 'deepseek-chat',
         apiKey: deepseekKey
       });
     }
@@ -69,7 +74,7 @@ class AIAnalysisService {
       this.providers.push({
         name: 'Anthropic',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        model: 'claude-3-sonnet-20240229',
+        model: selectedModelInfo?.provider === 'anthropic' ? selectedModel : 'claude-sonnet-4-5',
         apiKey: anthropicKey
       });
     }

@@ -179,7 +179,7 @@ const Settings = () => {
       const results = await aiService.testAPIKeys();
       setApiKeyStatus({
         openai: results.openai,
-        gemini: false, // Will be updated when Gemini service is implemented
+        gemini: results.gemini,
         deepseek: results.deepseek,
         anthropic: results.anthropic,
         tensorflow: results.tensorflow || false
@@ -400,36 +400,36 @@ const Settings = () => {
                   }}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
                 >
-                  <optgroup label="🚀 Latest Models (Recommended)">
-                    {getModelsByCategory('latest').map(model => (
+                  <optgroup label="🚀 OpenAI (Latest)">
+                    {getModelsByCategory('latest').filter(m => m.provider === 'openai').map(model => (
                       <option key={model.id} value={model.id}>
                         {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="🔷 Google Gemini Models">
-                    {getModelsByCategory('gemini').map(model => (
+                  <optgroup label="📜 OpenAI (Legacy IDs)">
+                    {getModelsByCategory('legacy').filter(m => m.provider === 'openai').map(model => (
                       <option key={model.id} value={model.id}>
                         {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="🧠 o1 Reasoning Models (ChatGPT-5)">
-                    {getModelsByCategory('reasoning').map(model => (
+                  <optgroup label="🔷 Google Gemini">
+                    {getModelsByProvider('google').map(model => (
                       <option key={model.id} value={model.id}>
                         {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="💬 Chat Models (GPT-4 Family)">
-                    {getModelsByCategory('chat').map(model => (
+                  <optgroup label="🟣 Anthropic Claude">
+                    {getModelsByProvider('anthropic').map(model => (
                       <option key={model.id} value={model.id}>
                         {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="📜 Legacy Models (GPT-3.5)">
-                    {getModelsByCategory('legacy').map(model => (
+                  <optgroup label="⚫ DeepSeek">
+                    {getModelsByProvider('deepseek').map(model => (
                       <option key={model.id} value={model.id}>
                         {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
                       </option>
@@ -444,6 +444,15 @@ const Settings = () => {
                 if (!selectedModelInfo) return null;
                 
                 const estimatedCost = calculateEstimatedCost(selectedModelInfo, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output);
+
+                const providerLabel =
+                  selectedModelInfo.provider === 'openai'
+                    ? 'OpenAI'
+                    : selectedModelInfo.provider === 'google'
+                      ? 'Google'
+                      : selectedModelInfo.provider === 'anthropic'
+                        ? 'Anthropic'
+                        : 'DeepSeek';
                 
                 return (
                   <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-3">
@@ -453,7 +462,7 @@ const Settings = () => {
                           <Zap className="h-4 w-4 mr-1" />
                           {selectedModelInfo.name}
                           {selectedModelInfo.isRecommended && <span className="ml-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-xs px-2 py-0.5 rounded-full">Recommended</span>}
-                          <span className="ml-2 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 text-xs px-2 py-0.5 rounded-full">{selectedModelInfo.provider === 'openai' ? 'OpenAI' : 'Google'}</span>
+                          <span className="ml-2 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 text-xs px-2 py-0.5 rounded-full">{providerLabel}</span>
                         </h4>
                         <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">{selectedModelInfo.description}</p>
                         <div className="flex items-center mt-2 space-x-4">
@@ -463,10 +472,10 @@ const Settings = () => {
                             <span className="ml-1">per analysis</span>
                           </div>
                           <div className="text-xs text-blue-600 dark:text-blue-400">
-                            Input: ${selectedModelInfo.inputCostPer1k}/1K tokens
+                            Input: {selectedModelInfo.inputCostPer1M == null ? '—' : `$${selectedModelInfo.inputCostPer1M}`}/1M tokens
                           </div>
                           <div className="text-xs text-blue-600 dark:text-blue-400">
-                            Output: ${selectedModelInfo.outputCostPer1k}/1K tokens
+                            Output: {selectedModelInfo.outputCostPer1M == null ? '—' : `$${selectedModelInfo.outputCostPer1M}`}/1M tokens
                           </div>
                         </div>
                       </div>
@@ -559,10 +568,10 @@ const Settings = () => {
                                 <span className="ml-1">per analysis</span>
                               </div>
                               <div className="text-xs text-gray-600 dark:text-gray-400">
-                                Input: ${model.inputCostPer1k}/1K tokens
+                                Input: {model.inputCostPer1M == null ? '—' : `$${model.inputCostPer1M}`}/1M tokens
                               </div>
                               <div className="text-xs text-gray-600 dark:text-gray-400">
-                                Output: ${model.outputCostPer1k}/1K tokens
+                                Output: {model.outputCostPer1M == null ? '—' : `$${model.outputCostPer1M}`}/1M tokens
                               </div>
                             </div>
                           </div>
@@ -616,8 +625,26 @@ const Settings = () => {
                   <ExternalLink className="h-5 w-5" />
                 </a>
               </div>
+
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  DeepSeek Models
+                </label>
+                <select
+                  value={getModelById(selectedModel)?.provider === 'deepseek' ? selectedModel : 'deepseek-chat'}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                >
+                  {getModelsByProvider('deepseek').map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Get your API key from the <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">DeepSeek platform</a>. Estimated cost: ~$0.005-0.02 per analysis.
+                Get your API key from the <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">DeepSeek platform</a>. Pricing isn’t publicly readable without login, so costs may show as “—” until pricing is configured in code.
               </p>
             </div>
             
@@ -659,8 +686,26 @@ const Settings = () => {
                   <ExternalLink className="h-5 w-5" />
                 </a>
               </div>
+
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Claude Models
+                </label>
+                <select
+                  value={getModelById(selectedModel)?.provider === 'anthropic' ? selectedModel : 'claude-sonnet-4-5'}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                >
+                  {getModelsByProvider('anthropic').map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Get your API key from the <a href="https://console.anthropic.com/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Anthropic console</a>. Estimated cost: ~$0.03-0.08 per analysis.
+                Get your API key from the <a href="https://console.anthropic.com/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Anthropic console</a>. Costs are estimated using the pricing table from <a href="https://platform.claude.com/docs/en/about-claude/models" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Claude model docs</a>.
               </p>
             </div>
             

@@ -1,13 +1,27 @@
+export type AIProvider = 'openai' | 'google' | 'anthropic' | 'deepseek';
+export type AIModelCategory =
+  | 'latest'
+  | 'reasoning'
+  | 'chat'
+  | 'legacy'
+  | 'gemini'
+  | 'claude'
+  | 'deepseek';
+
 export interface AIModel {
   id: string;
   name: string;
   description: string;
-  inputCostPer1k: number;  // Cost per 1K input tokens in USD
-  outputCostPer1k: number; // Cost per 1K output tokens in USD
+  /** USD per 1,000,000 tokens. Null means unknown / not configured. */
+  inputCostPer1M: number | null;
+  /** USD per 1,000,000 tokens. Null means unknown / not configured. */
+  outputCostPer1M: number | null;
   maxTokens: number;
-  category: 'latest' | 'reasoning' | 'chat' | 'legacy' | 'gemini';
-  provider: 'openai' | 'google';
+  category: AIModelCategory;
+  provider: AIProvider;
   isRecommended?: boolean;
+  pricingUrl?: string;
+  pricingAsOf?: string;
 }
 
 // Legacy interface for backwards compatibility
@@ -16,277 +30,206 @@ export interface OpenAIModel extends AIModel {
 }
 
 export const OPENAI_MODELS: AIModel[] = [
-  // Latest Models (GPT-4o family)
+  // OpenAI (pricing source: https://openai.com/api/pricing/)
   {
-    id: 'gpt-4o',
-    name: 'GPT-4o',
-    description: 'Latest flagship model with improved reasoning and vision capabilities',
-    inputCostPer1k: 5.00,
-    outputCostPer1k: 15.00,
-    maxTokens: 4096,
+    id: 'gpt-5.2',
+    name: 'GPT-5.2',
+    description: 'Flagship model for coding and agentic tasks',
+    inputCostPer1M: 1.75,
+    outputCostPer1M: 14.0,
+    maxTokens: 8192,
     category: 'latest',
     provider: 'openai',
-    isRecommended: true
+    isRecommended: true,
+    pricingUrl: 'https://openai.com/api/pricing/',
+    pricingAsOf: '2025-12-16'
   },
+  {
+    id: 'gpt-5.2-pro',
+    name: 'GPT-5.2 pro',
+    description: 'Highest-precision model (premium)',
+    inputCostPer1M: 21.0,
+    outputCostPer1M: 168.0,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    pricingUrl: 'https://openai.com/api/pricing/',
+    pricingAsOf: '2025-12-16'
+  },
+  {
+    id: 'gpt-5-mini',
+    name: 'GPT-5 mini',
+    description: 'Fast, cost-effective GPT-5 tier for well-defined tasks',
+    inputCostPer1M: 0.25,
+    outputCostPer1M: 2.0,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    isRecommended: true,
+    pricingUrl: 'https://openai.com/api/pricing/',
+    pricingAsOf: '2025-12-16'
+  },
+
+  // Backwards-compat / legacy OpenAI IDs (pricing not kept up-to-date here)
   {
     id: 'gpt-4o-mini',
-    name: 'GPT-4o mini',
-    description: 'Affordable and intelligent small model for fast, lightweight tasks',
-    inputCostPer1k: 0.150,
-    outputCostPer1k: 0.600,
+    name: 'GPT-4o mini (legacy id)',
+    description: 'Legacy model id kept for compatibility (pricing may have changed)',
+    inputCostPer1M: null,
+    outputCostPer1M: null,
     maxTokens: 16384,
-    category: 'latest',
-    provider: 'openai',
-    isRecommended: true
-  },
-  {
-    id: 'gpt-4o-2024-11-20',
-    name: 'GPT-4o (2024-11-20)',
-    description: 'Latest GPT-4o version with enhanced capabilities',
-    inputCostPer1k: 5.00,
-    outputCostPer1k: 15.00,
-    maxTokens: 4096,
-    category: 'latest',
+    category: 'legacy',
     provider: 'openai'
   },
   {
-    id: 'gpt-4o-2024-08-06',
-    name: 'GPT-4o (2024-08-06)',
-    description: 'GPT-4o with structured outputs support',
-    inputCostPer1k: 5.00,
-    outputCostPer1k: 15.00,
-    maxTokens: 4096,
-    category: 'latest',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-4o-2024-05-13',
-    name: 'GPT-4o (2024-05-13)',
-    description: 'Original GPT-4o release with multimodal capabilities',
-    inputCostPer1k: 5.00,
-    outputCostPer1k: 15.00,
-    maxTokens: 4096,
-    category: 'latest',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-4o-mini-2024-07-18',
-    name: 'GPT-4o mini (2024-07-18)',
-    description: 'Specific version of GPT-4o mini',
-    inputCostPer1k: 0.150,
-    outputCostPer1k: 0.600,
-    maxTokens: 16384,
-    category: 'latest',
-    provider: 'openai'
-  },
-
-  // ChatGPT-5 Models (o1 Reasoning family)
-  {
-    id: 'chatgpt-5',
-    name: 'ChatGPT-5',
-    description: 'Next-generation AI model with advanced reasoning capabilities',
-    inputCostPer1k: 15.00,
-    outputCostPer1k: 60.00,
-    maxTokens: 32768,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-  {
-    id: 'o1',
-    name: 'ChatGPT-5 (o1)',
-    description: 'Most capable reasoning model for complex, multi-step problems',
-    inputCostPer1k: 15.00,
-    outputCostPer1k: 60.00,
-    maxTokens: 32768,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-  {
-    id: 'o1-preview',
-    name: 'ChatGPT-5 Preview (o1-preview)',
-    description: 'Preview of ChatGPT-5 reasoning model with advanced problem-solving',
-    inputCostPer1k: 15.00,
-    outputCostPer1k: 60.00,
-    maxTokens: 32768,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-  {
-    id: 'o1-preview-2024-09-12',
-    name: 'o1-preview (2024-09-12)',
-    description: 'Specific version of ChatGPT-5 preview reasoning model',
-    inputCostPer1k: 15.00,
-    outputCostPer1k: 60.00,
-    maxTokens: 32768,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-  {
-    id: 'o1-mini',
-    name: 'ChatGPT-5 mini (o1-mini)',
-    description: 'Faster, more affordable ChatGPT-5 model for STEM tasks',
-    inputCostPer1k: 3.00,
-    outputCostPer1k: 12.00,
-    maxTokens: 65536,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-  {
-    id: 'o1-mini-2024-09-12',
-    name: 'o1-mini (2024-09-12)',
-    description: 'Specific version of ChatGPT-5 mini reasoning model',
-    inputCostPer1k: 3.00,
-    outputCostPer1k: 12.00,
-    maxTokens: 65536,
-    category: 'reasoning',
-    provider: 'openai'
-  },
-
-  // Chat Models (GPT-4 family)
-  {
-    id: 'gpt-4-turbo',
-    name: 'GPT-4 Turbo',
-    description: 'High-performance model with 128K context window',
-    inputCostPer1k: 10.00,
-    outputCostPer1k: 30.00,
-    maxTokens: 4096,
-    category: 'chat',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-4-turbo-2024-04-09',
-    name: 'GPT-4 Turbo (2024-04-09)',
-    description: 'Specific version of GPT-4 Turbo with vision capabilities',
-    inputCostPer1k: 10.00,
-    outputCostPer1k: 30.00,
-    maxTokens: 4096,
-    category: 'chat',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-4',
-    name: 'GPT-4',
-    description: 'Original GPT-4 model with strong reasoning capabilities',
-    inputCostPer1k: 30.00,
-    outputCostPer1k: 60.00,
-    maxTokens: 8192,
-    category: 'chat',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-4-0613',
-    name: 'GPT-4 (0613)',
-    description: 'June 2023 version of GPT-4',
-    inputCostPer1k: 30.00,
-    outputCostPer1k: 60.00,
+    id: 'gpt-4o',
+    name: 'GPT-4o (legacy id)',
+    description: 'Legacy model id kept for compatibility (pricing may have changed)',
+    inputCostPer1M: null,
+    outputCostPer1M: null,
     maxTokens: 8192,
     category: 'legacy',
     provider: 'openai'
   },
 
-  // Legacy Models (GPT-3.5 family)
+  // Google Gemini (pricing source: https://ai.google.dev/gemini-api/docs/pricing)
   {
-    id: 'gpt-3.5-turbo',
-    name: 'GPT-3.5 Turbo',
-    description: 'Fast and affordable model for simple tasks',
-    inputCostPer1k: 1.50,
-    outputCostPer1k: 2.00,
-    maxTokens: 4096,
-    category: 'legacy',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-3.5-turbo-0125',
-    name: 'GPT-3.5 Turbo (0125)',
-    description: 'Updated GPT-3.5 Turbo with improved accuracy',
-    inputCostPer1k: 0.50,
-    outputCostPer1k: 1.50,
-    maxTokens: 4096,
-    category: 'legacy',
-    provider: 'openai'
-  },
-  {
-    id: 'gpt-3.5-turbo-1106',
-    name: 'GPT-3.5 Turbo (1106)',
-    description: 'November 2023 version of GPT-3.5 Turbo',
-    inputCostPer1k: 1.00,
-    outputCostPer1k: 2.00,
-    maxTokens: 4096,
-    category: 'legacy',
-    provider: 'openai'
-  },
-
-  // Google Gemini Models
-  {
-    id: 'gemini-2.0-flash-exp',
-    name: 'Gemini 2.0 Flash (Experimental)',
-    description: 'Latest experimental Gemini model with enhanced capabilities',
-    inputCostPer1k: 0.075,  // $0.075 per 1M tokens
-    outputCostPer1k: 0.30,  // $0.30 per 1M tokens
+    id: 'gemini-3-pro-preview',
+    name: 'Gemini 3 Pro (Preview)',
+    description: 'Most powerful Gemini model (preview)',
+    inputCostPer1M: 2.0,
+    outputCostPer1M: 12.0,
     maxTokens: 1000000,
     category: 'gemini',
     provider: 'google',
-    isRecommended: true
+    isRecommended: false,
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
   },
   {
-    id: 'gemini-exp-1206',
-    name: 'Gemini Experimental (1206)',
-    description: 'Advanced experimental Gemini model with cutting-edge features',
-    inputCostPer1k: 0.075,  // $0.075 per 1M tokens
-    outputCostPer1k: 0.30,  // $0.30 per 1M tokens
-    maxTokens: 2000000,
-    category: 'gemini',
-    provider: 'google'
-  },
-  {
-    id: 'gemini-1.5-pro-002',
-    name: 'Gemini 1.5 Pro (Latest)',
-    description: 'Latest stable version of Gemini Pro with improved performance',
-    inputCostPer1k: 1.25,   // $1.25 per 1M tokens (updated pricing)
-    outputCostPer1k: 5.00,  // $5.00 per 1M tokens
-    maxTokens: 2000000,
-    category: 'gemini',
-    provider: 'google'
-  },
-  {
-    id: 'gemini-1.5-flash-002',
-    name: 'Gemini 1.5 Flash (Latest)',
-    description: 'Latest stable version of Gemini Flash - fast and efficient',
-    inputCostPer1k: 0.075,  // $0.075 per 1M tokens
-    outputCostPer1k: 0.30,  // $0.30 per 1M tokens
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    description: 'State-of-the-art multipurpose model (coding + complex reasoning)',
+    inputCostPer1M: 1.25,
+    outputCostPer1M: 10.0,
     maxTokens: 1000000,
     category: 'gemini',
-    provider: 'google'
+    provider: 'google',
+    isRecommended: true,
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
   },
   {
-    id: 'gemini-1.5-flash-8b',
-    name: 'Gemini 1.5 Flash-8B',
-    description: 'Smaller, ultra-fast model for simple tasks',
-    inputCostPer1k: 0.0375, // $0.0375 per 1M tokens
-    outputCostPer1k: 0.15,  // $0.15 per 1M tokens
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    description: 'Hybrid reasoning model with thinking budgets (balanced)',
+    inputCostPer1M: 0.3,
+    outputCostPer1M: 2.5,
     maxTokens: 1000000,
     category: 'gemini',
-    provider: 'google'
+    provider: 'google',
+    isRecommended: true,
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
   },
   {
-    id: 'gemini-1.5-pro',
-    name: 'Gemini 1.5 Pro (Legacy)',
-    description: 'Previous version of Gemini Pro for compatibility',
-    inputCostPer1k: 3.50,   // $3.50 per 1M tokens
-    outputCostPer1k: 10.50, // $10.50 per 1M tokens
-    maxTokens: 2000000,
-    category: 'gemini',
-    provider: 'google'
-  },
-  {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash (Legacy)',
-    description: 'Previous version of Gemini Flash for compatibility',
-    inputCostPer1k: 0.075,  // $0.075 per 1M tokens
-    outputCostPer1k: 0.30,  // $0.30 per 1M tokens
+    id: 'gemini-2.5-flash-lite',
+    name: 'Gemini 2.5 Flash-Lite',
+    description: 'Smallest / most cost-effective Gemini model for scale',
+    inputCostPer1M: 0.1,
+    outputCostPer1M: 0.4,
     maxTokens: 1000000,
     category: 'gemini',
-    provider: 'google'
+    provider: 'google',
+    isRecommended: true,
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
+  },
+  {
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    description: 'Balanced multimodal model (1M context)',
+    inputCostPer1M: 0.1,
+    outputCostPer1M: 0.4,
+    maxTokens: 1000000,
+    category: 'gemini',
+    provider: 'google',
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
+  },
+  {
+    id: 'gemini-2.0-flash-lite',
+    name: 'Gemini 2.0 Flash-Lite',
+    description: 'Smallest / most cost-effective Gemini model (legacy tier)',
+    inputCostPer1M: 0.075,
+    outputCostPer1M: 0.3,
+    maxTokens: 1000000,
+    category: 'gemini',
+    provider: 'google',
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2025-12-16'
+  },
+
+  // Anthropic Claude (pricing source: https://platform.claude.com/docs/en/about-claude/models)
+  {
+    id: 'claude-sonnet-4-5',
+    name: 'Claude Sonnet 4.5',
+    description: 'Best balance for complex agents and coding',
+    inputCostPer1M: 3.0,
+    outputCostPer1M: 15.0,
+    maxTokens: 200000,
+    category: 'claude',
+    provider: 'anthropic',
+    isRecommended: true,
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
+    pricingAsOf: '2025-12-16'
+  },
+  {
+    id: 'claude-haiku-4-5',
+    name: 'Claude Haiku 4.5',
+    description: 'Fastest Claude model with near-frontier intelligence',
+    inputCostPer1M: 1.0,
+    outputCostPer1M: 5.0,
+    maxTokens: 200000,
+    category: 'claude',
+    provider: 'anthropic',
+    isRecommended: true,
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
+    pricingAsOf: '2025-12-16'
+  },
+  {
+    id: 'claude-opus-4-5',
+    name: 'Claude Opus 4.5',
+    description: 'Premium Claude model (maximum intelligence)',
+    inputCostPer1M: 5.0,
+    outputCostPer1M: 25.0,
+    maxTokens: 200000,
+    category: 'claude',
+    provider: 'anthropic',
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
+    pricingAsOf: '2025-12-16'
+  },
+
+  // DeepSeek (pricing not publicly accessible without login at time of integration)
+  {
+    id: 'deepseek-chat',
+    name: 'DeepSeek Chat',
+    description: 'DeepSeek chat model (pricing not configured)',
+    inputCostPer1M: null,
+    outputCostPer1M: null,
+    maxTokens: 8192,
+    category: 'deepseek',
+    provider: 'deepseek'
+  },
+  {
+    id: 'deepseek-reasoner',
+    name: 'DeepSeek Reasoner',
+    description: 'DeepSeek reasoning model (pricing not configured)',
+    inputCostPer1M: null,
+    outputCostPer1M: null,
+    maxTokens: 8192,
+    category: 'deepseek',
+    provider: 'deepseek'
   }
 ];
 
@@ -294,7 +237,7 @@ export const getModelsByCategory = (category: string) => {
   return OPENAI_MODELS.filter(model => model.category === category);
 };
 
-export const getModelsByProvider = (provider: 'openai' | 'google') => {
+export const getModelsByProvider = (provider: AIProvider) => {
   return OPENAI_MODELS.filter(model => model.provider === provider);
 };
 
@@ -310,13 +253,17 @@ export const calculateEstimatedCost = (
   model: AIModel, 
   estimatedInputTokens: number = 1000, 
   estimatedOutputTokens: number = 500
-): number => {
-  const inputCost = (estimatedInputTokens / 1000) * model.inputCostPer1k;
-  const outputCost = (estimatedOutputTokens / 1000) * model.outputCostPer1k;
+): number | null => {
+  if (model.inputCostPer1M == null || model.outputCostPer1M == null) {
+    return null;
+  }
+  const inputCost = (estimatedInputTokens / 1_000_000) * model.inputCostPer1M;
+  const outputCost = (estimatedOutputTokens / 1_000_000) * model.outputCostPer1M;
   return inputCost + outputCost;
 };
 
-export const formatCostEstimate = (cost: number): string => {
+export const formatCostEstimate = (cost: number | null): string => {
+  if (cost == null || Number.isNaN(cost)) return '—';
   if (cost < 0.001) {
     return `$${(cost * 1000).toFixed(1)}‰`; // per mille symbol for very small costs
   } else if (cost < 0.01) {
@@ -329,8 +276,8 @@ export const formatCostEstimate = (cost: number): string => {
 };
 
 // Default models for new users
-export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash-exp';
+export const DEFAULT_OPENAI_MODEL = 'gpt-5-mini';
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
 export const DEFAULT_MODEL = DEFAULT_OPENAI_MODEL;
 
 // Estimated tokens for diabetes analysis (realistic estimates)

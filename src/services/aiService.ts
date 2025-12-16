@@ -1,7 +1,7 @@
 import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import TensorFlowAIService from './tensorFlowAIService';
 import GeminiService from './geminiService';
-import { getModelById } from '../constants/openaiModels';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, getModelById } from '../constants/openaiModels';
 
 // Interface for custom glucose range settings
 export interface CustomGlucoseRanges {
@@ -25,7 +25,7 @@ class AIService {
   private initializeProviders() {
     // Get API keys from localStorage or environment variables
     const openaiKey = localStorage.getItem('openai_api_key') || import.meta.env.VITE_OPENAI_API_KEY;
-    const selectedOpenAIModel = localStorage.getItem('openai_selected_model') || 'gpt-4o-mini';
+    const selectedOpenAIModel = localStorage.getItem('openai_selected_model') || DEFAULT_OPENAI_MODEL;
     const geminiKey = localStorage.getItem('gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY;
     const selectedModel = localStorage.getItem('selected_model') || selectedOpenAIModel;
     const deepseekKey = localStorage.getItem('deepseek_api_key') || import.meta.env.VITE_DEEPSEEK_API_KEY;
@@ -55,7 +55,7 @@ class AIService {
       this.providers.push({
         name: 'Gemini',
         endpoint: 'gemini', // Special identifier for Gemini
-        model: selectedModelInfo?.provider === 'google' ? selectedModel : 'gemini-2.0-flash-exp',
+        model: selectedModelInfo?.provider === 'google' ? selectedModel : DEFAULT_GEMINI_MODEL,
         apiKey: geminiKey
       });
     }
@@ -75,7 +75,7 @@ class AIService {
       this.providers.push({
         name: 'Anthropic',
         endpoint: 'https://api.anthropic.com/v1/messages',
-        model: 'claude-3-sonnet-20240229',
+        model: selectedModelInfo?.provider === 'anthropic' ? selectedModel : 'claude-sonnet-4-5',
         apiKey: anthropicKey
       });
     }
@@ -179,7 +179,7 @@ class AIService {
 
   // Get current OpenAI model information
   getCurrentOpenAIModel(): string {
-    return localStorage.getItem('openai_selected_model') || 'gpt-4o-mini';
+    return localStorage.getItem('openai_selected_model') || DEFAULT_OPENAI_MODEL;
   }
 
   // Refresh providers (call this when settings change)
