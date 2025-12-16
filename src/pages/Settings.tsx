@@ -1408,10 +1408,11 @@ const Settings = () => {
                   <p className="mb-2"><strong>For API v3 (Nightscout 15+):</strong></p>
                   <ol className="list-decimal list-inside space-y-1 ml-2">
                     <li>Log into your Nightscout site</li>
-                    <li>Open the admin/auth section where tokens/subjects are managed (wording differs by host)</li>
-                    <li>Create/generate a <strong>Bearer token</strong> with read permissions</li>
-                    <li>Ensure it includes: <strong>api:entries:read</strong>, <strong>api:treatments:read</strong>, <strong>api:profile:read</strong>, <strong>api:devicestatus:read</strong></li>
-                    <li>Paste the token here <strong>without</strong> the "Bearer " prefix</li>
+                    <li>Go to <strong>Admin Tools</strong> (or <strong>Settings</strong>)</li>
+                    <li>Open the page for <strong>Authentication</strong> / <strong>API Access</strong> / <strong>Tokens</strong> (names vary by host)</li>
+                    <li>Create a new <strong>subject</strong> (or user) and generate a <strong>Bearer token</strong></li>
+                    <li>Grant these permissions (read-only): <strong>api:entries:read</strong>, <strong>api:treatments:read</strong>, <strong>api:profile:read</strong>, <strong>api:devicestatus:read</strong></li>
+                    <li>Copy the generated token value and paste it here</li>
                   </ol>
                   <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
                     <p className="text-blue-700 dark:text-blue-300 font-medium">⚠️ Important for API v3:</p>
@@ -1456,7 +1457,7 @@ const Settings = () => {
                   <ul className="mt-2 space-y-1 text-sm text-yellow-800 dark:text-yellow-200 list-disc list-inside">
                     <li><strong>API v1:</strong> Use Access Tokens (read-only permissions)</li>
                     <li><strong>API v3:</strong> Use Bearer Tokens (with specific permissions)</li>
-                    <li><strong>Both:</strong> Paste only the token value (no "Bearer " prefix)</li>
+                    <li><strong>Both:</strong> Paste only the token value</li>
                   </ul>
                   <p className="mt-2 text-sm text-yellow-800 dark:text-yellow-200">
                     This application only needs read access to your glucose data and treatments.
