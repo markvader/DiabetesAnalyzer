@@ -92,6 +92,14 @@ const Settings = () => {
   const [selectedModel, setSelectedModel] = useState(localStorage.getItem('selected_model') || DEFAULT_MODEL);
   const [deepseekKey, setDeepseekKey] = useState(localStorage.getItem('deepseek_api_key') || '');
   const [anthropicKey, setAnthropicKey] = useState(localStorage.getItem('anthropic_api_key') || '');
+
+  const [lastActualCost, setLastActualCost] = useState<null | {
+    provider: string;
+    model: string;
+    tokenUsage: { inputTokens: number; outputTokens: number; totalTokens?: number };
+    costUSD: number | null;
+    at: number;
+  }>(null);
   
   // TensorFlow settings - removing old state since we use context now
   // const [tensorFlowEnabled, setTensorFlowEnabledState] = useState(() => {
@@ -102,6 +110,24 @@ const Settings = () => {
   // Auto-refresh settings
   const [newAutoRefreshEnabled, setNewAutoRefreshEnabled] = useState(autoRefreshEnabled);
   const [newAutoRefreshInterval, setNewAutoRefreshInterval] = useState(autoRefreshInterval);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('last_ai_cost');
+      if (!raw) {
+        setLastActualCost(null);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') {
+        setLastActualCost(null);
+        return;
+      }
+      setLastActualCost(parsed);
+    } catch {
+      setLastActualCost(null);
+    }
+  }, [selectedModel]);
   
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -403,35 +429,35 @@ const Settings = () => {
                   <optgroup label="🚀 OpenAI (Latest)">
                     {getModelsByCategory('latest').filter(m => m.provider === 'openai').map(model => (
                       <option key={model.id} value={model.id}>
-                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                        {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                       </option>
                     ))}
                   </optgroup>
                   <optgroup label="📜 OpenAI (Legacy IDs)">
                     {getModelsByCategory('legacy').filter(m => m.provider === 'openai').map(model => (
                       <option key={model.id} value={model.id}>
-                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                        {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                       </option>
                     ))}
                   </optgroup>
                   <optgroup label="🔷 Google Gemini">
                     {getModelsByProvider('google').map(model => (
                       <option key={model.id} value={model.id}>
-                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                        {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                       </option>
                     ))}
                   </optgroup>
                   <optgroup label="🟣 Anthropic Claude">
                     {getModelsByProvider('anthropic').map(model => (
                       <option key={model.id} value={model.id}>
-                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                        {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                       </option>
                     ))}
                   </optgroup>
                   <optgroup label="⚫ DeepSeek">
                     {getModelsByProvider('deepseek').map(model => (
                       <option key={model.id} value={model.id}>
-                        {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                        {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                       </option>
                     ))}
                   </optgroup>
@@ -469,8 +495,17 @@ const Settings = () => {
                           <div className="flex items-center text-xs text-blue-600 dark:text-blue-400">
                             <DollarSign className="h-3 w-3 mr-1" />
                             <span className="font-medium">{formatCostEstimate(estimatedCost)}</span>
-                            <span className="ml-1">per analysis</span>
+                            <span className="ml-1">est. / analysis</span>
                           </div>
+                          {lastActualCost && lastActualCost.model === selectedModelInfo.id && (
+                            <div className="text-xs text-blue-600 dark:text-blue-400">
+                              Actual last run:{' '}
+                              <span className="font-medium">{formatCostEstimate(lastActualCost.costUSD)}</span>
+                              {lastActualCost.tokenUsage && (
+                                <span className="ml-1">({lastActualCost.tokenUsage.inputTokens} in / {lastActualCost.tokenUsage.outputTokens} out)</span>
+                              )}
+                            </div>
+                          )}
                           <div className="text-xs text-blue-600 dark:text-blue-400">
                             Input: {selectedModelInfo.inputCostPer1M == null ? '—' : `$${selectedModelInfo.inputCostPer1M}`}/1M tokens
                           </div>
@@ -565,7 +600,7 @@ const Settings = () => {
                               <div className="flex items-center text-xs text-gray-600 dark:text-gray-400">
                                 <DollarSign className="h-3 w-3 mr-1" />
                                 <span className="font-medium">{formatCostEstimate(cost)}</span>
-                                <span className="ml-1">per analysis</span>
+                                <span className="ml-1">est. / analysis</span>
                               </div>
                               <div className="text-xs text-gray-600 dark:text-gray-400">
                                 Input: {model.inputCostPer1M == null ? '—' : `$${model.inputCostPer1M}`}/1M tokens
@@ -637,14 +672,14 @@ const Settings = () => {
                 >
                   {getModelsByProvider('deepseek').map(model => (
                     <option key={model.id} value={model.id}>
-                      {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                     </option>
                   ))}
                 </select>
               </div>
 
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Get your API key from the <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">DeepSeek platform</a>. Pricing isn’t publicly readable without login, so costs may show as “—” until pricing is configured in code.
+                Get your API key from the <a href="https://platform.deepseek.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">DeepSeek platform</a>. Token pricing source: <a href="https://api-docs.deepseek.com/quick_start/pricing" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">DeepSeek API Docs</a>.
               </p>
             </div>
             
@@ -698,7 +733,7 @@ const Settings = () => {
                 >
                   {getModelsByProvider('anthropic').map(model => (
                     <option key={model.id} value={model.id}>
-                      {model.name} - {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} per analysis
+                      {model.name} - est. {formatCostEstimate(calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output))} / analysis
                     </option>
                   ))}
                 </select>
@@ -746,12 +781,11 @@ const Settings = () => {
                     When API keys are configured, they take priority over TensorFlow for highest accuracy analysis.
                   </p>
                   <p className="mt-2 text-sm text-blue-800 dark:text-blue-200">
-                    <strong>Estimated costs per analysis:</strong>
+                    <strong>Costs:</strong>
                   </p>
                   <ul className="mt-1 space-y-1 text-sm text-blue-800 dark:text-blue-200 list-disc list-inside">
-                    <li>OpenAI GPT-4o mini: $0.003-0.01 per analysis (recommended)</li>
-                    <li>DeepSeek: $0.005-0.02 per analysis</li>
-                    <li>Anthropic Claude: $0.03-0.08 per analysis</li>
+                    <li>Model selector shows an estimated $/analysis using ~{DIABETES_ANALYSIS_TOKENS.input} input and ~{DIABETES_ANALYSIS_TOKENS.output} output tokens.</li>
+                    <li>AI Insights shows the actual token usage + actual USD cost after each run (based on the provider’s token counts and the model pricing table).</li>
                   </ul>
                   <p className="mt-2 text-sm text-blue-800 dark:text-blue-200">
                     <strong>Privacy:</strong> Your API keys are stored only in your browser's local storage and are never sent to our servers.

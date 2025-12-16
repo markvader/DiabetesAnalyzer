@@ -1,7 +1,13 @@
 import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import TensorFlowAIService from './tensorFlowAIService';
 import GeminiService from './geminiService';
-import { DEFAULT_GEMINI_MODEL, DEFAULT_OPENAI_MODEL, getModelById } from '../constants/openaiModels';
+import {
+  DEFAULT_GEMINI_MODEL,
+  DEFAULT_OPENAI_MODEL,
+  TokenUsage,
+  calculateCostFromTokenUsage,
+  getModelById
+} from '../constants/openaiModels';
 
 // Interface for custom glucose range settings
 export interface CustomGlucoseRanges {
@@ -15,6 +21,25 @@ class AIService {
   providers: any[] = [];
   private tensorFlowService: TensorFlowAIService;
   private geminiService: GeminiService;
+
+  private storeLastAICost(info: {
+    provider: string;
+    model: string;
+    tokenUsage: TokenUsage;
+    costUSD: number | null;
+  }) {
+    try {
+      localStorage.setItem(
+        'last_ai_cost',
+        JSON.stringify({
+          ...info,
+          at: Date.now()
+        })
+      );
+    } catch {
+      // Ignore storage failures (private mode, quota, etc.)
+    }
+  }
 
   constructor() {
     this.tensorFlowService = new TensorFlowAIService();
@@ -65,7 +90,7 @@ class AIService {
       this.providers.push({
         name: 'DeepSeek',
         endpoint: 'https://api.deepseek.com/v1/chat/completions',
-        model: 'deepseek-chat',
+        model: selectedModelInfo?.provider === 'deepseek' ? selectedModel : 'deepseek-chat',
         apiKey: deepseekKey
       });
     }
@@ -290,6 +315,19 @@ class AIService {
                 provider.model, 
                 glucoseContext?.unit === 'mmol' ? 'mmol/L' : 'mg/dL'
               );
+
+              const tokenUsage: TokenUsage = {
+                inputTokens: geminiResult.tokenUsage.prompt,
+                outputTokens: geminiResult.tokenUsage.completion,
+                totalTokens: geminiResult.tokenUsage.total
+              };
+              const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
+              this.storeLastAICost({
+                provider: 'Gemini',
+                model: provider.model,
+                tokenUsage,
+                costUSD
+              });
               
               // Convert Gemini result to expected format
               return {
@@ -303,7 +341,9 @@ class AIService {
                   avgGlucose: stats.mean
                 },
                 provider: 'Gemini',
-                tokenUsage: geminiResult.tokenUsage
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } else if (provider.name === 'Anthropic') {
               response = await fetch(provider.endpoint, {
@@ -346,11 +386,22 @@ class AIService {
             
             const data = await response.json();
             let content;
+            let tokenUsage: TokenUsage | null = null;
             
             if (provider.name === 'Anthropic') {
               content = data.content[0].text;
+              tokenUsage = {
+                inputTokens: data.usage?.input_tokens ?? 0,
+                outputTokens: data.usage?.output_tokens ?? 0,
+                totalTokens: (data.usage?.input_tokens ?? 0) + (data.usage?.output_tokens ?? 0)
+              };
             } else {
               content = data.choices[0].message.content;
+              tokenUsage = {
+                inputTokens: data.usage?.prompt_tokens ?? 0,
+                outputTokens: data.usage?.completion_tokens ?? 0,
+                totalTokens: data.usage?.total_tokens
+              };
             }
             
             // Try to parse JSON from the response
@@ -360,12 +411,26 @@ class AIService {
               const result = JSON.parse(jsonString);
               
               console.log(`✅ ${provider.name} glucose analysis successful`);
+
+              const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
+              if (tokenUsage) {
+                this.storeLastAICost({
+                  provider: provider.name,
+                  model: provider.model,
+                  tokenUsage,
+                  costUSD
+                });
+              }
               
               return {
                 insights: result.insights || [],
                 recommendations: result.recommendations || [],
                 riskAssessment: result.riskAssessment || 'medium',
-                confidence: result.confidence || 70
+                confidence: result.confidence || 70,
+                provider: provider.name,
+                model: provider.model,
+                tokenUsage,
+                costUSD
               };
             } catch (parseError) {
               console.error(`Failed to parse ${provider.name} response:`, parseError);

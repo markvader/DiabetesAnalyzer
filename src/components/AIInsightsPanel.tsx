@@ -4,6 +4,7 @@ import { aiService } from '../services/aiService';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { motion } from 'framer-motion';
+import { formatCostEstimate, getModelById } from '../constants/openaiModels';
 import { 
   Paper, 
   Typography, 
@@ -44,6 +45,12 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
+  const [lastUsageInfo, setLastUsageInfo] = useState<{
+    provider?: string;
+    model?: string;
+    tokenUsage?: { inputTokens: number; outputTokens: number; totalTokens?: number } | null;
+    costUSD?: number | null;
+  } | null>(null);
   const initialLoadDone = useRef<boolean>(false);
 
   useEffect(() => {
@@ -90,6 +97,12 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
         setRecommendations(result.recommendations);
         setRiskAssessment(result.riskAssessment);
         setConfidence(result.confidence);
+        setLastUsageInfo({
+          provider: result.provider,
+          model: result.model,
+          tokenUsage: result.tokenUsage,
+          costUSD: result.costUSD
+        });
         setLastAnalyzedData(dataHash);
         initialLoadDone.current = true;
       } else {
@@ -163,6 +176,28 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
       case 'high': return theme.palette.error.main;
       default: return theme.palette.text.secondary;
     }
+  };
+
+  const getUsageLabel = () => {
+    if (!lastUsageInfo?.provider || !lastUsageInfo?.model) return null;
+    const modelInfo = getModelById(lastUsageInfo.model);
+    const modelLabel = modelInfo?.name || lastUsageInfo.model;
+
+    const tokens = lastUsageInfo.tokenUsage;
+    const tokensLabel =
+      tokens && (tokens.inputTokens > 0 || tokens.outputTokens > 0)
+        ? `${tokens.inputTokens} in / ${tokens.outputTokens} out`
+        : null;
+
+    const costLabel =
+      lastUsageInfo.costUSD != null
+        ? `Cost ${formatCostEstimate(lastUsageInfo.costUSD)}`
+        : null;
+
+    const parts = [`${lastUsageInfo.provider} • ${modelLabel}`];
+    if (tokensLabel) parts.push(tokensLabel);
+    if (costLabel) parts.push(costLabel);
+    return parts.join(' • ');
   };
 
   // Premium Design with Demo Styling
@@ -249,6 +284,11 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
                     </Typography>
                   </Box>
                 </Box>
+                {getUsageLabel() && (
+                  <Typography variant="caption" sx={{ display: 'block', opacity: 0.9, color: '#ffffff', mt: 0.5 }}>
+                    {getUsageLabel()}
+                  </Typography>
+                )}
               </Box>
             </Paper>
 
@@ -473,6 +513,12 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
             </Box>
           </Box>
 
+          {getUsageLabel() && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+              {getUsageLabel()}
+            </Typography>
+          )}
+
           <Box display="grid" gridTemplateColumns={{ xs: '1fr', md: '1fr 1fr' }} gap={3}>
             {insights.length > 0 && (
               <Paper 
@@ -587,6 +633,12 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
           </span>
         </div>
       </div>
+
+      {getUsageLabel() && (
+        <div className="-mt-2 mb-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400">{getUsageLabel()}</p>
+        </div>
+      )}
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {insights.length > 0 && (

@@ -1,5 +1,5 @@
 // Google Gemini AI Service
-import { getModelById } from '../constants/openaiModels';
+import { DEFAULT_GEMINI_MODEL, getModelById } from '../constants/openaiModels';
 
 interface GeminiResponse {
   candidates: {
@@ -56,14 +56,14 @@ class GeminiService {
     }
 
     try {
-      // Test with the latest recommended model
-      const response = await this.generateContent('gemini-2.0-flash-exp', 'Hello, this is a test. Please respond with "Test successful".');
-      return response.includes('Test successful') || response.includes('test') || response.length > 0;
+      // Test with a known model from our catalog
+      const response = await this.generateContent(DEFAULT_GEMINI_MODEL, 'Hello, this is a test. Please respond with "Test successful".');
+      return response.text.includes('Test successful') || response.text.toLowerCase().includes('test') || response.text.length > 0;
     } catch (error) {
-      // Fallback to older model if newer one fails
+      // Fallback to another known model if the default fails
       try {
-        const response = await this.generateContent('gemini-1.5-flash-002', 'Hello, this is a test. Please respond with "Test successful".');
-        return response.includes('Test successful') || response.includes('test') || response.length > 0;
+        const response = await this.generateContent('gemini-2.0-flash', 'Hello, this is a test. Please respond with "Test successful".');
+        return response.text.includes('Test successful') || response.text.toLowerCase().includes('test') || response.text.length > 0;
       } catch (fallbackError) {
         console.error('Gemini connection test failed:', error, fallbackError);
         return false;
@@ -71,7 +71,10 @@ class GeminiService {
     }
   }
 
-  private async generateContent(modelId: string, prompt: string): Promise<string> {
+  private async generateContent(
+    modelId: string,
+    prompt: string
+  ): Promise<{ text: string; usageMetadata: GeminiResponse['usageMetadata'] } > {
     if (!this.apiKey) {
       throw new Error('Gemini API key not configured');
     }
@@ -136,7 +139,10 @@ class GeminiService {
       throw new Error('No response from Gemini API');
     }
 
-    return data.candidates[0].content.parts[0].text;
+    return {
+      text: data.candidates[0].content.parts[0].text,
+      usageMetadata: data.usageMetadata
+    };
   }
 
   public async analyzeDiabetesData(
@@ -215,18 +221,19 @@ Respond only with the JSON object, no additional text.`;
 
     try {
       const response = await this.generateContent(modelId, prompt);
+      const responseText = response.text;
       
       // Try to parse JSON response
       let analysisResult;
       try {
         // Extract JSON from response if it's wrapped in other text
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        const jsonStr = jsonMatch ? jsonMatch[0] : response;
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        const jsonStr = jsonMatch ? jsonMatch[0] : responseText;
         analysisResult = JSON.parse(jsonStr);
       } catch (parseError) {
         // If JSON parsing fails, create a structured response from the text
         analysisResult = {
-          recommendations: [response],
+          recommendations: [responseText],
           riskAssessment: avgGlucose > 250 ? 'critical' : avgGlucose > 180 ? 'high' : avgGlucose < 70 ? 'high' : 'medium',
           confidence: 0.7,
           reasoning: ['Generated from unstructured response'],
@@ -242,9 +249,9 @@ Respond only with the JSON object, no additional text.`;
         reasoning: Array.isArray(analysisResult.reasoning) ? analysisResult.reasoning : [analysisResult.reasoning || 'Based on glucose data analysis'],
         safetyWarnings: Array.isArray(analysisResult.safetyWarnings) ? analysisResult.safetyWarnings : [],
         tokenUsage: {
-          prompt: prompt.length / 4, // Rough estimation
-          completion: response.length / 4, // Rough estimation
-          total: (prompt.length + response.length) / 4
+          prompt: response.usageMetadata?.promptTokenCount ?? 0,
+          completion: response.usageMetadata?.candidatesTokenCount ?? 0,
+          total: response.usageMetadata?.totalTokenCount ?? 0
         }
       };
 

@@ -210,26 +210,32 @@ export const OPENAI_MODELS: AIModel[] = [
     pricingAsOf: '2025-12-16'
   },
 
-  // DeepSeek (pricing not publicly accessible without login at time of integration)
+  // DeepSeek (pricing source: https://api-docs.deepseek.com/quick_start/pricing)
   {
     id: 'deepseek-chat',
     name: 'DeepSeek Chat',
-    description: 'DeepSeek chat model (pricing not configured)',
-    inputCostPer1M: null,
-    outputCostPer1M: null,
+    description: 'DeepSeek-V3.2 (Non-thinking mode)',
+    // DeepSeek input pricing is split into cache-hit vs cache-miss.
+    // This app does not use prompt caching, so cache-miss is the effective price.
+    inputCostPer1M: 0.28,
+    outputCostPer1M: 0.42,
     maxTokens: 8192,
     category: 'deepseek',
-    provider: 'deepseek'
+    provider: 'deepseek',
+    pricingUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
+    pricingAsOf: '2025-12-16'
   },
   {
     id: 'deepseek-reasoner',
     name: 'DeepSeek Reasoner',
-    description: 'DeepSeek reasoning model (pricing not configured)',
-    inputCostPer1M: null,
-    outputCostPer1M: null,
+    description: 'DeepSeek-V3.2 (Thinking mode)',
+    inputCostPer1M: 0.28,
+    outputCostPer1M: 0.42,
     maxTokens: 8192,
     category: 'deepseek',
-    provider: 'deepseek'
+    provider: 'deepseek',
+    pricingUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
+    pricingAsOf: '2025-12-16'
   }
 ];
 
@@ -247,6 +253,25 @@ export const getRecommendedModels = () => {
 
 export const getModelById = (id: string) => {
   return OPENAI_MODELS.find(model => model.id === id);
+};
+
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens?: number;
+};
+
+export const calculateCostFromTokenUsage = (
+  modelOrId: AIModel | string,
+  usage: TokenUsage
+): number | null => {
+  const model = typeof modelOrId === 'string' ? getModelById(modelOrId) : modelOrId;
+  if (!model) return null;
+  if (model.inputCostPer1M == null || model.outputCostPer1M == null) return null;
+
+  const inputCost = (usage.inputTokens / 1_000_000) * model.inputCostPer1M;
+  const outputCost = (usage.outputTokens / 1_000_000) * model.outputCostPer1M;
+  return inputCost + outputCost;
 };
 
 export const calculateEstimatedCost = (
