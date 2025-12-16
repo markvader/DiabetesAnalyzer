@@ -69,6 +69,7 @@ const Settings = () => {
   const [newUrl, setNewUrl] = useState(url);
   const [newToken, setNewToken] = useState(token);
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [openaiTestError, setOpenaiTestError] = useState<string>('');
   const [testing, setTesting] = useState(false);
   const [apiKeyStatus, setApiKeyStatus] = useState<{
     openai: boolean | null;
@@ -203,6 +204,13 @@ const Settings = () => {
     setTestingApiKeys(true);
     try {
       const results = await aiService.testAPIKeys();
+
+      try {
+        setOpenaiTestError(localStorage.getItem('openai_test_error') || '');
+      } catch {
+        setOpenaiTestError('');
+      }
+
       setApiKeyStatus({
         openai: results.openai,
         gemini: results.gemini,
@@ -392,6 +400,11 @@ const Settings = () => {
                   )}
                 </div>
               </div>
+              {apiKeyStatus.openai === false && openaiTestError && (
+                <p className="mt-1 text-xs text-red-600 dark:text-red-400 break-words">
+                  {openaiTestError}
+                </p>
+              )}
               <div className="flex mb-3">
                 <input
                   type="password"

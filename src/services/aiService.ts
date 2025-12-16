@@ -142,6 +142,15 @@ class AIService {
         if (provider.name === 'Gemini') {
           // Skip testing here since we tested it above
           continue;
+        } else if (provider.name === 'OpenAI') {
+          // Validate the key itself, independent of any specific model availability.
+          // Model calls can fail even with a valid key (e.g., model not enabled), which was confusing in Settings.
+          response = await fetch('https://api.openai.com/v1/models', {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${provider.apiKey}`
+            }
+          });
         } else if (provider.name === 'Anthropic') {
           // Special handling for Anthropic API
           response = await fetch(provider.endpoint, {
@@ -180,6 +189,7 @@ class AIService {
         if (response.ok) {
           if (provider.name === 'OpenAI') {
             results.openai = true;
+            try { localStorage.removeItem('openai_test_error'); } catch {}
           } else if (provider.name === 'DeepSeek') {
             results.deepseek = true;
           } else if (provider.name === 'Anthropic') {
@@ -187,10 +197,24 @@ class AIService {
           }
           console.log(`${provider.name} API key is working`);
         } else {
-          console.error(`${provider.name} API key test failed:`, await response.text());
+          const errorText = await response.text();
+          console.error(`${provider.name} API key test failed:`, errorText);
+          if (provider.name === 'OpenAI') {
+            try {
+              localStorage.setItem(
+                'openai_test_error',
+                `${response.status} ${response.statusText}${errorText ? ` — ${errorText}` : ''}`
+              );
+            } catch {}
+          }
         }
       } catch (error) {
         console.error(`${provider.name} API test error:`, error);
+        if (provider.name === 'OpenAI') {
+          try {
+            localStorage.setItem('openai_test_error', error instanceof Error ? error.message : String(error));
+          } catch {}
+        }
       }
     }
     
