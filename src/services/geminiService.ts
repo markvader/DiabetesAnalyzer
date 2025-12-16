@@ -18,11 +18,21 @@ interface GeminiResponse {
 }
 
 interface GeminiAnalysisResult {
+  insights?: string[];
   recommendations: string[];
   riskAssessment: 'low' | 'medium' | 'high' | 'critical';
   confidence: number;
   reasoning: string[];
   safetyWarnings: string[];
+  details?: {
+    executiveSummary?: string;
+    likelyDrivers?: string[];
+    safetyFlags?: string[];
+    actionPlan7Days?: string[];
+    experiments?: string[];
+    questionsForClinician?: string[];
+    dataQualityNotes?: string[];
+  } | null;
   tokenUsage: {
     prompt: number;
     completion: number;
@@ -172,7 +182,7 @@ class GeminiService {
       high: (highCount / values.length) * 100
     };
 
-    const prompt = `As an advanced diabetes management AI assistant using the latest Gemini technology, analyze the following glucose data and provide comprehensive, evidence-based recommendations:
+    const prompt = `As an advanced diabetes management AI assistant using the latest Gemini technology, analyze the following glucose data and provide comprehensive, evidence-based recommendations.
 
 GLUCOSE DATA SUMMARY:
 - Unit: ${unit}
@@ -189,6 +199,9 @@ Recent glucose pattern: ${recentData.map(d => `${d.value}${unit}`).join(', ')}
 
 Please provide your analysis in the following JSON format:
 {
+  "insights": [
+    "3-5 short key observations about glucose patterns"
+  ],
   "recommendations": [
     "Specific, actionable recommendation 1 with clear rationale",
     "Specific, actionable recommendation 2 with clear rationale",
@@ -203,7 +216,16 @@ Please provide your analysis in the following JSON format:
   ],
   "safetyWarnings": [
     "Any urgent safety concerns if applicable"
-  ]
+  ],
+  "details": {
+    "executiveSummary": "2-4 sentences",
+    "likelyDrivers": ["3-6 bullets"],
+    "safetyFlags": ["0-5 bullets"],
+    "actionPlan7Days": ["4-7 bullets"],
+    "experiments": ["2-4 safe self-experiments; no medication dosing"],
+    "questionsForClinician": ["3-6 bullets"],
+    "dataQualityNotes": ["0-5 bullets"]
+  }
 }
 
 FOCUS AREAS:
@@ -243,11 +265,13 @@ Respond only with the JSON object, no additional text.`;
 
       // Validate and ensure required fields
       const result: GeminiAnalysisResult = {
+        insights: Array.isArray(analysisResult.insights) ? analysisResult.insights : undefined,
         recommendations: Array.isArray(analysisResult.recommendations) ? analysisResult.recommendations : [analysisResult.recommendations || 'Monitor glucose levels closely'],
         riskAssessment: ['low', 'medium', 'high', 'critical'].includes(analysisResult.riskAssessment) ? analysisResult.riskAssessment : 'medium',
         confidence: typeof analysisResult.confidence === 'number' ? Math.max(0, Math.min(1, analysisResult.confidence)) : 0.7,
         reasoning: Array.isArray(analysisResult.reasoning) ? analysisResult.reasoning : [analysisResult.reasoning || 'Based on glucose data analysis'],
         safetyWarnings: Array.isArray(analysisResult.safetyWarnings) ? analysisResult.safetyWarnings : [],
+        details: typeof analysisResult.details === 'object' ? analysisResult.details : null,
         tokenUsage: {
           prompt: response.usageMetadata?.promptTokenCount ?? 0,
           completion: response.usageMetadata?.candidatesTokenCount ?? 0,

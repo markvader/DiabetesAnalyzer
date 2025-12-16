@@ -264,6 +264,26 @@ class AIService {
         try {
           const result = await this.tensorFlowService.analyzeGlucosePatterns(readings);
           if (result && result.insights && result.insights.length > 0) {
+            const stats = this.calculateBasicStats(readings);
+            const tir = this.coerceTimeInRangePercent(timeInRange, result?.patterns?.timeInRange);
+            const { riskAssessment, confidence } = this.assessLocalGlucoseRisk(tir, stats, readings.length);
+
+            const formatValue = glucoseContext
+              ? (value: number) => glucoseContext.formatGlucoseValue(value, 'mgdl', true)
+              : (value: number) => `${toMmol(value)} mmol/L`;
+
+            const recommendations = this.buildLocalGlucoseRecommendations(tir, stats);
+            const details = this.buildLocalGlucoseDetails(tir, stats, readings, formatValue);
+
+            const tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const costUSD = 0;
+            this.storeLastAICost({
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
+            });
+
             // Adapt TensorFlow result for glucose analysis format
             return {
               insights: result.insights || [
@@ -271,19 +291,20 @@ class AIService {
                 "Local AI processing provides privacy and speed",
                 "Advanced machine learning pattern detection"
               ],
-              recommendations: result.recommendations || [
-                "Monitor glucose patterns consistently", 
-                "Review trending patterns with healthcare provider",
-                "Consider adjustments based on pattern insights"
-              ],
-              riskAssessment: result.riskLevel || 'medium',
-              confidence: result.confidence || 85,
+              recommendations,
+              riskAssessment,
+              confidence,
+              details,
               patterns: result.patterns || {
                 timeInRange: timeInRange,
                 variability: result.patterns?.variability || 0,
                 avgGlucose: result.patterns?.avgGlucose || 0
               },
-              predictions: result.predictions
+              predictions: result.predictions,
+              provider: 'TensorFlow',
+              model: 'local',
+              tokenUsage,
+              costUSD
             };
           }
         } catch (tfError) {
@@ -301,24 +322,36 @@ class AIService {
           ? (value: number) => glucoseContext.formatGlucoseValue(value, 'mgdl', true)
           : (value: number) => `${toMmol(value)} mmol/L`;
         
-        // Create a concise prompt
-        const prompt = `
-          Analyze this diabetes data:
-          
-          Time in Range:
-          - Below Range: ${timeInRange.lowPercentage.toFixed(1)}%
-          - In Range: ${timeInRange.timeInRange.toFixed(1)}%
-          - Above Range: ${timeInRange.highPercentage.toFixed(1)}%
-          
-          Variability: CV ${stats.cv.toFixed(1)}%
-          Mean Glucose: ${formatValue(stats.mean)}
-          
-          Provide JSON with:
-          1. insights: 3-4 key observations about glucose patterns
-          2. recommendations: 3-4 actionable suggestions
-          3. riskAssessment: "low", "medium", "high", or "critical"
-          4. confidence: 0-100%
-        `;
+            // Create a concise but more informative prompt
+            const prompt = `
+              You are a diabetes management AI assistant specializing in glucose pattern analysis.
+
+              Analyze this diabetes data summary and return ONLY valid JSON.
+
+              Time in Range (%):
+              - Below Range: ${timeInRange.lowPercentage.toFixed(1)}
+              - In Range: ${timeInRange.timeInRange.toFixed(1)}
+              - Above Range: ${timeInRange.highPercentage.toFixed(1)}
+
+              Variability (CV %): ${stats.cv.toFixed(1)}
+              Mean Glucose: ${formatValue(stats.mean)}
+
+              Return JSON with these keys:
+              1. insights: 3-5 short key observations about glucose patterns
+              2. recommendations: 4-6 actionable suggestions (non-prescriptive; avoid dosage changes)
+              3. riskAssessment: "low" | "medium" | "high" | "critical"
+              4. confidence: integer 0-100
+              5. details: an object with:
+                 - executiveSummary: 2-4 sentences
+                 - likelyDrivers: 3-6 bullets (possible causes of patterns)
+                 - safetyFlags: 0-5 bullets (urgent red flags; include when to contact clinician)
+                 - actionPlan7Days: 4-7 bullets (practical steps for the next week)
+                 - experiments: 2-4 bullets (safe self-experiments; e.g., meal timing, pre-bolus timing discussions, activity timing; no medication dosing)
+                 - questionsForClinician: 3-6 bullets
+                 - dataQualityNotes: 0-5 bullets (limitations / missing context)
+
+              Keep it concise. If uncertain, say so in dataQualityNotes.
+            `;
         
         // Try each provider in order
         for (const provider of this.providers) {
@@ -354,11 +387,12 @@ class AIService {
               });
               
               // Convert Gemini result to expected format
-              return {
-                insights: geminiResult.reasoning,
+                  return {
+                    insights: (geminiResult as any).insights ?? geminiResult.reasoning,
                 recommendations: geminiResult.recommendations,
                 riskAssessment: geminiResult.riskAssessment,
                 confidence: Math.round(geminiResult.confidence * 100),
+                    details: (geminiResult as any).details ?? null,
                 patterns: {
                   timeInRange: timeInRange,
                   variability: stats.cv,
@@ -382,7 +416,7 @@ class AIService {
                   messages: [
                     { role: 'user', content: prompt }
                   ],
-                  max_tokens: 500
+                      max_tokens: 900
                 })
               });
             } else {
@@ -399,7 +433,7 @@ class AIService {
                     { role: 'user', content: prompt }
                   ],
                   temperature: 0.3,
-                  max_tokens: 500
+                      max_tokens: 900
                 })
               });
             }
@@ -451,6 +485,7 @@ class AIService {
                 recommendations: result.recommendations || [],
                 riskAssessment: result.riskAssessment || 'medium',
                 confidence: result.confidence || 70,
+                    details: result.details || null,
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -1401,6 +1436,166 @@ class AIService {
       stdDev: stdDev, // Keep in mg/dL
       cv: (stdDev / mean) * 100,
       high: Math.round(highPercentage) // High percentage rounded
+    };
+  }
+
+  private coerceTimeInRangePercent(timeInRange: any, fallbackFromTensorFlow?: any): { low: number; inRange: number; high: number } {
+    const fromUI = timeInRange && typeof timeInRange === 'object'
+      ? {
+          low: typeof timeInRange.lowPercentage === 'number' ? timeInRange.lowPercentage : undefined,
+          inRange: typeof timeInRange.timeInRange === 'number' ? timeInRange.timeInRange : undefined,
+          high: typeof timeInRange.highPercentage === 'number' ? timeInRange.highPercentage : undefined
+        }
+      : {};
+
+    const fromTF = fallbackFromTensorFlow && typeof fallbackFromTensorFlow === 'object'
+      ? {
+          low: typeof fallbackFromTensorFlow.low === 'number' ? fallbackFromTensorFlow.low : undefined,
+          inRange: typeof fallbackFromTensorFlow.inRange === 'number' ? fallbackFromTensorFlow.inRange : undefined,
+          high: typeof fallbackFromTensorFlow.high === 'number' ? fallbackFromTensorFlow.high : undefined
+        }
+      : {};
+
+    const low = (fromUI.low ?? fromTF.low ?? 0);
+    const inRange = (fromUI.inRange ?? fromTF.inRange ?? 0);
+    const high = (fromUI.high ?? fromTF.high ?? 0);
+
+    return {
+      low: Math.max(0, Math.min(100, low)),
+      inRange: Math.max(0, Math.min(100, inRange)),
+      high: Math.max(0, Math.min(100, high))
+    };
+  }
+
+  private assessLocalGlucoseRisk(
+    tir: { low: number; inRange: number; high: number },
+    stats: { mean: number; stdDev: number; cv: number; high: number },
+    readingCount: number
+  ): { riskAssessment: 'low' | 'medium' | 'high' | 'critical'; confidence: number } {
+    let score = 0;
+
+    if (tir.low >= 10) score += 4;
+    else if (tir.low >= 5) score += 3;
+    else if (tir.low >= 4) score += 2;
+    else if (tir.low >= 1) score += 1;
+
+    if (tir.high >= 50) score += 3;
+    else if (tir.high >= 35) score += 2;
+    else if (tir.high >= 25) score += 1;
+
+    if (tir.inRange < 50) score += 3;
+    else if (tir.inRange < 60) score += 2;
+    else if (tir.inRange < 70) score += 1;
+
+    if (stats.cv >= 45) score += 2;
+    else if (stats.cv >= 36) score += 1;
+
+    if (stats.mean >= 300 || stats.mean <= 55) score += 3;
+    else if (stats.mean >= 250 || stats.mean <= 70) score += 2;
+    else if (stats.mean >= 180) score += 1;
+
+    let riskAssessment: 'low' | 'medium' | 'high' | 'critical' = 'medium';
+    if (score >= 9) riskAssessment = 'critical';
+    else if (score >= 6) riskAssessment = 'high';
+    else if (score <= 2) riskAssessment = 'low';
+
+    const dataConfidence = readingCount >= 144 ? 90 : readingCount >= 72 ? 85 : readingCount >= 24 ? 78 : 65;
+    const confidence = Math.max(55, Math.min(95, dataConfidence - (riskAssessment === 'critical' ? 0 : 0)));
+
+    return { riskAssessment, confidence };
+  }
+
+  private buildLocalGlucoseRecommendations(
+    tir: { low: number; inRange: number; high: number },
+    stats: { mean: number; stdDev: number; cv: number; high: number }
+  ): string[] {
+    const recs: string[] = [];
+
+    if (tir.low >= 4) {
+      recs.push('Prioritize hypoglycemia prevention: review low patterns, keep fast-acting carbs available, and consider safer alert thresholds.');
+    }
+    if (tir.high >= 25) {
+      recs.push('Focus on reducing high glucose exposure: look for post-meal spikes and persistent highs, and discuss potential strategy adjustments with your clinician.');
+    }
+    if (stats.cv >= 36) {
+      recs.push('Aim to reduce variability: keep meal timing/carbs more consistent and review factors like stress, sleep, and activity that can shift insulin needs.');
+    }
+    if (tir.inRange < 70) {
+      recs.push('Set a weekly review routine: identify 1–2 recurring time windows (e.g., mornings, after dinner) and target those first.');
+    }
+
+    recs.push('Check for data/tech drivers: verify sensor reliability, review compression lows, and ensure infusion sites (if used) are functioning well.');
+    recs.push('If you have repeated lows, severe highs, or feel unwell, contact your healthcare team promptly.');
+
+    return recs.slice(0, 6);
+  }
+
+  private buildLocalGlucoseDetails(
+    tir: { low: number; inRange: number; high: number },
+    stats: { mean: number; stdDev: number; cv: number; high: number },
+    readings: any[],
+    formatValue: (value: number) => string
+  ) {
+    const values = readings.map(r => r?.sgv).filter((v: any) => typeof v === 'number' && Number.isFinite(v));
+    const min = values.length ? Math.min(...values) : null;
+    const max = values.length ? Math.max(...values) : null;
+
+    const executiveSummaryParts: string[] = [];
+    executiveSummaryParts.push(`Time in range is ${tir.inRange.toFixed(1)}% with ${tir.low.toFixed(1)}% below range and ${tir.high.toFixed(1)}% above range.`);
+    executiveSummaryParts.push(`Average glucose is ${formatValue(stats.mean)} with variability CV ${stats.cv.toFixed(1)}%.`);
+    if (tir.low >= 4) executiveSummaryParts.push('Below-range exposure is above common safety targets and deserves priority.');
+    else if (tir.high >= 35) executiveSummaryParts.push('Above-range exposure is elevated and may be driven by post-meal spikes or persistent highs.');
+
+    const likelyDrivers: string[] = [];
+    if (tir.high >= 25) likelyDrivers.push('Post-meal spikes (carb timing/amount, absorption mismatch, or delayed bolus effect)');
+    if (tir.low >= 4) likelyDrivers.push('Over-correction, insulin stacking, delayed activity effects, or missed snacks');
+    if (stats.cv >= 36) likelyDrivers.push('Day-to-day variability from stress, sleep changes, illness, hormones, or inconsistent routines');
+    likelyDrivers.push('Basal/background insulin mismatch in a specific time window (discuss with clinician)');
+    likelyDrivers.push('Device/data effects (sensor lag, compression lows, infusion set issues if applicable)');
+
+    const safetyFlags: string[] = [];
+    if (min != null && min <= 54) safetyFlags.push('Severe low values detected in this dataset range; treat lows promptly and review prevention strategies with your clinician.');
+    else if (tir.low >= 10) safetyFlags.push('High time-below-range suggests meaningful hypoglycemia risk; consider urgent review with your healthcare team.');
+    if (max != null && max >= 300) safetyFlags.push('Very high glucose values detected; if persistent or with symptoms/ketones, seek medical advice promptly.');
+
+    const actionPlan7Days: string[] = [
+      'Pick one recurring problem window (e.g., mornings or after dinner) and review it across several days.',
+      'Use CGM alerts and keep rapid carbs accessible; confirm low readings if symptoms don’t match.',
+      'Track meal timing, carbs, and activity for a few days to identify repeatable triggers.',
+      'Review correction patterns to avoid “over-correct then rebound” cycles (discuss approach with clinician).',
+      'If using pump/CGM, verify site/sensor performance and consider replacing supplies if patterns look device-related.'
+    ];
+
+    const experiments: string[] = [
+      'Try a consistent breakfast (similar carbs/protein) for 3 days and compare post-meal peaks.',
+      'If you often spike after dinner, try a brief 10–20 minute walk after the meal (if safe for you) and observe the trend.',
+      'If you see overnight drift, log bedtime snack/alcohol/exercise timing to see what correlates.'
+    ];
+
+    const questionsForClinician: string[] = [
+      'Are my glucose targets appropriate for my situation (including hypoglycemia risk)?',
+      'Do my patterns suggest a basal/background insulin mismatch in specific time blocks?',
+      'What safe strategies should I use for corrections to reduce rebounds?',
+      'Are there settings/alerts I should adjust to reduce time below range?'
+    ];
+
+    const dataQualityNotes: string[] = [];
+    if (values.length < 24) dataQualityNotes.push('Limited data volume; conclusions may be less reliable.');
+    const times = readings.map(r => (typeof r?.date === 'number' ? r.date : (r?.date ? new Date(r.date).getTime() : null))).filter((t: any) => typeof t === 'number' && Number.isFinite(t));
+    if (times.length >= 2) {
+      const spanHours = (Math.max(...times) - Math.min(...times)) / (1000 * 60 * 60);
+      if (spanHours < 12) dataQualityNotes.push('Data window appears short; a 3–14 day view is usually more informative for patterns.');
+    }
+    if (readings.some(r => r?.sgv == null)) dataQualityNotes.push('Some readings are missing glucose values.');
+
+    return {
+      executiveSummary: executiveSummaryParts.slice(0, 4).join(' '),
+      likelyDrivers: likelyDrivers.slice(0, 6),
+      safetyFlags: safetyFlags.slice(0, 5),
+      actionPlan7Days: actionPlan7Days.slice(0, 7),
+      experiments: experiments.slice(0, 4),
+      questionsForClinician: questionsForClinician.slice(0, 6),
+      dataQualityNotes: dataQualityNotes.slice(0, 5)
     };
   }
 

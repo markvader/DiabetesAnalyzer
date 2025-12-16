@@ -42,6 +42,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [riskAssessment, setRiskAssessment] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
+  const [details, setDetails] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
@@ -97,6 +98,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
         setRecommendations(result.recommendations);
         setRiskAssessment(result.riskAssessment);
         setConfidence(result.confidence);
+        setDetails((result as any).details ?? null);
         setLastUsageInfo({
           provider: result.provider,
           model: result.model,
@@ -198,6 +200,70 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
     if (tokensLabel) parts.push(tokensLabel);
     if (costLabel) parts.push(costLabel);
     return parts.join(' • ');
+  };
+
+  const normalizeStringArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.filter(v => typeof v === 'string' && v.trim().length > 0);
+    if (typeof value === 'string' && value.trim().length > 0) return [value.trim()];
+    return [];
+  };
+
+  const hasDetails = (() => {
+    if (!details || typeof details !== 'object') return false;
+    const summary = typeof details.executiveSummary === 'string' ? details.executiveSummary.trim() : '';
+    const lists = [
+      normalizeStringArray(details.likelyDrivers),
+      normalizeStringArray(details.safetyFlags),
+      normalizeStringArray(details.actionPlan7Days),
+      normalizeStringArray(details.experiments),
+      normalizeStringArray(details.questionsForClinician),
+      normalizeStringArray(details.dataQualityNotes)
+    ];
+    return summary.length > 0 || lists.some(arr => arr.length > 0);
+  })();
+
+  const renderDetailsContentMui = () => {
+    if (!hasDetails) return null;
+
+    const sections: Array<{ title: string; items: string[] }> = [
+      { title: 'Likely drivers', items: normalizeStringArray(details.likelyDrivers) },
+      { title: 'Safety flags', items: normalizeStringArray(details.safetyFlags) },
+      { title: '7-day action plan', items: normalizeStringArray(details.actionPlan7Days) },
+      { title: 'Safe experiments', items: normalizeStringArray(details.experiments) },
+      { title: 'Questions for your clinician', items: normalizeStringArray(details.questionsForClinician) },
+      { title: 'Data quality notes', items: normalizeStringArray(details.dataQualityNotes) }
+    ].filter(s => s.items.length > 0);
+
+    return (
+      <Box>
+        {typeof details.executiveSummary === 'string' && details.executiveSummary.trim().length > 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {details.executiveSummary}
+          </Typography>
+        )}
+
+        {sections.map((section) => (
+          <Box key={section.title} sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
+              {section.title}
+            </Typography>
+            <List dense sx={{ pt: 0 }}>
+              {section.items.map((item, idx) => (
+                <ListItem key={`${section.title}-${idx}`} sx={{ px: 0, py: 0.25 }}>
+                  <ListItemIcon sx={{ minWidth: 20 }}>
+                    <Box sx={{ width: 4, height: 4, borderRadius: '50%', backgroundColor: theme.palette.text.secondary }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={item}
+                    primaryTypographyProps={{ variant: 'body2', color: 'text.primary' }}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        ))}
+      </Box>
+    );
   };
 
   // Premium Design with Demo Styling
@@ -457,6 +523,27 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
               )}
             </Box>
 
+            {hasDetails && (
+              <Box sx={{ mt: 3 }}>
+                <Accordion
+                  elevation={0}
+                  sx={{
+                    borderRadius: 3,
+                    background: alpha(theme.palette.background.paper, 0.6),
+                    border: `1px solid ${alpha(theme.palette.divider, 0.12)}`,
+                    '&:before': { display: 'none' }
+                  }}
+                >
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                      More details
+                    </Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>{renderDetailsContentMui()}</AccordionDetails>
+                </Accordion>
+              </Box>
+            )}
+
             {/* Enhanced footer */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -603,6 +690,19 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
             )}
           </Box>
 
+          {hasDetails && (
+            <Box sx={{ mt: 3 }}>
+              <Accordion elevation={0} sx={{ borderRadius: 2, border: `1px solid ${alpha(theme.palette.divider, 0.2)}`, '&:before': { display: 'none' } }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                    More details
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails>{renderDetailsContentMui()}</AccordionDetails>
+              </Accordion>
+            </Box>
+          )}
+
           <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
             <Alert severity="info" variant="outlined" sx={{ borderRadius: 2 }}>
               <Typography variant="caption">
@@ -673,6 +773,85 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
           </div>
         )}
       </div>
+
+      {hasDetails && (
+        <details className="mt-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-gray-900 dark:text-gray-100">
+            More details
+          </summary>
+          <div className="mt-3 space-y-4">
+            {typeof details?.executiveSummary === 'string' && details.executiveSummary.trim().length > 0 && (
+              <p className="text-sm text-gray-700 dark:text-gray-300">{details.executiveSummary}</p>
+            )}
+
+            {normalizeStringArray(details?.likelyDrivers).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Likely drivers</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.likelyDrivers).map((item, idx) => (
+                    <li key={`drivers-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {normalizeStringArray(details?.safetyFlags).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Safety flags</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.safetyFlags).map((item, idx) => (
+                    <li key={`safety-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {normalizeStringArray(details?.actionPlan7Days).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">7-day action plan</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.actionPlan7Days).map((item, idx) => (
+                    <li key={`plan-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {normalizeStringArray(details?.experiments).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Safe experiments</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.experiments).map((item, idx) => (
+                    <li key={`exp-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {normalizeStringArray(details?.questionsForClinician).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Questions for your clinician</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.questionsForClinician).map((item, idx) => (
+                    <li key={`q-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {normalizeStringArray(details?.dataQualityNotes).length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Data quality notes</h4>
+                <ul className="mt-2 space-y-1">
+                  {normalizeStringArray(details.dataQualityNotes).map((item, idx) => (
+                    <li key={`dq-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
       
       <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
         <p className="text-xs text-gray-500 dark:text-gray-400">
