@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { FileText, Download, Settings, Loader2 } from 'lucide-react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend);
 
 interface ComprehensivePDFReportProps {
   data: any;
@@ -218,6 +218,38 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         .filter(r => r && typeof r.sgv === 'number' && typeof r.date === 'number' && Number.isFinite(r.date))
         .map(r => ({ ts: r.date as number, v: convert(r.sgv as number, 'mgdl') }))
         .filter(p => Number.isFinite(p.v));
+
+      const renderChartImage = async (config: any, width = 1400, height = 650): Promise<string | null> => {
+        try {
+          if (typeof document === 'undefined') return null;
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          const chart = new ChartJS(ctx, {
+            ...config,
+            options: {
+              responsive: false,
+              animation: false,
+              ...(config?.options ?? {})
+            }
+          });
+
+          chart.update();
+          await new Promise(resolve => setTimeout(resolve, 0));
+          const dataUrl = canvas.toDataURL('image/png', 1.0);
+          chart.destroy();
+          canvas.remove();
+          return dataUrl;
+        } catch {
+          return null;
+        }
+      };
 
       const medianIntervalMinutes = (() => {
         if (readingPoints.length < 2) return 5;
@@ -518,21 +550,23 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         return r.n ? (r.high / r.n) * 100 : 0;
       });
 
-      const renderTirChart = async () => {
-        try {
-          if (typeof document === 'undefined') return null;
-          const canvas = document.createElement('canvas');
-          // Higher resolution for crisp PDF
-          canvas.width = 1400;
-          canvas.height = 650;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return null;
+      const labelStep = Math.max(1, Math.ceil(labels.length / 10));
 
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
+      pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.text(`Period: ${analysisLabel}`, 15, yPos);
+      yPos += 6;
+      pdf.setFontSize(10);
+      pdf.text(
+        `Targets: ${targetRanges.TARGET_MIN.toFixed(1)}–${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()}  •  Low ${lowPctTotal.toFixed(1)}%  •  In Range ${tirPct.toFixed(1)}%  •  High ${highPctTotal.toFixed(1)}%`,
+        15,
+        yPos
+      );
+      yPos += 8;
 
-          const labelStep = Math.max(1, Math.ceil(labels.length / 10));
-          const chart = new ChartJS(ctx, {
+      const chartImg = labels.length >= 2
+        ? await renderChartImage({
             type: 'bar',
             data: {
               labels,
@@ -561,8 +595,6 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
               ]
             },
             options: {
-              responsive: false,
-              animation: false,
               layout: { padding: { top: 10, right: 16, bottom: 0, left: 16 } },
               plugins: {
                 legend: {
@@ -576,7 +608,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                 },
                 tooltip: {
                   callbacks: {
-                    label: (ctx) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%`
+                    label: (ctx: any) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%`
                   }
                 }
               },
@@ -588,7 +620,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                     color: '#334155',
                     maxRotation: 0,
                     autoSkip: false,
-                    callback: (_val, idx) => (idx % labelStep === 0 ? labels[idx] : '')
+                    callback: (_val: any, idx: number) => (idx % labelStep === 0 ? labels[idx] : '')
                   }
                 },
                 y: {
@@ -598,7 +630,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                   grid: { color: '#E5E7EB' },
                   ticks: {
                     color: '#334155',
-                    callback: (v) => `${v}%`
+                    callback: (v: any) => `${v}%`
                   },
                   title: {
                     display: true,
@@ -609,33 +641,8 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                 }
               }
             }
-          });
-
-          chart.update();
-          await new Promise(resolve => setTimeout(resolve, 0));
-          const dataUrl = canvas.toDataURL('image/png', 1.0);
-          chart.destroy();
-          canvas.remove();
-          return dataUrl;
-        } catch {
-          return null;
-        }
-      };
-
-      pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.text(`Period: ${analysisLabel}`, 15, yPos);
-      yPos += 6;
-      pdf.setFontSize(10);
-      pdf.text(
-        `Targets: ${targetRanges.TARGET_MIN.toFixed(1)}–${targetRanges.TARGET_MAX.toFixed(1)} ${getUnitLabel()}  •  Low ${lowPctTotal.toFixed(1)}%  •  In Range ${tirPct.toFixed(1)}%  •  High ${highPctTotal.toFixed(1)}%`,
-        15,
-        yPos
-      );
-      yPos += 8;
-
-      const chartImg = labels.length >= 2 ? await renderTirChart() : null;
+          }, 1400, 650)
+        : null;
       if (chartImg) {
         // Fill most of the page with the chart
         pdf.addImage(chartImg, 'PNG', 15, yPos, 180, 110);
@@ -1283,7 +1290,70 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         dawnDelta !== null ? `Dawn phenomenon proxy (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(dawnDelta, unit as any, false)} ${getUnitLabel()}` : 'Dawn phenomenon proxy: —',
         'Overnight stats use CGM readings during 23:00–07:00 and summarize per night.'
       ];
-      pdf.text(pdf.splitTextToSize(sleepNotes.join('\n'), 180), 15, yPos);
+      const sleepLines = pdf.splitTextToSize(sleepNotes.join('\n'), 180);
+      pdf.text(sleepLines, 15, yPos);
+      yPos += sleepLines.length * 4.2 + 10;
+
+      // Fill remaining space: nightly mean/SD chart (if enough nights)
+      if (byNight.length >= 3) {
+        const nightsForChart = byNight.slice(-10);
+        const labelsN = nightsForChart.map(n => n.date);
+        const meanSeries = nightsForChart.map(n => n.mean);
+        const sdSeries = nightsForChart.map(n => n.sd);
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text(`Nightly Mean & Variability (${getUnitLabel()})`, 15, yPos);
+        yPos += 6;
+
+        const img = await renderChartImage({
+          type: 'line',
+          data: {
+            labels: labelsN,
+            datasets: [
+              {
+                label: 'Mean',
+                data: meanSeries,
+                borderColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                backgroundColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                tension: 0.25,
+                pointRadius: 2
+              },
+              {
+                label: 'SD',
+                data: sdSeries,
+                borderColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                backgroundColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                tension: 0.25,
+                pointRadius: 2
+              }
+            ]
+          },
+          options: {
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: '#111827', boxWidth: 12 }
+              }
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: '#334155', maxRotation: 0 }
+              },
+              y: {
+                grid: { color: '#E5E7EB' },
+                ticks: { color: '#334155' }
+              }
+            }
+          }
+        }, 1400, 520);
+
+        if (img) {
+          pdf.addImage(img, 'PNG', 15, yPos, 180, 70);
+          yPos += 78;
+        }
+      }
 
       // PAGE 10: STRESS & LIFESTYLE ANALYSIS
       yPos = addNewPage();
@@ -1404,7 +1474,142 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         'Stress is not directly measurable from Nightscout data. This section uses proxies from CGM variability and logged behaviors.',
         'If you log exercise, sleep, and meal notes consistently, the next reports become more specific.'
       ];
-      pdf.text(pdf.splitTextToSize(lifestyleNotes.join('\n'), 180), 15, yPos);
+      const lifestyleLines = pdf.splitTextToSize(lifestyleNotes.join('\n'), 180);
+      pdf.text(lifestyleLines, 15, yPos);
+      yPos += lifestyleLines.length * 4.2 + 10;
+
+      // Fill remaining space with charts: daily CV% and late-night carb counts
+      const dailyStats = new Map<string, { n: number; sum: number; sumSq: number }>();
+      readingPoints.forEach(p => {
+        const key = format(new Date(p.ts), 'yyyy-MM-dd');
+        const row = dailyStats.get(key) ?? { n: 0, sum: 0, sumSq: 0 };
+        row.n += 1;
+        row.sum += p.v;
+        row.sumSq += p.v * p.v;
+        dailyStats.set(key, row);
+      });
+      const dayKeys2 = [...dailyStats.keys()].sort((a, b) => (a < b ? -1 : 1));
+      const labels2 = dayKeys2.map(k => format(new Date(k), 'MMM dd'));
+      const cvSeries = dayKeys2.map(k => {
+        const s = dailyStats.get(k)!;
+        if (s.n < 2) return null;
+        const mean = s.sum / s.n;
+        const variance = s.sumSq / s.n - mean * mean;
+        const sd = Math.sqrt(Math.max(0, variance));
+        return mean > 0 ? (sd / mean) * 100 : null;
+      });
+      const cvVals = cvSeries.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+      if (labels2.length >= 3 && cvVals.length >= 3) {
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('Daily Glycemic Variability (CV%)', 15, yPos);
+        yPos += 6;
+
+        const imgCv = await renderChartImage({
+          type: 'line',
+          data: {
+            labels: labels2,
+            datasets: [
+              {
+                label: 'CV%',
+                data: cvSeries,
+                spanGaps: true,
+                borderColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                backgroundColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                tension: 0.25,
+                pointRadius: 2
+              }
+            ]
+          },
+          options: {
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: { color: '#111827', boxWidth: 12 }
+              }
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: {
+                  color: '#334155',
+                  maxRotation: 0,
+                  autoSkip: true,
+                  maxTicksLimit: 8
+                }
+              },
+              y: {
+                grid: { color: '#E5E7EB' },
+                ticks: { color: '#334155', callback: (v: any) => `${v}%` }
+              }
+            }
+          }
+        }, 1400, 520);
+
+        if (imgCv) {
+          pdf.addImage(imgCv, 'PNG', 15, yPos, 180, 58);
+          yPos += 66;
+        }
+
+        const lateByDay = new Map<string, number>();
+        carbEvents
+          .filter(c => {
+            const h = new Date(c._ts).getHours();
+            return h >= 21 || h < 5;
+          })
+          .forEach(c => {
+            const key = format(new Date(c._ts), 'yyyy-MM-dd');
+            lateByDay.set(key, (lateByDay.get(key) ?? 0) + 1);
+          });
+
+        const lateSeries = dayKeys2.map(k => lateByDay.get(k) ?? 0);
+        const lateMax = Math.max(0, ...lateSeries);
+        if (lateMax > 0) {
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text('Late-night Carb Entries (21:00–05:00)', 15, yPos);
+          yPos += 6;
+
+          const imgLate = await renderChartImage({
+            type: 'bar',
+            data: {
+              labels: labels2,
+              datasets: [
+                {
+                  label: 'Count',
+                  data: lateSeries,
+                  backgroundColor: `rgb(${colors.warning[0]}, ${colors.warning[1]}, ${colors.warning[2]})`,
+                  borderWidth: 0
+                }
+              ]
+            },
+            options: {
+              plugins: {
+                legend: { display: false }
+              },
+              scales: {
+                x: {
+                  grid: { display: false },
+                  ticks: { color: '#334155', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                },
+                y: {
+                  beginAtZero: true,
+                  grid: { color: '#E5E7EB' },
+                  ticks: { color: '#334155', precision: 0 }
+                }
+              }
+            }
+          }, 1400, 460);
+
+          if (imgLate) {
+            pdf.addImage(imgLate, 'PNG', 15, yPos, 180, 50);
+            yPos += 58;
+          }
+        }
+      }
 
       // PAGE 11: Medication Adherence Analysis
       yPos = addNewPage();
