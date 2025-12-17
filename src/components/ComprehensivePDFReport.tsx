@@ -515,6 +515,150 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.text(row[2], 140, rowY + 6);
       });
 
+      // Fill remaining space on Page 2 with charts
+      {
+        const values = readingPoints.map(p => p.v).filter(v => Number.isFinite(v));
+        const daily = new Map<string, { n: number; sum: number }>();
+        readingPoints.forEach(p => {
+          const key = format(new Date(p.ts), 'yyyy-MM-dd');
+          const row = daily.get(key) ?? { n: 0, sum: 0 };
+          row.n += 1;
+          row.sum += p.v;
+          daily.set(key, row);
+        });
+        const dayKeys = [...daily.keys()].sort((a, b) => (a < b ? -1 : 1));
+        const dailyLabels = dayKeys.map(k => format(new Date(k), 'MMM dd'));
+        const dailyMean = dayKeys.map(k => {
+          const s = daily.get(k)!;
+          return s.n ? s.sum / s.n : null;
+        });
+
+        // Histogram bins
+        const vMin = values.length ? Math.min(...values) : 0;
+        const vMax = values.length ? Math.max(...values) : 0;
+        const binCount = 10;
+        const span = Math.max(1e-6, vMax - vMin);
+        const bins = Array.from({ length: binCount }, () => 0);
+        values.forEach(v => {
+          const idx = Math.min(binCount - 1, Math.max(0, Math.floor(((v - vMin) / span) * binCount)));
+          bins[idx] += 1;
+        });
+        const binLabels = bins.map((_, i) => {
+          const a = vMin + (i / binCount) * span;
+          const b = vMin + ((i + 1) / binCount) * span;
+          return `${formatGlucoseValue(a, unit as any, false)}–${formatGlucoseValue(b, unit as any, false)}`;
+        });
+
+        const chartsTopY = yPos + detailedStats.length * 10 + 10;
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('Distribution & Trends', 15, chartsTopY);
+
+        const histImg = values.length >= 20
+          ? await renderChartImage({
+              type: 'bar',
+              data: {
+                labels: binLabels,
+                datasets: [
+                  {
+                    label: 'Readings',
+                    data: bins,
+                    backgroundColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                    borderWidth: 0
+                  }
+                ]
+              },
+              options: {
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx: any) => `${ctx.parsed?.y ?? 0} readings`
+                    }
+                  }
+                },
+                scales: {
+                  x: {
+                    grid: { display: false },
+                    ticks: { color: '#334155', maxRotation: 60, minRotation: 60, autoSkip: true, maxTicksLimit: 6 }
+                  },
+                  y: {
+                    beginAtZero: true,
+                    grid: { color: '#E5E7EB' },
+                    ticks: { color: '#334155', precision: 0 }
+                  }
+                }
+              }
+            }, 1200, 520)
+          : null;
+
+        const trendImg = dailyLabels.length >= 2
+          ? await renderChartImage({
+              type: 'line',
+              data: {
+                labels: dailyLabels,
+                datasets: [
+                  {
+                    label: `Daily Mean (${getUnitLabel()})`,
+                    data: dailyMean,
+                    spanGaps: true,
+                    borderColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                    backgroundColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                    tension: 0.25,
+                    pointRadius: 2
+                  },
+                  {
+                    label: 'Target Min',
+                    data: dailyMean.map(() => targetRanges.TARGET_MIN),
+                    borderColor: 'rgba(148,163,184,1)',
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    tension: 0
+                  },
+                  {
+                    label: 'Target Max',
+                    data: dailyMean.map(() => targetRanges.TARGET_MAX),
+                    borderColor: 'rgba(148,163,184,1)',
+                    borderDash: [6, 4],
+                    pointRadius: 0,
+                    tension: 0
+                  }
+                ]
+              },
+              options: {
+                plugins: {
+                  legend: {
+                    position: 'bottom',
+                    labels: { color: '#111827', boxWidth: 12 }
+                  }
+                },
+                scales: {
+                  x: {
+                    grid: { display: false },
+                    ticks: { color: '#334155', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }
+                  },
+                  y: {
+                    grid: { color: '#E5E7EB' },
+                    ticks: { color: '#334155' }
+                  }
+                }
+              }
+            }, 1200, 520)
+          : null;
+
+        const imgY = chartsTopY + 6;
+        if (histImg) pdf.addImage(histImg, 'PNG', 15, imgY, 88, 58);
+        if (trendImg) pdf.addImage(trendImg, 'PNG', 107, imgY, 88, 58);
+
+        if (!histImg && !trendImg) {
+          pdf.setTextColor(colors.textLight[0], colors.textLight[1], colors.textLight[2]);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(10);
+          pdf.text('Not enough data to render distribution/trend charts.', 15, imgY + 20);
+        }
+      }
+
       // PAGE 3: TIME IN RANGE ANALYSIS
       yPos = addNewPage();
       yPos = addHeader('TIME IN RANGE ANALYSIS', 3);
@@ -685,6 +829,34 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.text(`${b[0]}: ${b[1].toFixed(1)}%`, 25, y);
       });
 
+      // Use remaining space: best/worst day insight
+      {
+        const bestIdx = inRangeSeries.length
+          ? inRangeSeries.reduce((best, v, i) => (v > inRangeSeries[best] ? i : best), 0)
+          : -1;
+        const worstIdx = inRangeSeries.length
+          ? inRangeSeries.reduce((worst, v, i) => (v < inRangeSeries[worst] ? i : worst), 0)
+          : -1;
+        const insightY = yPos + bands.length * 12 + 12;
+        if (labels.length >= 2 && insightY < 255) {
+          pdf.setFillColor(248, 250, 252);
+          pdf.setDrawColor(226, 232, 240);
+          pdf.roundedRect(15, insightY, 180, 28, 3, 3, 'F');
+          pdf.roundedRect(15, insightY, 180, 28, 3, 3, 'S');
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text('Daily Insights', 20, insightY + 10);
+          pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(9);
+          const best = bestIdx >= 0 ? `${labels[bestIdx]} (${inRangeSeries[bestIdx].toFixed(1)}% in range)` : '—';
+          const worst = worstIdx >= 0 ? `${labels[worstIdx]} (${inRangeSeries[worstIdx].toFixed(1)}% in range)` : '—';
+          pdf.text(`Best day: ${best}`, 20, insightY + 18);
+          pdf.text(`Most challenging day: ${worst}`, 20, insightY + 24);
+        }
+      }
+
       // PAGE 4: HYPOGLYCEMIA ANALYSIS
       yPos = addNewPage();
       yPos = addHeader('HYPOGLYCEMIA ANALYSIS', 4);
@@ -775,6 +947,51 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       ];
       pdf.text(pdf.splitTextToSize(hypoNotes.join('\n'), 180), 15, noteY);
 
+      // Fill remaining space on Page 4: minutes low by hour
+      {
+        const minsLowByHour = Array.from({ length: 24 }, () => 0);
+        hypoEvents.forEach(e => {
+          minsLowByHour[e.startHour] += e.minutes;
+        });
+        const maxM = Math.max(1, ...minsLowByHour);
+        const chartTop = noteY + 26;
+        if (chartTop < 240) {
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text('Minutes Low by Start Hour', 15, chartTop);
+
+          const img = await renderChartImage({
+            type: 'bar',
+            data: {
+              labels: Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')),
+              datasets: [
+                {
+                  label: 'Minutes',
+                  data: minsLowByHour.map(m => Math.round(m)),
+                  backgroundColor: `rgb(${colors.danger[0]}, ${colors.danger[1]}, ${colors.danger[2]})`,
+                  borderWidth: 0
+                }
+              ]
+            },
+            options: {
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: '#334155', autoSkip: true, maxTicksLimit: 8 } },
+                y: {
+                  beginAtZero: true,
+                  suggestedMax: maxM,
+                  grid: { color: '#E5E7EB' },
+                  ticks: { color: '#334155', precision: 0 }
+                }
+              }
+            }
+          }, 1400, 440);
+
+          if (img) pdf.addImage(img, 'PNG', 15, chartTop + 6, 180, 46);
+        }
+      }
+
       // PAGE 5: HYPERGLYCEMIA ANALYSIS
       yPos = addNewPage();
       yPos = addHeader('HYPERGLYCEMIA ANALYSIS', 5);
@@ -857,6 +1074,45 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         insulinEvents.length ? `Insulin logs available: ${insulinEvents.length} doses (use to correlate post-meal peaks/corrections).` : 'No insulin doses logged (correlation limited).'
       ];
       pdf.text(pdf.splitTextToSize(hyperNotes.join('\n'), 180), 15, hyperNotesY);
+
+      // Fill remaining space on Page 5: minutes high by start hour
+      {
+        const minsHighByHour = Array.from({ length: 24 }, () => 0);
+        hyperEvents.forEach(e => {
+          minsHighByHour[e.startHour] += e.minutes;
+        });
+        const chartTop = hyperNotesY + 26;
+        if (chartTop < 240) {
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text('Minutes High by Start Hour', 15, chartTop);
+
+          const img = await renderChartImage({
+            type: 'bar',
+            data: {
+              labels: Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0')),
+              datasets: [
+                {
+                  label: 'Minutes',
+                  data: minsHighByHour.map(m => Math.round(m)),
+                  backgroundColor: `rgb(${colors.warning[0]}, ${colors.warning[1]}, ${colors.warning[2]})`,
+                  borderWidth: 0
+                }
+              ]
+            },
+            options: {
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: '#334155', autoSkip: true, maxTicksLimit: 8 } },
+                y: { beginAtZero: true, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', precision: 0 } }
+              }
+            }
+          }, 1400, 440);
+
+          if (img) pdf.addImage(img, 'PNG', 15, chartTop + 6, 180, 46);
+        }
+      }
 
       // PAGE 6: WEEKLY PATTERN ANALYSIS
       yPos = addNewPage();
@@ -945,7 +1201,77 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
           return formatGlucoseValue(Math.abs(wMean - weMean), unit as any, false);
         })()} ${getUnitLabel()}`
       ];
-      pdf.text(pdf.splitTextToSize(highlights.join('\n'), 180), 15, yPos);
+      const highlightLines = pdf.splitTextToSize(highlights.join('\n'), 180);
+      pdf.text(highlightLines, 15, yPos);
+      yPos += highlightLines.length * 4.2 + 10;
+
+      // Fill remaining space on Page 6: hourly mean vs targets
+      {
+        const hourBins: { n: number; sum: number }[] = Array.from({ length: 24 }, () => ({ n: 0, sum: 0 }));
+        readingPoints.forEach(p => {
+          const h = new Date(p.ts).getHours();
+          hourBins[h].n += 1;
+          hourBins[h].sum += p.v;
+        });
+        const hourLabels = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}`);
+        const hourMean = hourBins.map(b => (b.n ? b.sum / b.n : null));
+
+        if (yPos < 230) {
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text(`Mean Glucose by Hour (${getUnitLabel()})`, 15, yPos);
+          yPos += 6;
+
+          const img = await renderChartImage({
+            type: 'line',
+            data: {
+              labels: hourLabels,
+              datasets: [
+                {
+                  label: 'Mean',
+                  data: hourMean,
+                  spanGaps: true,
+                  borderColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                  backgroundColor: `rgb(${colors.primary[0]}, ${colors.primary[1]}, ${colors.primary[2]})`,
+                  tension: 0.25,
+                  pointRadius: 0
+                },
+                {
+                  label: 'Target Min',
+                  data: hourMean.map(() => targetRanges.TARGET_MIN),
+                  borderColor: 'rgba(148,163,184,1)',
+                  borderDash: [6, 4],
+                  pointRadius: 0,
+                  tension: 0
+                },
+                {
+                  label: 'Target Max',
+                  data: hourMean.map(() => targetRanges.TARGET_MAX),
+                  borderColor: 'rgba(148,163,184,1)',
+                  borderDash: [6, 4],
+                  pointRadius: 0,
+                  tension: 0
+                }
+              ]
+            },
+            options: {
+              plugins: {
+                legend: { position: 'bottom', labels: { color: '#111827', boxWidth: 12 } }
+              },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: '#334155', autoSkip: true, maxTicksLimit: 8 } },
+                y: { grid: { color: '#E5E7EB' }, ticks: { color: '#334155' } }
+              }
+            }
+          }, 1400, 520);
+
+          if (img) {
+            pdf.addImage(img, 'PNG', 15, yPos, 180, 58);
+            yPos += 66;
+          }
+        }
+      }
 
       // PAGE 7: MEAL IMPACT ANALYSIS
       yPos = addNewPage();
@@ -1083,6 +1409,55 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       ];
       pdf.text(pdf.splitTextToSize(mealNotes.join('\n'), 180), 15, yPos);
 
+      // Fill remaining space on Page 7: meal response chart
+      {
+        const chartTop = yPos + 28;
+        if (chartTop < 235) {
+          const mealLabels = mealRows.map(r => r.label);
+          const delta = mealRows.map(r => (r.n ? r.avgDelta : 0));
+          const carbs = mealRows.map(r => (r.n ? r.avgCarbs : 0));
+
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text(`Avg Peak Δ by Meal (${getUnitLabel()})`, 15, chartTop);
+
+          const img = await renderChartImage({
+            type: 'bar',
+            data: {
+              labels: mealLabels,
+              datasets: [
+                {
+                  label: `Peak Δ (${getUnitLabel()})`,
+                  data: delta,
+                  backgroundColor: `rgb(${colors.secondary[0]}, ${colors.secondary[1]}, ${colors.secondary[2]})`,
+                  borderWidth: 0
+                }
+              ]
+            },
+            options: {
+              plugins: {
+                legend: { display: false },
+                tooltip: {
+                  callbacks: {
+                    afterLabel: (ctx: any) => {
+                      const i = ctx.dataIndex;
+                      return `Avg carbs: ${carbs[i] ? carbs[i].toFixed(0) : '—'} g`;
+                    }
+                  }
+                }
+              },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: '#334155', maxRotation: 0 } },
+                y: { grid: { color: '#E5E7EB' }, ticks: { color: '#334155' } }
+              }
+            }
+          }, 1400, 460);
+
+          if (img) pdf.addImage(img, 'PNG', 15, chartTop + 6, 180, 55);
+        }
+      }
+
       // PAGE 8: EXERCISE IMPACT ANALYSIS
       yPos = addNewPage();
       yPos = addHeader('EXERCISE IMPACT ANALYSIS', 8);
@@ -1192,6 +1567,76 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
           pdf.rect(vx + hour * bw + 0.5, vy + vh - 4 - h, Math.max(1, bw - 1), h, 'F');
         });
         yPos += vh + 15;
+      }
+
+      // Fill remaining space on Page 8: time-in-range by hour (stacked)
+      {
+        if (yPos < 230) {
+          const hourCounts = Array.from({ length: 24 }, () => ({ n: 0, low: 0, inRange: 0, high: 0 }));
+          readingPoints.forEach(p => {
+            const h = new Date(p.ts).getHours();
+            const row = hourCounts[h];
+            row.n += 1;
+            if (p.v < targetRanges.TARGET_MIN) row.low += 1;
+            else if (p.v > targetRanges.TARGET_MAX) row.high += 1;
+            else row.inRange += 1;
+          });
+          const hLabels = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
+          const low = hourCounts.map(r => (r.n ? (r.low / r.n) * 100 : 0));
+          const inR = hourCounts.map(r => (r.n ? (r.inRange / r.n) * 100 : 0));
+          const high = hourCounts.map(r => (r.n ? (r.high / r.n) * 100 : 0));
+
+          pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+          pdf.setFont('helvetica', 'bold');
+          pdf.setFontSize(11);
+          pdf.text('Time-in-Range by Hour (%)', 15, yPos);
+          yPos += 6;
+
+          const img = await renderChartImage({
+            type: 'bar',
+            data: {
+              labels: hLabels,
+              datasets: [
+                {
+                  label: 'Low',
+                  data: low,
+                  backgroundColor: `rgb(${colors.danger[0]}, ${colors.danger[1]}, ${colors.danger[2]})`,
+                  stack: 'bg',
+                  borderWidth: 0
+                },
+                {
+                  label: 'In Range',
+                  data: inR,
+                  backgroundColor: `rgb(${colors.success[0]}, ${colors.success[1]}, ${colors.success[2]})`,
+                  stack: 'bg',
+                  borderWidth: 0
+                },
+                {
+                  label: 'High',
+                  data: high,
+                  backgroundColor: `rgb(${colors.warning[0]}, ${colors.warning[1]}, ${colors.warning[2]})`,
+                  stack: 'bg',
+                  borderWidth: 0
+                }
+              ]
+            },
+            options: {
+              plugins: {
+                legend: { position: 'bottom', labels: { color: '#111827', boxWidth: 12 } },
+                tooltip: { callbacks: { label: (ctx: any) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%` } }
+              },
+              scales: {
+                x: { stacked: true, grid: { display: false }, ticks: { color: '#334155', autoSkip: true, maxTicksLimit: 8 } },
+                y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: any) => `${v}%` } }
+              }
+            }
+          }, 1400, 520);
+
+          if (img) {
+            pdf.addImage(img, 'PNG', 15, yPos, 180, 58);
+            yPos += 66;
+          }
+        }
       }
 
       // PAGE 9: SLEEP PATTERN ANALYSIS
@@ -1352,6 +1797,65 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         if (img) {
           pdf.addImage(img, 'PNG', 15, yPos, 180, 70);
           yPos += 78;
+        }
+      }
+
+      // Use remaining space on Page 9: overnight TIR bands per night (stacked)
+      if (byNight.length >= 3 && yPos < 230) {
+        const nightsForChart = byNight.slice(-10);
+        const labelsN = nightsForChart.map(n => n.date);
+        const lowPct = nightsForChart.map(n => n.lowPct);
+        const inPct = nightsForChart.map(n => Math.max(0, n.tirPct));
+        const highPct = nightsForChart.map((n, i) => Math.max(0, 100 - lowPct[i] - inPct[i]));
+
+        pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text('Overnight Time-in-Range by Night (%)', 15, yPos);
+        yPos += 6;
+
+        const imgBands = await renderChartImage({
+          type: 'bar',
+          data: {
+            labels: labelsN,
+            datasets: [
+              {
+                label: 'Low',
+                data: lowPct,
+                backgroundColor: `rgb(${colors.danger[0]}, ${colors.danger[1]}, ${colors.danger[2]})`,
+                stack: 'bg',
+                borderWidth: 0
+              },
+              {
+                label: 'In Range',
+                data: inPct,
+                backgroundColor: `rgb(${colors.success[0]}, ${colors.success[1]}, ${colors.success[2]})`,
+                stack: 'bg',
+                borderWidth: 0
+              },
+              {
+                label: 'High',
+                data: highPct,
+                backgroundColor: `rgb(${colors.warning[0]}, ${colors.warning[1]}, ${colors.warning[2]})`,
+                stack: 'bg',
+                borderWidth: 0
+              }
+            ]
+          },
+          options: {
+            plugins: {
+              legend: { position: 'bottom', labels: { color: '#111827', boxWidth: 12 } }
+            },
+            scales: {
+              x: { stacked: true, grid: { display: false }, ticks: { color: '#334155', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+              y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: any) => `${v}%` } }
+            }
+          }
+        }, 1400, 520);
+
+        if (imgBands) {
+          pdf.addImage(imgBands, 'PNG', 15, yPos, 180, 58);
+          yPos += 66;
         }
       }
 
