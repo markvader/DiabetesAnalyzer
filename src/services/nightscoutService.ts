@@ -530,8 +530,9 @@ export const testConnection = async (url: string, token?: string, apiVersion: 'v
     // Use appropriate test endpoint based on API version
     let testPath: string;
     if (apiVersion === 'v3') {
-      // API v3 uses $desc syntax for sorting
-      testPath = '/api/v3/entries?limit=1&sort$desc=date';
+      // Prefer API v3's filter syntax for broad compatibility.
+      // Many instances support `sort=-date`, while some support `sort$desc=date`.
+      testPath = '/api/v3/entries?limit=1&sort=-date';
     } else {
       testPath = '/api/v1/entries?count=1';
     }
@@ -539,6 +540,19 @@ export const testConnection = async (url: string, token?: string, apiVersion: 'v
     console.log(`📍 Test endpoint: ${testPath}`);
     
     const testResult = await makeProxyRequestWithFallback(url, testPath, token, undefined, apiVersion);
+
+    // If v3 sort syntax is not supported, retry with the alternative.
+    if (apiVersion === 'v3' && Array.isArray(testResult) && testResult.length === 0) {
+      try {
+        const alt = await makeProxyRequestWithFallback(url, '/api/v3/entries?limit=1&sort$desc=date', token, undefined, 'v3');
+        if (Array.isArray(alt)) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          testResult.splice(0, testResult.length, ...alt);
+        }
+      } catch {
+        // ignore: empty is not necessarily an error
+      }
+    }
     
     if (testResult === null) {
       throw new Error('Connection test failed - no response received');
@@ -693,16 +707,115 @@ export const fetchData = async (
       // For API v3, we'll make a single optimized request for each data type
       // Using date$gte and date$lte query parameters (API v3 uses $ instead of [] for filters)
       
-      // Fetch entries - API v3 uses sort$desc=date syntax
-      let v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lte=${endTimestamp}&limit=${maxV3Limit}&sort$desc=date`;
-      console.log(`🔗 API v3 entries endpoint: ${v3EntriesPath}`);
+      type V3ParamStyle = 'filter' | 'dollar';
 
-      // Some Nightscout v3 installations are picky about timestamp formats.
-      // Use ISO strings for created_at filters (encoded), which tends to be the most compatible.
-      const startDateIsoEncoded = encodeURIComponent(startDate);
-      const endDateIsoEncoded = encodeURIComponent(endDate);
+      const getEntryDate = (entry: any): number | null => {
+        const candidate = entry?.date ?? entry?.srvCreated ?? entry?.mills ?? entry?.dateString ?? entry?.created_at;
+        if (candidate == null) return null;
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+        if (typeof candidate === 'string') {
+          const asNumber = Number(candidate);
+          if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+          const asDate = Date.parse(candidate);
+          if (Number.isFinite(asDate)) return asDate;
+        }
+        return null;
+      };
 
-      const v3TreatmentsPath = `/api/v3/treatments?created_at$gte=${startDateIsoEncoded}&created_at$lte=${endDateIsoEncoded}&limit=${maxV3Limit}&sort$desc=created_at`;
+      const estimateMaxPagesForDays = (days: number) => {
+        // Assume ~288-300 CGM points/day (5 min). Add a small buffer.
+        const estimatedPoints = Math.ceil(days * 300 * 1.15);
+        return Math.min(50, Math.max(3, Math.ceil(estimatedPoints / maxV3Limit) + 1));
+      };
+
+      const buildV3EntriesPath = (style: V3ParamStyle, cursor: number | null, isFirstPage: boolean) => {
+        const params = new URLSearchParams();
+        params.set('limit', String(maxV3Limit));
+
+        if (style === 'filter') {
+          // Nightscout v3 canonical filtering
+          params.set('filter[date][$gte]', String(startTimestamp));
+          params.set(isFirstPage ? 'filter[date][$lte]' : 'filter[date][$lt]', String(cursor ?? endTimestamp));
+          params.set('sort', '-date');
+        } else {
+          // Older/alternate syntax seen on some deployments
+          params.set('date$gte', String(startTimestamp));
+          params.set(isFirstPage ? 'date$lte' : 'date$lt', String(cursor ?? endTimestamp));
+          params.set('sort$desc', 'date');
+        }
+
+        return `/api/v3/entries?${params.toString()}`;
+      };
+
+      const fetchV3EntriesPaged = async (style: V3ParamStyle) => {
+        const maxPages = estimateMaxPagesForDays(days);
+        const collected: any[] = [];
+        const seen = new Set<string>();
+
+        let cursor: number | null = endTimestamp;
+        for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+          const path = buildV3EntriesPath(style, cursor, pageIndex === 0);
+          console.log(`📄 API v3 entries page ${pageIndex + 1}/${maxPages} (${style}): ${path}`);
+
+          const page = await makeProxyRequestWithFallback(url, path, token, signal, 'v3');
+          if (!Array.isArray(page) || page.length === 0) {
+            break;
+          }
+
+          for (const item of page) {
+            const id = item?._id ?? item?.id ?? getEntryDate(item);
+            const key = `${id ?? ''}:${item?.type ?? ''}:${item?.sgv ?? ''}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              collected.push(item);
+            }
+          }
+
+          const oldest = page[page.length - 1];
+          const oldestDate = getEntryDate(oldest);
+          if (!oldestDate || oldestDate <= startTimestamp) {
+            break;
+          }
+          // Move cursor earlier for the next page.
+          cursor = oldestDate;
+
+          // If we got less than the limit, no more pages.
+          if (page.length < maxV3Limit) {
+            break;
+          }
+        }
+
+        return collected;
+      };
+
+      const fetchV3EntriesWithFallbacks = async () => {
+        // 1) Try canonical filter syntax first.
+        const filtered = await fetchV3EntriesPaged('filter');
+        if (filtered.length > 0) return filtered;
+
+        // 2) Sanity check: do we get *any* data unfiltered? If yes, it's likely query-param incompatibility.
+        const unfiltered = await makeProxyRequestWithFallback(url, '/api/v3/entries?limit=5&sort=-date', token, signal, 'v3');
+        if (Array.isArray(unfiltered) && unfiltered.length > 0) {
+          console.log('⚠️ API v3 entries filter returned empty, but unfiltered returned data. Trying alternate param style...');
+          const dollar = await fetchV3EntriesPaged('dollar');
+          if (dollar.length > 0) return dollar;
+
+          // 3) Last resort: return unfiltered data (at least non-empty) and let downstream logic work.
+          return unfiltered;
+        }
+
+        // 4) Nothing returned even unfiltered.
+        return Array.isArray(unfiltered) ? unfiltered : [];
+      };
+
+      // Use canonical filter syntax for API v3 where available.
+      // `created_at` is typically ISO-like; keep ISO filtering for compatibility.
+      const v3TreatmentsParams = new URLSearchParams();
+      v3TreatmentsParams.set('limit', String(maxV3Limit));
+      v3TreatmentsParams.set('sort', '-created_at');
+      v3TreatmentsParams.set('filter[created_at][$gte]', startDate);
+      v3TreatmentsParams.set('filter[created_at][$lte]', endDate);
+      const v3TreatmentsPath = `/api/v3/treatments?${v3TreatmentsParams.toString()}`;
 
       const fetchV3Profile = async () => {
         try {
@@ -728,7 +841,7 @@ export const fetchData = async (
 
       // Entries + treatments are required; profile/devicestatus are best-effort.
       const [entriesSettled, treatmentsSettled, profilesSettled, deviceStatusSettled] = await Promise.allSettled([
-        makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3'),
+        fetchV3EntriesWithFallbacks(),
         makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3'),
         fetchV3Profile(),
         fetchV3DeviceStatus()
@@ -749,36 +862,7 @@ export const fetchData = async (
       console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
       console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
       
-      // If we got exactly maxV3Limit items, there might be more data - fetch additional pages
-      // But limit to a maximum of 3 additional requests to keep costs down
-      if (Array.isArray(entries) && entries.length === maxV3Limit && days > 7) {
-        console.log(`⚠️ Got max limit items, fetching additional pages for longer time range...`);
-        let allEntries = [...entries];
-        let additionalPages = 0;
-        const maxAdditionalPages = 2; // Max 2 additional pages = 3 total requests
-        
-        while (additionalPages < maxAdditionalPages && entries.length === maxV3Limit) {
-          // Get the oldest entry from the last batch to paginate
-          const oldestEntry = entries[entries.length - 1];
-          const oldestDate = oldestEntry.date || oldestEntry.srvCreated;
-          
-          if (!oldestDate || oldestDate <= startTimestamp) break;
-          
-          v3EntriesPath = `/api/v3/entries?date$gte=${startTimestamp}&date$lt=${oldestDate}&limit=${maxV3Limit}&sort$desc=date`;
-          console.log(`📄 Fetching additional page ${additionalPages + 1}: ${v3EntriesPath}`);
-          
-          entries = await makeProxyRequestWithFallback(url, v3EntriesPath, token, signal, 'v3');
-          if (Array.isArray(entries) && entries.length > 0) {
-            allEntries = allEntries.concat(entries);
-            additionalPages++;
-          } else {
-            break;
-          }
-        }
-        
-        entries = allEntries;
-        console.log(`📋 Total entries after pagination: ${entries.length} items`);
-      }
+      // `fetchV3EntriesWithFallbacks()` already paginates as needed.
       
       console.log('✅ Successfully fetched data using API v3 with optimized requests');
       
