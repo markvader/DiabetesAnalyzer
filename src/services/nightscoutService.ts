@@ -808,14 +808,42 @@ export const fetchData = async (
         return Array.isArray(unfiltered) ? unfiltered : [];
       };
 
-      // Use canonical filter syntax for API v3 where available.
-      // `created_at` is typically ISO-like; keep ISO filtering for compatibility.
-      const v3TreatmentsParams = new URLSearchParams();
-      v3TreatmentsParams.set('limit', String(maxV3Limit));
-      v3TreatmentsParams.set('sort', '-created_at');
-      v3TreatmentsParams.set('filter[created_at][$gte]', startDate);
-      v3TreatmentsParams.set('filter[created_at][$lte]', endDate);
-      const v3TreatmentsPath = `/api/v3/treatments?${v3TreatmentsParams.toString()}`;
+      const buildV3TreatmentsPath = (style: V3ParamStyle) => {
+        const params = new URLSearchParams();
+        params.set('limit', String(maxV3Limit));
+
+        if (style === 'filter') {
+          params.set('sort', '-created_at');
+          params.set('filter[created_at][$gte]', startDate);
+          params.set('filter[created_at][$lte]', endDate);
+        } else {
+          // Alternate syntax seen on some deployments
+          params.set('sort$desc', 'created_at');
+          params.set('created_at$gte', encodeURIComponent(startDate));
+          params.set('created_at$lte', encodeURIComponent(endDate));
+        }
+
+        return `/api/v3/treatments?${params.toString()}`;
+      };
+
+      const fetchV3TreatmentsWithFallbacks = async () => {
+        // 1) Canonical filter syntax
+        const primaryPath = buildV3TreatmentsPath('filter');
+        const primary = await makeProxyRequestWithFallback(url, primaryPath, token, signal, 'v3');
+        if (Array.isArray(primary) && primary.length > 0) return primary;
+
+        // 2) Sanity check: any data at all?
+        const unfiltered = await makeProxyRequestWithFallback(url, '/api/v3/treatments?limit=5&sort=-created_at', token, signal, 'v3');
+        if (Array.isArray(unfiltered) && unfiltered.length > 0) {
+          console.log('⚠️ API v3 treatments filter returned empty, but unfiltered returned data. Trying alternate param style...');
+          const altPath = buildV3TreatmentsPath('dollar');
+          const alt = await makeProxyRequestWithFallback(url, altPath, token, signal, 'v3');
+          if (Array.isArray(alt) && alt.length > 0) return alt;
+          return unfiltered;
+        }
+
+        return Array.isArray(primary) ? primary : (Array.isArray(unfiltered) ? unfiltered : []);
+      };
 
       const fetchV3Profile = async () => {
         try {
@@ -842,7 +870,7 @@ export const fetchData = async (
       // Entries + treatments are required; profile/devicestatus are best-effort.
       const [entriesSettled, treatmentsSettled, profilesSettled, deviceStatusSettled] = await Promise.allSettled([
         fetchV3EntriesWithFallbacks(),
-        makeProxyRequestWithFallback(url, v3TreatmentsPath, token, signal, 'v3'),
+        fetchV3TreatmentsWithFallbacks(),
         fetchV3Profile(),
         fetchV3DeviceStatus()
       ]);

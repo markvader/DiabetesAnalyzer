@@ -445,6 +445,19 @@ This is a server-side configuration issue, not an authentication problem.`,
       if (responseData.result !== undefined) {
         console.log(`API v3 response detected with result wrapper. Extracting result array.`);
         normalizedData = responseData.result;
+
+        // Some deployments wrap further: { result: { data: [...] } } or { result: { result: [...] } }
+        if (normalizedData && typeof normalizedData === 'object' && !Array.isArray(normalizedData)) {
+          const maybeData = (normalizedData as any).data;
+          const maybeResult = (normalizedData as any).result;
+          if (maybeData !== undefined) {
+            console.log(`API v3 nested wrapper detected: result.data`);
+            normalizedData = maybeData;
+          } else if (maybeResult !== undefined) {
+            console.log(`API v3 nested wrapper detected: result.result`);
+            normalizedData = maybeResult;
+          }
+        }
         
         // Handle case where result might be a single object (like profile/current)
         if (normalizedData && typeof normalizedData === 'object' && !Array.isArray(normalizedData)) {
