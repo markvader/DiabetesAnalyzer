@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { FileText, Database, Activity, Brain, Sparkles, Award, TrendingUp, Share, FileDown } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { FileText, Database, Activity, Brain, Sparkles, Award, TrendingUp, Share, FileDown, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
+import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import PDFExport from '../components/PDFExport';
@@ -13,12 +14,185 @@ const ExportData: React.FC = () => {
     data, 
     url, 
     loading,
-    error
+    error,
+    fetchDataForDays,
+    analysisPeriod
   } = useNightscout();
 
   const { formatGlucoseValue, getUnitLabel, unit, convertToCurrentUnit, getCurrentGlucoseRanges } = useGlucoseFormatting();
 
   const [activeTab, setActiveTab] = useState<'comprehensive' | 'advanced' | 'standard' | 'data'>('comprehensive');
+
+  // Comprehensive Report time range selection (mirrors Standard Reports UX)
+  const [comprehensiveTimeWindow, setComprehensiveTimeWindow] = useState(168); // 7 days
+  const [comprehensiveIsCustomRange, setComprehensiveIsCustomRange] = useState(false);
+  const [comprehensiveCustomDateRange, setComprehensiveCustomDateRange] = useState({
+    startDate: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
+    endDate: format(new Date(), 'yyyy-MM-dd')
+  });
+  const [comprehensiveShowCalendar, setComprehensiveShowCalendar] = useState(false);
+  const [comprehensiveFetchingMoreData, setComprehensiveFetchingMoreData] = useState(false);
+
+  const comprehensiveDataSpanInfo = useMemo(() => {
+    if (!data?.entries?.length) return null;
+
+    const sortedEntries = [...data.entries].sort((a: any, b: any) => (a?.date ?? 0) - (b?.date ?? 0));
+    const oldestEntry = sortedEntries[0];
+    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    const spanDays = Math.round(((newestEntry?.date ?? 0) - (oldestEntry?.date ?? 0)) / (1000 * 60 * 60 * 24));
+    const spanHours = Math.round(((newestEntry?.date ?? 0) - (oldestEntry?.date ?? 0)) / (1000 * 60 * 60));
+
+    return {
+      oldestDate: new Date(oldestEntry.date),
+      newestDate: new Date(newestEntry.date),
+      spanDays,
+      spanHours,
+      totalReadings: data.entries.length
+    };
+  }, [data?.entries]);
+
+  const comprehensiveGetTimeWindowLabel = (hours: number) => {
+    if (hours < 24) return `${hours} hours`;
+    if (hours < 168) {
+      const days = hours / 24;
+      return `${days} day${days > 1 ? 's' : ''}`;
+    }
+    if (hours < 720) {
+      const weeks = hours / 168;
+      return `${weeks} week${weeks > 1 ? 's' : ''}`;
+    }
+    const months = Math.round(hours / 720);
+    return `${months} month${months > 1 ? 's' : ''}`;
+  };
+
+  const comprehensiveGetAvailableTimeWindows = () => {
+    const allWindows = [
+      { value: 24, label: '24 hours' },
+      { value: 48, label: '2 days' },
+      { value: 72, label: '3 days' },
+      { value: 96, label: '4 days' },
+      { value: 120, label: '5 days' },
+      { value: 144, label: '6 days' },
+      { value: 168, label: '7 days' },
+      { value: 336, label: '2 weeks' },
+      { value: 504, label: '3 weeks' },
+      { value: 720, label: '1 month' },
+      { value: 1440, label: '2 months' },
+      { value: 2160, label: '3 months' }
+    ];
+
+    if (!comprehensiveDataSpanInfo) return allWindows;
+
+    return allWindows.map(window => {
+      const hasEnoughData = comprehensiveDataSpanInfo.spanHours >= window.value;
+      const requestedDays = Math.ceil(window.value / 24);
+
+      if (hasEnoughData) return { ...window, hasEnoughData: true };
+
+      if (requestedDays <= 90) {
+        return {
+          ...window,
+          label: `${window.label} (will fetch more data)`,
+          hasEnoughData: false,
+          canFetch: true
+        };
+      }
+
+      return {
+        ...window,
+        label: `${window.label} (limited data available)`,
+        hasEnoughData: false,
+        canFetch: false
+      };
+    });
+  };
+
+  const comprehensiveHandleTimeWindowChange = async (value: string) => {
+    if (value === 'custom') {
+      setComprehensiveIsCustomRange(true);
+      setComprehensiveShowCalendar(true);
+      return;
+    }
+
+    setComprehensiveIsCustomRange(false);
+    const newTimeWindow = parseInt(value);
+    setComprehensiveTimeWindow(newTimeWindow);
+    setComprehensiveShowCalendar(false);
+
+    const requestedDays = Math.ceil(newTimeWindow / 24);
+    if (comprehensiveDataSpanInfo && requestedDays > analysisPeriod && requestedDays > comprehensiveDataSpanInfo.spanDays) {
+      setComprehensiveFetchingMoreData(true);
+      try {
+        await fetchDataForDays(requestedDays);
+      } catch (err) {
+        console.error('Failed to fetch more data for comprehensive report:', err);
+      } finally {
+        setComprehensiveFetchingMoreData(false);
+      }
+    }
+  };
+
+  const comprehensiveHandleCustomDateSubmit = () => {
+    const startDate = new Date(comprehensiveCustomDateRange.startDate);
+    const endDate = new Date(comprehensiveCustomDateRange.endDate);
+
+    if (startDate > endDate) {
+      alert('Start date cannot be after end date');
+      return;
+    }
+
+    if (endDate > new Date()) {
+      alert('End date cannot be in the future');
+      return;
+    }
+
+    setComprehensiveIsCustomRange(true);
+    setComprehensiveShowCalendar(false);
+  };
+
+  const comprehensiveFilteredReadings = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    const sortedEntries = [...data.entries].sort((a: any, b: any) => (a?.date ?? 0) - (b?.date ?? 0));
+
+    if (comprehensiveIsCustomRange) {
+      const startTime = startOfDay(new Date(comprehensiveCustomDateRange.startDate)).getTime();
+      const endTime = endOfDay(new Date(comprehensiveCustomDateRange.endDate)).getTime();
+      return sortedEntries.filter((reading: any) => reading?.date >= startTime && reading?.date <= endTime);
+    }
+
+    const now = Date.now();
+    const cutoffTime = now - comprehensiveTimeWindow * 60 * 60 * 1000;
+    return sortedEntries.filter((reading: any) => reading?.date >= cutoffTime);
+  }, [data?.entries, comprehensiveTimeWindow, comprehensiveIsCustomRange, comprehensiveCustomDateRange]);
+
+  const comprehensiveFilteredTreatments = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+
+    if (comprehensiveIsCustomRange) {
+      const startTime = startOfDay(new Date(comprehensiveCustomDateRange.startDate)).getTime();
+      const endTime = endOfDay(new Date(comprehensiveCustomDateRange.endDate)).getTime();
+      return data.treatments.filter((treatment: any) => {
+        const treatmentTime = new Date(treatment?.created_at).getTime();
+        return treatmentTime >= startTime && treatmentTime <= endTime;
+      });
+    }
+
+    const now = Date.now();
+    const cutoffTime = now - comprehensiveTimeWindow * 60 * 60 * 1000;
+    return data.treatments.filter((treatment: any) => {
+      const treatmentTime = new Date(treatment?.created_at).getTime();
+      return treatmentTime >= cutoffTime;
+    });
+  }, [data?.treatments, comprehensiveTimeWindow, comprehensiveIsCustomRange, comprehensiveCustomDateRange]);
+
+  const comprehensiveReportData = useMemo(() => {
+    if (!data) return data;
+    return {
+      ...data,
+      entries: comprehensiveFilteredReadings,
+      treatments: comprehensiveFilteredTreatments
+    };
+  }, [data, comprehensiveFilteredReadings, comprehensiveFilteredTreatments]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -140,10 +314,151 @@ const ExportData: React.FC = () => {
                   lifestyle factors, and comprehensive recommendations. Perfect for healthcare provider consultations.
                 </p>
               </div>
+
+              {/* Time Selection (same UX as Standard Reports) */}
+              <div className="mb-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-200 dark:border-gray-700">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Select Time Period
+                </label>
+
+                <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+                  <select
+                    value={comprehensiveIsCustomRange ? 'custom' : comprehensiveTimeWindow.toString()}
+                    onChange={(e) => comprehensiveHandleTimeWindowChange(e.target.value)}
+                    className="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+                  >
+                    {comprehensiveGetAvailableTimeWindows().map((option: any) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                    <option value="custom">Custom Range</option>
+                  </select>
+
+                  {!comprehensiveIsCustomRange && (
+                    <button
+                      onClick={() => setComprehensiveShowCalendar(!comprehensiveShowCalendar)}
+                      className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+                    >
+                      <Calendar className="w-4 h-4 mr-2" />
+                      Calendar
+                    </button>
+                  )}
+                </div>
+
+                {/* Warning for insufficient data */}
+                {!comprehensiveIsCustomRange && comprehensiveDataSpanInfo && comprehensiveTimeWindow > comprehensiveDataSpanInfo.spanHours && (
+                  <div className="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+                    <div className="flex items-start">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mr-2 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm text-amber-800 dark:text-amber-200">
+                          <strong>Limited Data Available:</strong> You selected {comprehensiveGetTimeWindowLabel(comprehensiveTimeWindow)}, but only {comprehensiveDataSpanInfo.spanDays} days of data are available.
+                          {comprehensiveFetchingMoreData ? ' Fetching more data...' : ' The report will include all available readings.'}
+                        </p>
+                      </div>
+                      {!comprehensiveFetchingMoreData && (
+                        <button
+                          onClick={async () => {
+                            const requestedDays = Math.ceil(comprehensiveTimeWindow / 24);
+                            setComprehensiveFetchingMoreData(true);
+                            try {
+                              await fetchDataForDays(requestedDays);
+                            } catch (err) {
+                              console.error('Failed to fetch more data:', err);
+                            } finally {
+                              setComprehensiveFetchingMoreData(false);
+                            }
+                          }}
+                          className="ml-2 px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded flex items-center transition-colors duration-200"
+                        >
+                          <RefreshCw className="w-3 h-3 mr-1" />
+                          Fetch More
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Calendar Panel */}
+                {comprehensiveShowCalendar && (
+                  <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+                    <h4 className="text-md font-medium text-gray-900 dark:text-gray-100 mb-3">Select Date Range</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Date</label>
+                        <input
+                          type="date"
+                          value={comprehensiveCustomDateRange.startDate}
+                          onChange={(e) => setComprehensiveCustomDateRange(prev => ({ ...prev, startDate: e.target.value }))}
+                          max={comprehensiveCustomDateRange.endDate}
+                          min={comprehensiveDataSpanInfo ? format(comprehensiveDataSpanInfo.oldestDate, 'yyyy-MM-dd') : undefined}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">End Date</label>
+                        <input
+                          type="date"
+                          value={comprehensiveCustomDateRange.endDate}
+                          onChange={(e) => setComprehensiveCustomDateRange(prev => ({ ...prev, endDate: e.target.value }))}
+                          min={comprehensiveCustomDateRange.startDate}
+                          max={comprehensiveDataSpanInfo ? format(comprehensiveDataSpanInfo.newestDate, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                        />
+                      </div>
+                    </div>
+
+                    {comprehensiveDataSpanInfo && (
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                        Available data: {format(comprehensiveDataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(comprehensiveDataSpanInfo.newestDate, 'dd.MM.yyyy')}
+                      </p>
+                    )}
+
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={comprehensiveHandleCustomDateSubmit}
+                        className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                      >
+                        Apply Range
+                      </button>
+                      <button
+                        onClick={() => {
+                          setComprehensiveShowCalendar(false);
+                          if (comprehensiveIsCustomRange) setComprehensiveIsCustomRange(false);
+                        }}
+                        className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
+                      >
+                        Cancel
+                      </button>
+                      {comprehensiveDataSpanInfo?.spanDays != null && comprehensiveDataSpanInfo.spanDays < 90 && (
+                        <button
+                          onClick={async () => {
+                            setComprehensiveFetchingMoreData(true);
+                            try {
+                              await fetchDataForDays(90);
+                            } catch (err) {
+                              console.error('Failed to fetch 3 months of data:', err);
+                            } finally {
+                              setComprehensiveFetchingMoreData(false);
+                            }
+                          }}
+                          disabled={comprehensiveFetchingMoreData}
+                          className="ml-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded flex items-center transition-colors duration-200"
+                        >
+                          <RefreshCw className={`w-4 h-4 mr-2 ${comprehensiveFetchingMoreData ? 'animate-spin' : ''}`} />
+                          {comprehensiveFetchingMoreData ? 'Fetching...' : 'Fetch 3 Months'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <ComprehensivePDFReport 
-                data={data} 
+                data={comprehensiveReportData} 
                 basicStats={{}} 
-                filteredReadings={data?.entries || []}
+                filteredReadings={comprehensiveFilteredReadings}
                 formatGlucoseValue={formatGlucoseValue}
                 getUnitLabel={getUnitLabel}
                 unit={unit}

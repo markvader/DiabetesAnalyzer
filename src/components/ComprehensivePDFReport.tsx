@@ -179,7 +179,9 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       const lastTs = sortedReadings[sortedReadings.length - 1]?.date;
       const analysisLabel =
         typeof firstTs === 'number' && typeof lastTs === 'number'
-          ? `${format(new Date(firstTs), 'MMM dd, yyyy')} – ${format(new Date(lastTs), 'MMM dd, yyyy')}`
+          ? (format(new Date(firstTs), 'yyyy-MM-dd') === format(new Date(lastTs), 'yyyy-MM-dd')
+              ? `${format(new Date(firstTs), 'dd.MM.yyyy')}`
+              : `${format(new Date(firstTs), 'dd.MM.yyyy')} – ${format(new Date(lastTs), 'dd.MM.yyyy')}`)
           : 'Selected Period';
 
       const treatments: any[] = Array.isArray(data?.treatments) ? data.treatments : [];
