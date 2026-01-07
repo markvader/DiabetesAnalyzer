@@ -62,6 +62,21 @@ export interface PredictionResult {
 }
 
 class AdvancedPredictionService {
+
+  private getFirstJsonCapableProvider(): any | null {
+    const providers = (aiService as any)?.providers;
+    if (!Array.isArray(providers) || providers.length === 0) return null;
+
+    // Gemini uses a dedicated SDK/service in `aiService` and isn't directly callable from here.
+    // For advanced predictions we only use providers we can call with fetch.
+    const provider = providers.find((p: any) => {
+      const endpoint = p?.endpoint;
+      const apiKey = p?.apiKey;
+      return typeof endpoint === 'string' && endpoint !== 'gemini' && typeof apiKey === 'string' && apiKey.length > 0;
+    });
+
+    return provider ?? null;
+  }
   
   async generateAdvancedPredictions(
     readings: GlucoseReading[],
@@ -92,13 +107,19 @@ class AdvancedPredictionService {
     predictionPoints: number = 36
   ): Promise<PredictionResult | null> {
     
+    const provider = this.getFirstJsonCapableProvider();
+    if (!provider) {
+      // No remote AI configured; fall back to deterministic model without logging errors.
+      return null;
+    }
+
     const recentReadings = readings.slice(-48); // Last 4 hours of data
     
     // Prepare comprehensive context for AI
     const prompt = this.buildAIPredictionPrompt(recentReadings, context, predictionPoints);
     
     try {
-      const response = await this.callAIService(prompt);
+      const response = await this.callAIService(prompt, provider);
       return this.parseAIResponse(response, recentReadings);
     } catch (error) {
       console.error('AI service call failed:', error);
@@ -197,41 +218,82 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     return prompt;
   }
 
-  private async callAIService(_prompt: string): Promise<string> {
+  private async callAIService(prompt: string, provider: any): Promise<string> {
     try {
-      // Create a simple AI request for predictions
-      const tempReadings = [{ sgv: 100, date: Date.now() }];
-      const mockTimeInRange = { percentage: 80 };
-      
-      const response = await aiService.analyzeGlucosePatterns(
-        tempReadings, 
-        mockTimeInRange,
-        {
-          unit: 'mgdl' as const,
-          formatGlucoseValue: (value: number) => `${value}`,
-          getUnitLabel: () => 'mg/dL'
-        }
-      );
-      
-      // For now, return insights as a string
-      return Array.isArray(response.insights) ? response.insights.join(' ') : String(response.insights);
+      if (!provider?.endpoint || !provider?.name || !provider?.model || !provider?.apiKey) {
+        return '';
+      }
+
+      let response: Response;
+
+      if (provider.name === 'Anthropic') {
+        response = await fetch(provider.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': provider.apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: provider.model,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 1200
+          })
+        });
+      } else {
+        // OpenAI / DeepSeek compatible APIs
+        response = await fetch(provider.endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${provider.apiKey}`
+          },
+          body: JSON.stringify({
+            model: provider.model,
+            messages: [
+              { role: 'system', content: 'You are an advanced diabetes AI specialized in glucose prediction.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 1200
+          })
+        });
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '');
+        throw new Error(`${provider.name} API error: ${response.status} ${response.statusText}${errorText ? ` — ${errorText}` : ''}`);
+      }
+
+      const data = await response.json();
+
+      if (provider.name === 'Anthropic') {
+        const text = data?.content?.[0]?.text;
+        return typeof text === 'string' ? text : '';
+      }
+
+      const content = data?.choices?.[0]?.message?.content;
+      return typeof content === 'string' ? content : '';
     } catch (error) {
       console.error('AI service call failed:', error);
       throw error;
     }
   }
 
-  private parseAIResponse(response: string, readings: GlucoseReading[]): PredictionResult {
-    try {
-      const parsedJson = safeJsonParseFromText(String(response ?? ''));
-      if (!parsedJson.ok) {
-        throw new Error(parsedJson.error);
-      }
+  private parseAIResponse(response: string, readings: GlucoseReading[]): PredictionResult | null {
+    const text = String(response ?? '').trim();
+    if (!text) return null;
 
-      const parsed = (typeof parsedJson.value === 'object' && parsedJson.value !== null) ? (parsedJson.value as any) : {};
+    const parsedJson = safeJsonParseFromText(text);
+    if (!parsedJson.ok) {
+      // Non-JSON response; treat as unsupported and fall back without spamming errors.
+      console.warn('AI prediction returned non-JSON response; falling back to mathematical model');
+      return null;
+    }
+
+    const parsed = (typeof parsedJson.value === 'object' && parsedJson.value !== null) ? (parsedJson.value as any) : {};
       
-      // Validate and sanitize the parsed data
-      return {
+    const result: PredictionResult = {
         predictions: this.validatePredictionArray(parsed.predictions, readings),
         highScenario: this.validatePredictionArray(parsed.highScenario, readings),
         lowScenario: this.validatePredictionArray(parsed.lowScenario, readings),
@@ -253,10 +315,13 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
           highAlerts: this.validateAlerts(parsed.alertPredictions?.highAlerts)
         }
       };
-    } catch (error) {
-      console.error('Failed to parse AI response:', error);
-      throw new Error('Invalid AI response format');
+
+    // Require at least some prediction points, otherwise treat as invalid and fall back.
+    if (!Array.isArray(result.predictions) || result.predictions.length === 0) {
+      return null;
     }
+
+    return result;
   }
 
   private validatePredictionArray(arr: any, readings: GlucoseReading[]): number[] {
