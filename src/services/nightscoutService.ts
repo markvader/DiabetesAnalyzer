@@ -686,13 +686,20 @@ export const fetchData = async (
           }
         };
 
+        const normalizeEpochMs = (value: number): number => {
+          // Heuristic: epoch seconds are ~1e9, epoch ms are ~1e12.
+          // Treat anything < 1e11 as seconds.
+          if (value > 0 && value < 1e11) return value * 1000;
+          return value;
+        };
+
         const getV1TreatmentTimeMs = (treatment: any): number | null => {
           const candidate = treatment?.created_at ?? treatment?.timestamp ?? treatment?.mills;
           if (candidate == null) return null;
-          if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return normalizeEpochMs(candidate);
           if (typeof candidate === 'string') {
             const asNumber = Number(candidate);
-            if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+            if (Number.isFinite(asNumber) && asNumber > 0) return normalizeEpochMs(asNumber);
             const asDate = Date.parse(candidate);
             if (Number.isFinite(asDate)) return asDate;
           }
@@ -705,6 +712,8 @@ export const fetchData = async (
           const pageSize = 5000;
           const maxPages = 25; // safety cap to avoid unbounded loads
 
+          console.log(`📄 API v1 treatments pagination enabled (max ${maxPages} pages × ${pageSize})`);
+
           const fetchCreatedAtPages = async () => {
             const collected: any[] = [];
             let cursorIso: string | null = endDate;
@@ -713,7 +722,8 @@ export const fetchData = async (
               const params = new URLSearchParams();
               params.set('count', String(pageSize));
               params.set('sort$desc', 'created_at');
-              params.set('find[created_at][$gte]', startDate);
+              // Do NOT rely on server-side $gte filters here; some instances ignore/handle them inconsistently.
+              // We page backwards by cursor and stop once we've reached the requested start.
               params.set(pageIndex === 0 ? 'find[created_at][$lte]' : 'find[created_at][$lt]', cursorIso ?? endDate);
               const path = `/api/v1/treatments?${params.toString()}`;
 
@@ -741,7 +751,7 @@ export const fetchData = async (
               const params = new URLSearchParams();
               params.set('count', String(pageSize));
               params.set('sort$desc', 'timestamp');
-              params.set('find[timestamp][$gte]', String(startTimestamp));
+              // Same approach as created_at: page by cursor only, then filter client-side.
               params.set(pageIndex === 0 ? 'find[timestamp][$lte]' : 'find[timestamp][$lt]', String(cursorMs ?? endTimestamp));
               const path = `/api/v1/treatments?${params.toString()}`;
 
@@ -769,13 +779,22 @@ export const fetchData = async (
           const combined = [...byCreatedAt, ...byTimestamp];
           const seen = new Set<string>();
 
-          return combined.filter((t: any) => {
+          const deduped = combined.filter((t: any) => {
             const id = t?._id ?? t?.id;
             const key = id ? String(id) : `${t?.eventType ?? ''}:${t?.created_at ?? ''}:${t?.timestamp ?? ''}:${t?.enteredBy ?? ''}`;
             if (seen.has(key)) return false;
             seen.add(key);
             return true;
           });
+
+          const inRange = deduped.filter((t: any) => {
+            const tMs = getV1TreatmentTimeMs(t);
+            if (!tMs) return false;
+            return tMs >= startTimestamp && tMs <= endTimestamp;
+          });
+
+          console.log(`📄 API v1 treatments collected: ${combined.length}, deduped: ${deduped.length}, in-range: ${inRange.length}`);
+          return inRange;
         };
 
         const buildV1EntriesPath = (cursor: number | null, isFirstPage: boolean, pageCount: number) => {

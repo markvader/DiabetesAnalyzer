@@ -86,10 +86,15 @@ const CGMCalibration = () => {
   const getTreatmentTimeMs = (treatment: any): number | null => {
     const candidate = treatment?.created_at ?? treatment?.timestamp ?? treatment?.mills;
     if (candidate == null) return null;
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+    const normalizeEpochMs = (value: number): number => {
+      // Heuristic: epoch seconds are ~1e9, epoch ms are ~1e12.
+      if (value > 0 && value < 1e11) return value * 1000;
+      return value;
+    };
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) return normalizeEpochMs(candidate);
     if (typeof candidate === 'string') {
       const asNumber = Number(candidate);
-      if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+      if (Number.isFinite(asNumber) && asNumber > 0) return normalizeEpochMs(asNumber);
       const asDate = Date.parse(candidate);
       if (Number.isFinite(asDate)) return asDate;
     }
