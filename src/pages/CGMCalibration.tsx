@@ -264,39 +264,123 @@ const CGMCalibration = () => {
     }
   };
 
-  const isSensorEvent = (treatment: any) => {
-    const eventType = String(treatment?.eventType ?? treatment?.event_type ?? '').toLowerCase();
-    if (!eventType) return false;
-    return eventType.includes('sensor');
+  type SensorEventKind = 'start' | 'end' | 'other';
+
+  const getTreatmentEventType = (treatment: any) => {
+    const raw = treatment?.eventType ?? treatment?.event_type;
+    return raw == null ? '' : String(raw);
   };
 
+  const classifySensorEvent = (treatment: any): SensorEventKind => {
+    const eventType = getTreatmentEventType(treatment).trim();
+    const notes = treatment?.notes == null ? '' : String(treatment.notes);
+    const combined = `${eventType} ${notes}`.toLowerCase();
+    const normalized = combined.replace(/\s+/g, ' ').trim();
+
+    if (!normalized) return 'other';
+
+    // End/stop/failure events
+    if (
+      normalized.includes('sensor stop') ||
+      normalized.includes('sensor end') ||
+      normalized.includes('stop sensor') ||
+      normalized.includes('sensor fail') ||
+      normalized.includes('sensor failure') ||
+      normalized.includes('sensor failed') ||
+      normalized.includes('stopped working') ||
+      normalized.includes('not working') ||
+      normalized.includes('sensor error') ||
+      normalized.includes('sensor expired')
+    ) {
+      return 'end';
+    }
+
+    // Start/insert/change events
+    if (
+      normalized === 'sage' ||
+      normalized.includes(' sage ') ||
+      normalized.startsWith('sage ') ||
+      normalized.endsWith(' sage') ||
+      normalized.includes('sensor start') ||
+      normalized.includes('sensor insert') ||
+      normalized.includes('sensor change') ||
+      normalized.includes('start sensor')
+    ) {
+      return 'start';
+    }
+
+    // Generic sensor-related events (fallback)
+    if (normalized.includes('sensor')) return 'start';
+
+    return 'other';
+  };
+
+  const isSensorStartEvent = (treatment: any) => classifySensorEvent(treatment) === 'start';
+  const isSensorEndEvent = (treatment: any) => classifySensorEvent(treatment) === 'end';
+
   const sensorPeriods = useMemo(() => {
-    if (!data?.treatments?.length) return [] as Array<{ start: number; end: number; notes?: string; eventType?: string }>;
-    const events = data.treatments
-      .filter(isSensorEvent)
+    if (!data?.treatments?.length) {
+      return [] as Array<{
+        start: number;
+        end: number;
+        notes?: string;
+        eventType?: string;
+        endEventType?: string;
+      }>;
+    }
+
+    const mapped = data.treatments
       .map((t) => {
         const tMs = getTreatmentTimeMs(t);
         if (!tMs) return null;
+        const kind = classifySensorEvent(t);
+        if (kind === 'other') return null;
         return {
-          start: tMs,
+          t,
+          time: tMs,
+          kind,
           notes: t?.notes as string | undefined,
-          eventType: t?.eventType as string | undefined
+          eventType: getTreatmentEventType(t) || undefined,
         };
       })
-      .filter(Boolean) as Array<{ start: number; notes?: string; eventType?: string }>;
+      .filter(Boolean) as Array<{
+      t: any;
+      time: number;
+      kind: SensorEventKind;
+      notes?: string;
+      eventType?: string;
+    }>;
 
-    events.sort((a, b) => a.start - b.start);
-    if (!events.length) return [];
+    if (!mapped.length) return [];
 
+    mapped.sort((a, b) => a.time - b.time);
+    const starts = mapped.filter((e) => e.kind === 'start');
+    const ends = mapped.filter((e) => e.kind === 'end');
     const now = Date.now();
-    const periods: Array<{ start: number; end: number; notes?: string; eventType?: string }> = [];
-    for (let i = 0; i < events.length; i++) {
-      const start = events[i].start;
-      const end = i < events.length - 1 ? events[i + 1].start : now;
-      periods.push({ start, end, notes: events[i].notes, eventType: events[i].eventType });
+
+    const periods: Array<{ start: number; end: number; notes?: string; eventType?: string; endEventType?: string }> = [];
+    for (const s of starts) {
+      const nextStart = starts.find((n) => n.time > s.time);
+      const nextEnd = ends.find((n) => n.time > s.time);
+
+      let end = nextStart ? nextStart.time : now;
+      let endEventType: string | undefined;
+
+      // Prefer an explicit stop/failure if it occurs before the next start.
+      if (nextEnd && (!nextStart || nextEnd.time <= nextStart.time)) {
+        end = nextEnd.time;
+        endEventType = nextEnd.eventType;
+      }
+
+      periods.push({
+        start: s.time,
+        end,
+        notes: s.notes,
+        eventType: s.eventType,
+        endEventType,
+      });
     }
 
-    // Keep only periods that overlap the selected time window
     return periods.filter((p) => p.end >= selectedRange.start && p.start <= selectedRange.end);
   }, [data?.treatments, selectedRange.start, selectedRange.end]);
 
@@ -436,7 +520,7 @@ const CGMCalibration = () => {
     const firstReading = readings.length ? (readings[0].t as number) : null;
 
     // Prefer explicit sensor insert/change events if present
-    const latestSensorEvent = data?.treatments?.filter(isSensorEvent)
+    const latestSensorEvent = data?.treatments?.filter(isSensorStartEvent)
       .map(getTreatmentTimeMs)
       .filter((t): t is number => typeof t === 'number' && Number.isFinite(t))
       .sort((a, b) => b - a)[0];
@@ -696,6 +780,7 @@ const CGMCalibration = () => {
                       </p>
                       <p className="text-xs text-gray-600 dark:text-gray-300 mt-1">
                         End: {p.end >= Date.now() - 60 * 1000 ? 'Now' : format(new Date(p.end), 'dd.MM.yyyy HH:mm')}
+                        {p.endEventType && p.end < Date.now() - 60 * 1000 ? ` (${p.endEventType})` : ''}
                         {' • '}Lasted: {formatDurationDaysHours(p.start, p.end)}
                       </p>
                       {(p.notes || p.eventType) && (
