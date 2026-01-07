@@ -65,6 +65,7 @@ const CGMCalibration = () => {
   // Sensor insert/change events
   const [showAddSensorEvent, setShowAddSensorEvent] = useState(false);
   const [sensorEventDateTime, setSensorEventDateTime] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+  const [sensorEventType, setSensorEventType] = useState<'CGM Sensor Start' | 'CGM Sensor Insert' | 'CGM Sensor Stop'>('CGM Sensor Insert');
   const [sensorEventNotes, setSensorEventNotes] = useState('');
   const [sensorEventError, setSensorEventError] = useState<string | null>(null);
   const [sensorEventSaving, setSensorEventSaving] = useState(false);
@@ -279,6 +280,11 @@ const CGMCalibration = () => {
 
     if (!normalized) return 'other';
 
+    // Explicit Nightscout CGM sensor event types
+    if (normalized.includes('cgm sensor stop')) return 'end';
+    if (normalized.includes('cgm sensor start')) return 'start';
+    if (normalized.includes('cgm sensor insert')) return 'start';
+
     // End/stop/failure events
     if (
       normalized.includes('sensor stop') ||
@@ -415,7 +421,7 @@ const CGMCalibration = () => {
       await createTreatment(
         nightscoutUrl,
         {
-          eventType: 'Sensor Insert',
+          eventType: sensorEventType,
           created_at: createdAt.toISOString(),
           enteredBy: 'DiabetesAnalyzer',
           notes: sensorEventNotes?.trim() || undefined
@@ -431,6 +437,7 @@ const CGMCalibration = () => {
       setShowAddSensorEvent(false);
       setSensorEventNotes('');
       setSensorEventDateTime(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
+      setSensorEventType('CGM Sensor Insert');
     } catch (e) {
       setSensorEventError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -702,9 +709,9 @@ const CGMCalibration = () => {
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-start justify-between gap-4 flex-col sm:flex-row">
           <div>
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Sensor Insert Events</h3>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">CGM Sensor Events</h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Track when sensors were inserted and how long they lasted (useful for warranty claims)
+              Track sensor start/insert/stop events and how long sensors lasted (useful for warranty claims)
             </p>
           </div>
           <button
@@ -722,6 +729,18 @@ const CGMCalibration = () => {
         {showAddSensorEvent && (
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Event Type</label>
+                <select
+                  value={sensorEventType}
+                  onChange={(e) => setSensorEventType(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100"
+                >
+                  <option value="CGM Sensor Start">CGM Sensor Start</option>
+                  <option value="CGM Sensor Insert">CGM Sensor Insert</option>
+                  <option value="CGM Sensor Stop">CGM Sensor Stop</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Insert Date/Time</label>
                 <input
