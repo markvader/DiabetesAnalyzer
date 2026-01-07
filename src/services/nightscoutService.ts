@@ -686,6 +686,98 @@ export const fetchData = async (
           }
         };
 
+        const getV1TreatmentTimeMs = (treatment: any): number | null => {
+          const candidate = treatment?.created_at ?? treatment?.timestamp ?? treatment?.mills;
+          if (candidate == null) return null;
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+          if (typeof candidate === 'string') {
+            const asNumber = Number(candidate);
+            if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+            const asDate = Date.parse(candidate);
+            if (Number.isFinite(asDate)) return asDate;
+          }
+          return null;
+        };
+
+        const fetchV1TreatmentsPaged = async () => {
+          // Nightscout v1 treatments often cap at count=5000.
+          // For long ranges (e.g. 90 days) we need pagination, otherwise older sensor events disappear.
+          const pageSize = 5000;
+          const maxPages = 25; // safety cap to avoid unbounded loads
+
+          const fetchCreatedAtPages = async () => {
+            const collected: any[] = [];
+            let cursorIso: string | null = endDate;
+
+            for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+              const params = new URLSearchParams();
+              params.set('count', String(pageSize));
+              params.set('sort$desc', 'created_at');
+              params.set('find[created_at][$gte]', startDate);
+              params.set(pageIndex === 0 ? 'find[created_at][$lte]' : 'find[created_at][$lt]', cursorIso ?? endDate);
+              const path = `/api/v1/treatments?${params.toString()}`;
+
+              console.log(`📄 API v1 treatments(created_at) page ${pageIndex + 1}/${maxPages}: ${path}`);
+              const page = await safeProxyFetch(path);
+              if (!page.length) break;
+              collected.push(...page);
+
+              const oldest = page[page.length - 1];
+              const oldestMs = getV1TreatmentTimeMs(oldest);
+              if (!oldestMs || oldestMs <= startTimestamp) break;
+              cursorIso = new Date(oldestMs).toISOString();
+
+              if (page.length < pageSize) break;
+            }
+
+            return collected;
+          };
+
+          const fetchTimestampPages = async () => {
+            const collected: any[] = [];
+            let cursorMs: number | null = endTimestamp;
+
+            for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+              const params = new URLSearchParams();
+              params.set('count', String(pageSize));
+              params.set('sort$desc', 'timestamp');
+              params.set('find[timestamp][$gte]', String(startTimestamp));
+              params.set(pageIndex === 0 ? 'find[timestamp][$lte]' : 'find[timestamp][$lt]', String(cursorMs ?? endTimestamp));
+              const path = `/api/v1/treatments?${params.toString()}`;
+
+              console.log(`📄 API v1 treatments(timestamp) page ${pageIndex + 1}/${maxPages}: ${path}`);
+              const page = await safeProxyFetch(path);
+              if (!page.length) break;
+              collected.push(...page);
+
+              const oldest = page[page.length - 1];
+              const oldestMs = getV1TreatmentTimeMs(oldest);
+              if (!oldestMs || oldestMs <= startTimestamp) break;
+              cursorMs = oldestMs;
+
+              if (page.length < pageSize) break;
+            }
+
+            return collected;
+          };
+
+          const byCreatedAt = await fetchCreatedAtPages();
+          // Most Nightscout instances include `created_at`. Only fall back to timestamp paging
+          // when `created_at` is missing/unusable for the requested range.
+          const byTimestamp = byCreatedAt.length > 0 ? [] : await fetchTimestampPages();
+
+          const combined = [...byCreatedAt, ...byTimestamp];
+          const seen = new Set<string>();
+
+          return combined.filter((t: any) => {
+            const id = t?._id ?? t?.id;
+            const key = id ? String(id) : `${t?.eventType ?? ''}:${t?.created_at ?? ''}:${t?.timestamp ?? ''}:${t?.enteredBy ?? ''}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        };
+
         const buildV1EntriesPath = (cursor: number | null, isFirstPage: boolean, pageCount: number) => {
           const params = new URLSearchParams();
           params.set('count', String(pageCount));
@@ -734,32 +826,19 @@ export const fetchData = async (
           return collected;
         };
 
-        // Keep treatments bounded to the same requested time range
-        const treatmentsLimit = Math.min(Math.max(500, optimizedLimit), 5000);
-        const v1TreatmentsPathCreatedAt = `/api/v1/treatments?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${treatmentsLimit}`;
-        const v1TreatmentsPathTimestamp = `/api/v1/treatments?find[timestamp][$gte]=${startTimestamp}&find[timestamp][$lte]=${endTimestamp}&count=${treatmentsLimit}`;
       const v1ProfilePath = '/api/v1/profile';
       const v1DeviceStatusPath = '/api/v1/devicestatus?count=1';
 
         // Parallelize requests; entries are paged to actually cover long ranges.
-        const [entriesRes, treatmentsCreatedRes, treatmentsTimestampRes, profilesRes, deviceStatusRes] = await Promise.all([
+        const [entriesRes, treatmentsRes, profilesRes, deviceStatusRes] = await Promise.all([
           fetchV1EntriesPaged(),
-          safeProxyFetch(v1TreatmentsPathCreatedAt),
-          safeProxyFetch(v1TreatmentsPathTimestamp),
+          fetchV1TreatmentsPaged(),
           makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1'),
           makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1')
         ]);
 
       entries = entriesRes;
-        const combinedTreatments = [...(Array.isArray(treatmentsCreatedRes) ? treatmentsCreatedRes : []), ...(Array.isArray(treatmentsTimestampRes) ? treatmentsTimestampRes : [])];
-        const seenTreatments = new Set<string>();
-        treatments = combinedTreatments.filter((t: any) => {
-          const id = t?._id ?? t?.id;
-          const key = id ? String(id) : `${t?.eventType ?? ''}:${t?.created_at ?? ''}:${t?.timestamp ?? ''}`;
-          if (seenTreatments.has(key)) return false;
-          seenTreatments.add(key);
-          return true;
-        });
+      treatments = treatmentsRes;
       profiles = profilesRes;
       const deviceStatus = deviceStatusRes;
 
@@ -897,41 +976,79 @@ export const fetchData = async (
         return Array.isArray(unfiltered) ? unfiltered : [];
       };
 
-      const buildV3TreatmentsPath = (style: V3ParamStyle) => {
-        const params = new URLSearchParams();
-        params.set('limit', String(maxV3Limit));
+      const getV3TreatmentTimeMs = (treatment: any): number | null => {
+        const candidate = treatment?.created_at ?? treatment?.srvCreated ?? treatment?.timestamp ?? treatment?.mills;
+        if (candidate == null) return null;
+        if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+        if (typeof candidate === 'string') {
+          const asNumber = Number(candidate);
+          if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+          const asDate = Date.parse(candidate);
+          if (Number.isFinite(asDate)) return asDate;
+        }
+        return null;
+      };
 
-        if (style === 'filter') {
-          params.set('sort', '-created_at');
-          params.set('filter[created_at][$gte]', startDate);
-          params.set('filter[created_at][$lte]', endDate);
-        } else {
-          // Alternate syntax seen on some deployments
-          params.set('sort$desc', 'created_at');
-          params.set('created_at$gte', encodeURIComponent(startDate));
-          params.set('created_at$lte', encodeURIComponent(endDate));
+      const fetchV3TreatmentsPaged = async (style: V3ParamStyle) => {
+        const maxPages = 25;
+        const collected: any[] = [];
+        const seen = new Set<string>();
+
+        let cursorIso: string | null = endDate;
+        for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+          const params = new URLSearchParams();
+          params.set('limit', String(maxV3Limit));
+
+          if (style === 'filter') {
+            params.set('sort', '-created_at');
+            params.set('filter[created_at][$gte]', startDate);
+            params.set(pageIndex === 0 ? 'filter[created_at][$lte]' : 'filter[created_at][$lt]', cursorIso ?? endDate);
+          } else {
+            params.set('sort$desc', 'created_at');
+            params.set('created_at$gte', encodeURIComponent(startDate));
+            params.set(pageIndex === 0 ? 'created_at$lte' : 'created_at$lt', encodeURIComponent(cursorIso ?? endDate));
+          }
+
+          const path = `/api/v3/treatments?${params.toString()}`;
+          console.log(`📄 API v3 treatments page ${pageIndex + 1}/${maxPages} (${style}): ${path}`);
+
+          const page = await makeProxyRequestWithFallback(url, path, token, signal, 'v3');
+          if (!Array.isArray(page) || page.length === 0) break;
+
+          for (const item of page) {
+            const id = item?._id ?? item?.id;
+            const key = id ? String(id) : `${item?.eventType ?? ''}:${item?.created_at ?? ''}:${item?.timestamp ?? ''}:${item?.enteredBy ?? ''}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            collected.push(item);
+          }
+
+          const oldest = page[page.length - 1];
+          const oldestMs = getV3TreatmentTimeMs(oldest);
+          if (!oldestMs || oldestMs <= startTimestamp) break;
+          cursorIso = new Date(oldestMs).toISOString();
+
+          if (page.length < maxV3Limit) break;
         }
 
-        return `/api/v3/treatments?${params.toString()}`;
+        return collected;
       };
 
       const fetchV3TreatmentsWithFallbacks = async () => {
-        // 1) Canonical filter syntax
-        const primaryPath = buildV3TreatmentsPath('filter');
-        const primary = await makeProxyRequestWithFallback(url, primaryPath, token, signal, 'v3');
-        if (Array.isArray(primary) && primary.length > 0) return primary;
+        // 1) Canonical filter syntax first (paged)
+        const filtered = await fetchV3TreatmentsPaged('filter');
+        if (filtered.length > 0) return filtered;
 
         // 2) Sanity check: any data at all?
         const unfiltered = await makeProxyRequestWithFallback(url, '/api/v3/treatments?limit=5&sort=-created_at', token, signal, 'v3');
         if (Array.isArray(unfiltered) && unfiltered.length > 0) {
           console.log('⚠️ API v3 treatments filter returned empty, but unfiltered returned data. Trying alternate param style...');
-          const altPath = buildV3TreatmentsPath('dollar');
-          const alt = await makeProxyRequestWithFallback(url, altPath, token, signal, 'v3');
-          if (Array.isArray(alt) && alt.length > 0) return alt;
+          const alt = await fetchV3TreatmentsPaged('dollar');
+          if (alt.length > 0) return alt;
           return unfiltered;
         }
 
-        return Array.isArray(primary) ? primary : (Array.isArray(unfiltered) ? unfiltered : []);
+        return Array.isArray(unfiltered) ? unfiltered : [];
       };
 
       const fetchV3Profile = async () => {
