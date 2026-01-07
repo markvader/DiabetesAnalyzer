@@ -15,6 +15,8 @@ interface ProxyRequest {
   token?: string;
   apiVersion?: 'v1' | 'v3' | 'auto';
   authMethod?: 'bearer' | 'api-secret' | 'url-param' | 'auto';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: unknown;
 }
 
 serve(async (req) => {
@@ -52,7 +54,15 @@ serve(async (req) => {
       )
     }
 
-    const { url, path, token, apiVersion = 'auto', authMethod = 'auto' } = requestData;
+    const {
+      url,
+      path,
+      token,
+      apiVersion = 'auto',
+      authMethod = 'auto',
+      method = 'GET',
+      body,
+    } = requestData;
 
     // Validate required fields
     if (!url) {
@@ -160,9 +170,17 @@ serve(async (req) => {
 
     let response: Response;
     try {
+      const forwardMethod = (method || 'GET').toUpperCase();
+      const shouldSendBody = forwardMethod !== 'GET' && forwardMethod !== 'HEAD';
+      if (shouldSendBody) {
+        // Ensure Nightscout receives JSON for write operations
+        nightscoutHeaders['Content-Type'] = nightscoutHeaders['Content-Type'] || 'application/json';
+      }
+
       response = await fetch(targetUrl, {
-        method: 'GET',
+        method: forwardMethod,
         headers: nightscoutHeaders,
+        body: shouldSendBody ? JSON.stringify(body ?? {}) : undefined,
         signal: controller.signal,
       });
     } catch (error) {

@@ -160,7 +160,9 @@ const makeProxyRequestWithFallback = async (
   path: string, 
   token?: string,
   signal?: AbortSignal,
-  apiVersion: 'v1' | 'v3' = 'v1'
+  apiVersion: 'v1' | 'v3' = 'v1',
+  requestMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  requestBody?: unknown
 ) => {
   console.log(`🔍 makeProxyRequestWithFallback called with:`, {
     nightscoutUrl: nightscoutUrl?.substring(0, 50) + '...',
@@ -173,14 +175,14 @@ const makeProxyRequestWithFallback = async (
 
   // For API v3, always use bearer token
   if (apiVersion === 'v3') {
-    return makeProxyRequest(nightscoutUrl, path, token, signal, apiVersion, 'bearer');
+    return makeProxyRequest(nightscoutUrl, path, token, signal, apiVersion, 'bearer', requestMethod, requestBody);
   }
   
   // For API v1, use the correct authentication method directly
   // The proxy now handles API v1 with API-SECRET header, so use 'auto' to let it decide
   try {
     console.log(`🔄 Using standard API v1 authentication with API-SECRET header`);
-    const result = await makeProxyRequest(nightscoutUrl, path, token, signal, apiVersion, 'auto');
+    const result = await makeProxyRequest(nightscoutUrl, path, token, signal, apiVersion, 'auto', requestMethod, requestBody);
     console.log(`✅ API v1 authentication succeeded`);
     return result;
   } catch (error) {
@@ -206,7 +208,9 @@ const makeProxyRequest = async (
   token?: string,
   signal?: AbortSignal,
   apiVersion: 'v1' | 'v3' | 'auto' = 'auto',
-  authMethod: 'bearer' | 'api-secret' | 'url-param' | 'auto' = 'auto'
+  authMethod: 'bearer' | 'api-secret' | 'url-param' | 'auto' = 'auto',
+  requestMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  requestBody?: unknown
 ) => {
   // Check if signal is already aborted
   if (signal?.aborted) {
@@ -250,6 +254,7 @@ const makeProxyRequest = async (
           tokenPreview: token ? token.substring(0, 8) + '...' : 'none',
           apiVersion,
           authMethod,
+          requestMethod,
           attempt: attempt + 1
         });
 
@@ -265,7 +270,9 @@ const makeProxyRequest = async (
             path: path.startsWith('/') ? path : `/${path}`,
             token: token?.trim(),
             apiVersion,
-            authMethod
+            authMethod,
+            method: requestMethod,
+            body: requestBody
           }),
           signal,
           credentials: 'omit'
@@ -980,4 +987,26 @@ If you continue having issues, please try switching to API v1 in the Settings pa
     
     throw new Error(`Failed to fetch Nightscout data: ${errorMessage}`);
   }
+};
+
+// Create a treatment/event in Nightscout (used for sensor-change tracking)
+export const createTreatment = async (
+  url: string,
+  treatment: Record<string, unknown>,
+  token?: string,
+  signal?: AbortSignal,
+  preferredApiVersion?: 'v1' | 'v3' | null
+) => {
+  const apiVersion = preferredApiVersion || 'v1';
+  const path = apiVersion === 'v3' ? '/api/v3/treatments' : '/api/v1/treatments';
+
+  return makeProxyRequestWithFallback(
+    url,
+    path,
+    token,
+    signal,
+    apiVersion,
+    'POST',
+    treatment
+  );
 };
