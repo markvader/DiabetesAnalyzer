@@ -655,29 +655,111 @@ export const fetchData = async (
       const startTimestamp = new Date(startDate).getTime();
       const endTimestamp = new Date(endDate).getTime();
       
-      // Use a reasonable limit - API v1 can handle larger counts
-      // But we'll cap at 10000 to avoid timeout issues
-      const optimizedLimit = Math.min(countLimit, 10000);
+        // API v1 entries for long ranges must be paged; otherwise we only get the newest slice.
+        // Default 5-min CGM data is ~288 points/day, so 90 days is ~26k points.
+        const maxV1PageSize = 10000;
+        const optimizedLimit = countLimit;
       
       // Build endpoints
-      const v1EntriesPath = `/api/v1/entries?find[date][$gte]=${startTimestamp}&find[date][$lte]=${endTimestamp}&count=${optimizedLimit}`;
-      console.log(`🔗 API v1 entries endpoint: ${v1EntriesPath}`);
+        const getV1EntryDateMs = (entry: any): number | null => {
+          const candidate = entry?.date ?? entry?.mills ?? entry?.srvCreated ?? entry?.dateString ?? entry?.created_at;
+          if (candidate == null) return null;
+          if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
+          if (typeof candidate === 'string') {
+            const asNumber = Number(candidate);
+            if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+            const asDate = Date.parse(candidate);
+            if (Number.isFinite(asDate)) return asDate;
+          }
+          return null;
+        };
 
-      // Keep treatments bounded to the same requested time range
-      const v1TreatmentsPath = `/api/v1/treatments?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${Math.min(optimizedLimit, 5000)}`;
+        const safeProxyFetch = async (
+          path: string
+        ): Promise<any[]> => {
+          try {
+            const res = await makeProxyRequestWithFallback(url, path, token, signal, 'v1');
+            return Array.isArray(res) ? res : [];
+          } catch (e) {
+            console.warn('⚠️ Non-fatal Nightscout fetch failed:', { path, error: getErrorMessage(e) });
+            return [];
+          }
+        };
+
+        const buildV1EntriesPath = (cursor: number | null, isFirstPage: boolean, pageCount: number) => {
+          const params = new URLSearchParams();
+          params.set('count', String(pageCount));
+          params.set('sort$desc', 'date');
+          params.set('find[date][$gte]', String(startTimestamp));
+          params.set(isFirstPage ? 'find[date][$lte]' : 'find[date][$lt]', String(cursor ?? endTimestamp));
+          return `/api/v1/entries?${params.toString()}`;
+        };
+
+        const fetchV1EntriesPaged = async () => {
+          const collected: any[] = [];
+          const seen = new Set<string>();
+          const target = Math.min(optimizedLimit, 30000);
+
+          let cursor: number | null = endTimestamp;
+          const maxPages = Math.max(1, Math.ceil(target / maxV1PageSize));
+
+          for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
+            const remaining = target - collected.length;
+            if (remaining <= 0) break;
+
+            const pageSize = Math.min(maxV1PageSize, remaining);
+            const path = buildV1EntriesPath(cursor, pageIndex === 0, pageSize);
+            console.log(`📄 API v1 entries page ${pageIndex + 1}/${maxPages}: ${path}`);
+
+            const page = await safeProxyFetch(path);
+            if (!page.length) break;
+
+            for (const item of page) {
+              const id = item?._id ?? item?.id ?? getV1EntryDateMs(item);
+              const key = `${id ?? ''}:${item?.type ?? ''}:${item?.sgv ?? ''}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                collected.push(item);
+              }
+            }
+
+            const oldest = page[page.length - 1];
+            const oldestDate = getV1EntryDateMs(oldest);
+            if (!oldestDate || oldestDate <= startTimestamp) break;
+            cursor = oldestDate;
+
+            if (page.length < pageSize) break;
+          }
+
+          return collected;
+        };
+
+        // Keep treatments bounded to the same requested time range
+        const treatmentsLimit = Math.min(Math.max(500, optimizedLimit), 5000);
+        const v1TreatmentsPathCreatedAt = `/api/v1/treatments?find[created_at][$gte]=${startDate}&find[created_at][$lte]=${endDate}&count=${treatmentsLimit}`;
+        const v1TreatmentsPathTimestamp = `/api/v1/treatments?find[timestamp][$gte]=${startTimestamp}&find[timestamp][$lte]=${endTimestamp}&count=${treatmentsLimit}`;
       const v1ProfilePath = '/api/v1/profile';
       const v1DeviceStatusPath = '/api/v1/devicestatus?count=1';
 
-      // Parallelize the 4 requests to reduce overall wait time
-      const [entriesRes, treatmentsRes, profilesRes, deviceStatusRes] = await Promise.all([
-        makeProxyRequestWithFallback(url, v1EntriesPath, token, signal, 'v1'),
-        makeProxyRequestWithFallback(url, v1TreatmentsPath, token, signal, 'v1'),
-        makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1'),
-        makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1')
-      ]);
+        // Parallelize requests; entries are paged to actually cover long ranges.
+        const [entriesRes, treatmentsCreatedRes, treatmentsTimestampRes, profilesRes, deviceStatusRes] = await Promise.all([
+          fetchV1EntriesPaged(),
+          safeProxyFetch(v1TreatmentsPathCreatedAt),
+          safeProxyFetch(v1TreatmentsPathTimestamp),
+          makeProxyRequestWithFallback(url, v1ProfilePath, token, signal, 'v1'),
+          makeProxyRequestWithFallback(url, v1DeviceStatusPath, token, signal, 'v1')
+        ]);
 
       entries = entriesRes;
-      treatments = treatmentsRes;
+        const combinedTreatments = [...(Array.isArray(treatmentsCreatedRes) ? treatmentsCreatedRes : []), ...(Array.isArray(treatmentsTimestampRes) ? treatmentsTimestampRes : [])];
+        const seenTreatments = new Set<string>();
+        treatments = combinedTreatments.filter((t: any) => {
+          const id = t?._id ?? t?.id;
+          const key = id ? String(id) : `${t?.eventType ?? ''}:${t?.created_at ?? ''}:${t?.timestamp ?? ''}`;
+          if (seenTreatments.has(key)) return false;
+          seenTreatments.add(key);
+          return true;
+        });
       profiles = profilesRes;
       const deviceStatus = deviceStatusRes;
 
