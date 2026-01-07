@@ -122,7 +122,6 @@ class AdvancedPredictionService {
       const response = await this.callAIService(prompt, provider);
       return this.parseAIResponse(response, recentReadings);
     } catch (error) {
-      console.error('AI service call failed:', error);
       return null;
     }
   }
@@ -261,8 +260,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
       }
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`${provider.name} API error: ${response.status} ${response.statusText}${errorText ? ` — ${errorText}` : ''}`);
+        return '';
       }
 
       const data = await response.json();
@@ -275,8 +273,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
       const content = data?.choices?.[0]?.message?.content;
       return typeof content === 'string' ? content : '';
     } catch (error) {
-      console.error('AI service call failed:', error);
-      throw error;
+      return '';
     }
   }
 
@@ -286,8 +283,6 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
 
     const parsedJson = safeJsonParseFromText(text);
     if (!parsedJson.ok) {
-      // Non-JSON response; treat as unsupported and fall back without spamming errors.
-      console.warn('AI prediction returned non-JSON response; falling back to mathematical model');
       return null;
     }
 
