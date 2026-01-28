@@ -216,7 +216,7 @@ const Dashboard = () => {
     return `Glucose monitoring data from ${url || 'Nightscout'}`;
   };
 
-  const handleAlertSettingsSave = (settings: any) => {
+  const handleAlertSettingsSave = (settings: unknown) => {
     // Save logic here
     console.log('Alert settings saved:', settings);
   };
@@ -242,14 +242,14 @@ const Dashboard = () => {
     };
   };
 
-  const safePercentage = (value: any): string => {
+  const safePercentage = (value: unknown): string => {
     if (typeof value === 'number' && !isNaN(value)) {
       return `${value}%`;
     }
     return '0%';
   };
 
-  const ultraSafeRender = (value: any): string => {
+  const ultraSafeRender = (value: unknown): string => {
     if (value === null || value === undefined) return 'N/A';
     if (typeof value === 'string') return value;
     if (typeof value === 'number') return value.toString();
@@ -260,12 +260,12 @@ const Dashboard = () => {
   const lastKnownCageRef = useRef<number | null>(null);
   const lastKnownSageRef = useRef<number | null>(null);
 
-  const extractCageValue = (deviceStatus: any): number | null => {
+  const extractCageValue = (deviceStatus: unknown): number | null => {
     if (!deviceStatus || !data?.treatments) return lastKnownCageRef.current;
     
     const now = new Date();
     const siteChanges = data.treatments
-      .filter((t: any) => {
+      .filter((t) => {
         if (!t) return false;
         const eventType = t.eventType?.toLowerCase() || '';
         const notes = t.notes?.toLowerCase() || '';
@@ -277,7 +277,7 @@ const Dashboard = () => {
                notes.includes('cannula') ||
                notes.includes('pump site');
       })
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
         const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
         return timeB - timeA;
@@ -300,12 +300,12 @@ const Dashboard = () => {
     return lastKnownCageRef.current;
   };
 
-  const extractSageValue = (deviceStatus: any): number | null => {
+  const extractSageValue = (deviceStatus: unknown): number | null => {
     if (!deviceStatus || !data?.treatments) return lastKnownSageRef.current;
     
     const now = new Date();
     const sensorChanges = data.treatments
-      .filter((t: any) => {
+      .filter((t) => {
         if (!t) return false;
         const eventType = t.eventType?.toLowerCase() || '';
         const notes = t.notes?.toLowerCase() || '';
@@ -315,7 +315,7 @@ const Dashboard = () => {
                notes.includes('sensor') || 
                notes.includes('cgm');
       })
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
         const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
         return timeB - timeA;

@@ -1,3 +1,4 @@
+import { runSafeAsync, safeAsync } from '../utils/safeAsync';
 import { useEffect, useCallback, useMemo, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNightscout } from '../contexts/NightscoutContext';
@@ -24,6 +25,7 @@ import TreatmentTimeline from '../components/TreatmentTimeline';
 import GlucoseTrendAnalysis from '../components/GlucoseTrendAnalysis';
 import AdvancedStats from '../components/AdvancedStats';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { debugError, debugLog } from '../utils/logger';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
 import TensorFlowStatus from '../components/TensorFlowStatus';
 import AIManagementPlan from '../components/AIManagementPlan';
@@ -37,6 +39,8 @@ import {
   nightscoutTreatmentParser, 
   type ParsedNightscoutData 
 } from '../services/nightscoutTreatmentParser';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+import { toEpochMs } from '../utils/time';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -300,7 +304,7 @@ const Dashboard = () => {
   const lastKnownSageRef = useRef<number | null>(null);
   
   // Helper functions to extract values from your specific Nightscout data structure
-  const extractCageValue = (deviceStatus: any): number | null => {
+  const extractCageValue = (_deviceStatus: unknown): number | null => {
     // If no device status is available, return cached value
     if (!deviceStatus) {
       console.log('⚠️ No device status available, using cached CAGE value');
@@ -319,7 +323,7 @@ const Dashboard = () => {
       // CAGE (Cannula Age) is typically tracked via "Site Change" or "Pump Site Change" treatments
       const now = new Date();
       const siteChanges = data.treatments
-        .filter((t: any) => {
+        .filter((t) => {
           if (!t) return false;
           const eventType = t.eventType?.toLowerCase() || '';
           const notes = t.notes?.toLowerCase() || '';
@@ -331,7 +335,7 @@ const Dashboard = () => {
                  notes.includes('cannula') ||
                  notes.includes('pump site');
         })
-        .sort((a: any, b: any) => {
+        .sort((a, b) => {
           const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
           const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
           return timeB - timeA;
@@ -361,7 +365,7 @@ const Dashboard = () => {
       }
       
       console.log('❌ CAGE not found in treatments. Available treatment types:', 
-        [...new Set(data.treatments.map((t: any) => t.eventType).filter(Boolean))]);
+        [...new Set(data.treatments.map((t) => t.eventType).filter(Boolean))]);
       return lastKnownCageRef.current; // Return cached value instead of null
       
     } catch (error) {
@@ -370,7 +374,7 @@ const Dashboard = () => {
     }
   };
 
-  const extractSageValue = (deviceStatus: any): number | null => {
+  const extractSageValue = (_deviceStatus: unknown): number | null => {
     // If no device status is available, return cached value
     if (!deviceStatus) {
       console.log('⚠️ No device status available, using cached SAGE value');
@@ -389,7 +393,7 @@ const Dashboard = () => {
       // SAGE (Sensor Age) is typically tracked via "Sensor Change" or "CGM Sensor Start" treatments
       const now = new Date();
       const sensorChanges = data.treatments
-        .filter((t: any) => {
+        .filter((t) => {
           if (!t) return false;
           const eventType = t.eventType?.toLowerCase() || '';
           const notes = t.notes?.toLowerCase() || '';
@@ -403,7 +407,7 @@ const Dashboard = () => {
                  notes.includes('sensor change') ||
                  notes.includes('sensor start');
         })
-        .sort((a: any, b: any) => {
+        .sort((a, b) => {
           const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
           const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
           return timeB - timeA;
@@ -433,7 +437,7 @@ const Dashboard = () => {
       }
       
       console.log('❌ SAGE not found in treatments. Available treatment types:', 
-        [...new Set(data.treatments.map((t: any) => t.eventType).filter(Boolean))]);
+        [...new Set(data.treatments.map((t) => t.eventType).filter(Boolean))]);
       return lastKnownSageRef.current; // Return cached value instead of null
       
     } catch (error) {
@@ -442,10 +446,16 @@ const Dashboard = () => {
     }
   };
 
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [timeWindow, setTimeWindow] = useState(24);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showRefreshSettings, setShowRefreshSettings] = useState(false);
+  const chartTreatments = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    const now = Date.now();
+    const cutoffTime = now - timeWindow * 60 * 60 * 1000;
+    return data.treatments.filter((t) => getTreatmentMs(t) >= cutoffTime);
+  }, [data?.treatments, timeWindow]);
   const [customDateRange, setCustomDateRange] = useState<{
     startDate: string;
     endDate: string;
@@ -474,7 +484,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     if (url && !data && !loading) {
-      fetchDataForDays(1);
+      runSafeAsync(() => fetchDataForDays(1), { label: 'Dashboard initial fetch' });
     }
   }, [url, data, loading, fetchDataForDays]);
 
@@ -489,7 +499,7 @@ const Dashboard = () => {
 
     // NightscoutContext rate-limits fetches; wait a moment after the initial load.
     prefetchTimerRef.current = window.setTimeout(() => {
-      prefetchDataForDays(daysToPrefetch);
+      safeAsync(() => prefetchDataForDays(daysToPrefetch), { label: 'Dashboard prefetch' })();
     }, 5500);
 
     return () => {
@@ -505,13 +515,13 @@ const Dashboard = () => {
     if (!data || loading) return;
 
     let cancelled = false;
-    const run = () => {
+    const run = safeAsync(async () => {
       if (cancelled) return;
-      const results = analyzeData(data);
+      const results = await analyzeData(data);
       if (!cancelled) {
         setAnalysisResults(results);
       }
-    };
+    }, { label: 'Dashboard analyzeData' });
 
     const w = window as unknown as {
       requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
@@ -559,13 +569,21 @@ const Dashboard = () => {
     };
   }, [entriesSortedAsc, convertToCurrentUnit, formatGlucoseValue, getUnitLabel]);
 
-  // Get most recent device status
-  const getMostRecentDeviceStatus = useCallback(() => {
+  const recentDeviceStatus = useMemo(() => {
     if (!data?.deviceStatus?.length) return null;
-    return [...data.deviceStatus].sort((a, b) => new Date(b.created_at || b.date).getTime() - new Date(a.created_at || a.date).getTime())[0];
+    let best: (typeof data.deviceStatus)[number] | null = null;
+    let bestMs = -Infinity;
+
+    for (const status of data.deviceStatus) {
+      const ms = toEpochMs(status.mills ?? status.date ?? status.created_at);
+      if (ms != null && ms > bestMs) {
+        bestMs = ms;
+        best = status;
+      }
+    }
+
+    return best;
   }, [data?.deviceStatus]);
-  
-  const recentDeviceStatus = useMemo(() => getMostRecentDeviceStatus(), [getMostRecentDeviceStatus]);
   
   // Debug: Log device status to console to see what data is available
   useEffect(() => {
@@ -584,17 +602,17 @@ const Dashboard = () => {
       console.log('💊 Treatments data found:');
       console.log('  - Total treatments:', data.treatments.length);
       console.log('  - Recent treatments (last 10):', data.treatments.slice(0, 10));
-      console.log('  - Treatment types available:', [...new Set(data.treatments.map((t: any) => t.eventType))]);
+      console.log('  - Treatment types available:', [...new Set(data.treatments.map((t) => t.eventType))]);
       
       // Look specifically for site changes and sensor changes
-      const siteChanges = data.treatments.filter((t: any) => 
+      const siteChanges = data.treatments.filter((t) => 
         t.eventType?.toLowerCase().includes('site') || 
         t.eventType?.toLowerCase().includes('cannula') ||
         t.notes?.toLowerCase().includes('site') ||
         t.notes?.toLowerCase().includes('cannula')
       );
       
-      const sensorChanges = data.treatments.filter((t: any) => 
+      const sensorChanges = data.treatments.filter((t) => 
         t.eventType?.toLowerCase().includes('sensor') || 
         t.eventType?.toLowerCase().includes('cgm') ||
         t.notes?.toLowerCase().includes('sensor') ||
@@ -690,32 +708,22 @@ const Dashboard = () => {
   // Ultra-fast filtering with intelligent sampling - FOR STATISTICS
   const filteredReadings = useMemo(() => {
     if (baseWindowReadings.length === 0) return [];
+    if (baseWindowReadings.length <= 5000) return baseWindowReadings;
 
-    const filtered = baseWindowReadings;
-
-    // For very large datasets, intelligently sample for UI responsiveness
-    if (filtered.length > 5000) {
-      const step = Math.ceil(filtered.length / 2000); // Max 2000 points for UI
-      const sampled = [];
-      for (let i = 0; i < filtered.length; i += step) {
-        sampled.push(filtered[i]);
-      }
-      if (import.meta.env.DEV) {
-        console.log(`📊 Dashboard: Sampled ${sampled.length} from ${filtered.length} readings for UI performance`);
-      }
-      return sampled;
+    const step = Math.ceil(baseWindowReadings.length / 2000); // Max ~2000 points for UI
+    const sampled: typeof baseWindowReadings = [];
+    for (let i = 0; i < baseWindowReadings.length; i += step) {
+      sampled.push(baseWindowReadings[i]);
     }
-
-    return filtered;
+    return sampled;
   }, [baseWindowReadings]);
 
-  // NEW: Chart-specific filtering - ALWAYS LIMITED TO 2 WEEKS MAX
+  // Chart readings are further limited (max 14 days) for performance and readability.
   const chartReadings = useMemo(() => {
-    if (entriesSortedAsc.length === 0) return [];
+    if (baseWindowReadings.length === 0) return [];
 
     const now = Date.now();
-    const max14DaysMs = 14 * 24 * 60 * 60 * 1000;
-    const chartCutoffTime = now - max14DaysMs;
+    const chartCutoffTime = now - 14 * 24 * 60 * 60 * 1000;
 
     let chartFiltered = baseWindowReadings;
 
@@ -724,68 +732,44 @@ const Dashboard = () => {
       const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
       const rangeDays = Math.round((endTime - startTime) / (1000 * 60 * 60 * 24));
 
-      // If custom range is more than 14 days, show only the last 14 days (preserve prior behavior)
       if (rangeDays > 14) {
         if (import.meta.env.DEV) {
           console.log(`📊 Chart limit: Custom range is ${rangeDays} days, limiting charts to last 14 days`);
         }
-        const startIndex = lowerBoundByDate(entriesSortedAsc, chartCutoffTime);
-        chartFiltered = entriesSortedAsc.slice(startIndex);
-      } else {
-        // For custom ranges <= 14 days, use the actual range
         const startTime14Days = Math.max(startTime, chartCutoffTime);
         chartFiltered = sliceEntriesByDateRange(baseWindowReadings, startTime14Days, endTime);
       }
-    } else {
-      // For time window selections, limit to max 14 days
-      if (timeWindow > 336) {
-        if (import.meta.env.DEV) {
-          console.log(`📊 Chart limit: Selected ${timeWindow/24} days, limiting charts to 14 days`);
-        }
-        const startIndex = lowerBoundByDate(baseWindowReadings, chartCutoffTime);
-        chartFiltered = baseWindowReadings.slice(startIndex);
+    } else if (timeWindow > 336) {
+      if (import.meta.env.DEV) {
+        console.log(`📊 Chart limit: Selected ${timeWindow / 24} days, limiting charts to 14 days`);
       }
+      const startIndex = lowerBoundByDate(baseWindowReadings, chartCutoffTime);
+      chartFiltered = baseWindowReadings.slice(startIndex);
     }
-    
-    // For very large datasets, intelligently sample for chart performance
+
+    // For very large chart datasets, intelligently sample for chart performance
     if (chartFiltered.length > 3000) {
-      const step = Math.ceil(chartFiltered.length / 1500); // Max 1500 points for charts
-      const sampled = [];
+      const step = Math.ceil(chartFiltered.length / 1500); // Max ~1500 points for charts
+      const sampled: typeof chartFiltered = [];
       for (let i = 0; i < chartFiltered.length; i += step) {
         sampled.push(chartFiltered[i]);
-      }
-      if (import.meta.env.DEV) {
-        console.log(`📊 Chart sampling: ${sampled.length} from ${chartFiltered.length} readings for optimal chart performance`);
       }
       return sampled;
     }
 
     return chartFiltered;
-  }, [
-    entriesSortedAsc,
-    baseWindowReadings,
-    timeWindow,
-    isCustomRange,
-    customDateRange,
-    lowerBoundByDate,
-    sliceEntriesByDateRange,
-  ]);
+  }, [baseWindowReadings, isCustomRange, customDateRange, timeWindow, lowerBoundByDate, sliceEntriesByDateRange]);
 
-  // Ultra-fast stats calculation - uses full filtered data for accuracy
   const filteredStats = useMemo(() => {
     if (filteredReadings.length === 0) {
-      return {
-        timeInRange: 0,
-        highPercentage: 0,
-        lowPercentage: 0,
-        averageBG: 0,
-        totalReadings: 0
-      };
+      return { timeInRange: 0, highPercentage: 0, lowPercentage: 0, averageBG: 0, totalReadings: 0 };
     }
 
-    let inRange = 0, high = 0, low = 0;
+    let inRange = 0,
+      high = 0,
+      low = 0;
     let totalGlucose = 0;
-    
+
     const ranges = currentRanges;
 
     // Use for loop for maximum performance
@@ -793,7 +777,7 @@ const Dashboard = () => {
       const reading = filteredReadings[i];
       const glucoseInCurrentUnit = convertToCurrentUnit(reading.sgv);
       totalGlucose += reading.sgv;
-      
+
       // Use ranges in the current unit for accurate classification
       if (glucoseInCurrentUnit >= ranges.TARGET_MIN && glucoseInCurrentUnit <= ranges.TARGET_MAX) {
         inRange++;
@@ -803,15 +787,14 @@ const Dashboard = () => {
         low++;
       }
     }
-    
+
     const total = filteredReadings.length;
     const avgBG = totalGlucose / total;
-    
-    // Ensure all calculations return valid numbers
+
     const timeInRangeCalc = (inRange / total) * 100;
     const highPercentageCalc = (high / total) * 100;
     const lowPercentageCalc = (low / total) * 100;
-    
+
     const result = {
       timeInRange: isNaN(timeInRangeCalc) ? 0 : timeInRangeCalc,
       highPercentage: isNaN(highPercentageCalc) ? 0 : highPercentageCalc,
@@ -819,8 +802,7 @@ const Dashboard = () => {
       averageBG: isNaN(avgBG) ? 0 : avgBG,
       totalReadings: total
     };
-    
-    // Debug logging to ensure we're not returning objects
+
     if (import.meta.env.DEV) {
       console.log('📊 filteredStats calculation result:', {
         timeInRange: { value: result.timeInRange, type: typeof result.timeInRange },
@@ -830,11 +812,11 @@ const Dashboard = () => {
         totalReadings: { value: result.totalReadings, type: typeof result.totalReadings }
       });
     }
-    
+
     return result;
   }, [filteredReadings, convertToCurrentUnit, currentRanges]);
 
-  const handleAlertSettingsSave = (settings: any) => {
+  const handleAlertSettingsSave = (settings: unknown) => {
     console.log('Alert settings saved:', settings);
   };
 
@@ -891,7 +873,7 @@ const Dashboard = () => {
       const daysNeeded = Math.ceil(newTimeWindow / 24);
       if (daysNeeded > 14 && !hasEnoughData(daysNeeded)) {
         console.log(`📥 Need to fetch ${Math.min(daysNeeded, 90)} days - current data insufficient`);
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'Dashboard fetch more data for time window' });
       } else {
         console.log(`✅ Using existing data for ${getTimeWindowLabel(newTimeWindow)} - no fetch needed`);
         // Force a refresh to ensure UI updates
@@ -927,7 +909,7 @@ const Dashboard = () => {
     if (!hasEnoughData(diffDays)) {
       const daysToFetch = Math.max(diffDays + 7, 14);
       console.log(`📥 Custom range needs ${Math.min(daysToFetch, 90)} days - fetching data`);
-      fetchDataForDays(Math.min(daysToFetch, 90));
+      runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'Dashboard fetch data for custom range' });
     } else {
       console.log(`✅ Using existing data for custom range - no fetch needed`);
       // Force a refresh to ensure UI updates
@@ -1012,13 +994,13 @@ const Dashboard = () => {
   };
   
   // Ultra-safe render function to prevent any object rendering errors
-  const ultraSafeRender = (value: any, fallback: string = 'N/A'): string => {
+  const ultraSafeRender = (value: unknown, fallback: string = 'N/A'): string => {
     if (value === null || value === undefined) return fallback;
     if (typeof value === 'string') return value;
     if (typeof value === 'number') return String(value);
     if (typeof value === 'boolean') return String(value);
     if (typeof value === 'object') {
-      console.error('❌ ultraSafeRender caught object:', value);
+      debugError('❌ ultraSafeRender caught object:', value);
       if (Array.isArray(value)) return value.join(', ');
       return JSON.stringify(value);
     }
@@ -1026,11 +1008,11 @@ const Dashboard = () => {
   };
 
   // Safe percentage render
-  const safePercentage = (value: any) => {
+  const safePercentage = (value: unknown): string => {
     if (typeof value === 'number') return `${value.toFixed(1)}%`;
     if (value === null || value === undefined) return 'N/A';
     if (typeof value === 'object') {
-      console.error('❌ Attempted to render percentage object:', value);
+      debugError('❌ Attempted to render percentage object:', value);
       return 'N/A';
     }
     return String(value);
@@ -1039,7 +1021,7 @@ const Dashboard = () => {
   if (loading) return <LoadingSpinner message="Loading your diabetes data..." />;
   
   // Debug logging to understand data structure
-  console.log('🔍 Dashboard Debug Info:', {
+  debugLog('🔍 Dashboard Debug Info:', {
     loading,
     error,
     url,
@@ -1249,7 +1231,7 @@ const Dashboard = () => {
                   <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
                     <Button
                       variant="contained"
-                      onClick={() => fetchDataForDays(7)}
+                      onClick={() => runSafeAsync(() => fetchDataForDays(7), { label: 'Dashboard retry fetch' })}
                       startIcon={<RefreshCw size={18} />}
                       sx={{
                         background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
@@ -1314,7 +1296,7 @@ const Dashboard = () => {
                 Check Settings
               </button>
               <button
-                onClick={() => fetchDataForDays(7)}
+                onClick={() => runSafeAsync(() => fetchDataForDays(7), { label: 'Dashboard retry fetch' })}
                 className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
               >
                 Retry Fetch
@@ -2855,9 +2837,14 @@ const Dashboard = () => {
                     console.log('🍎 Full devicestatus object:', JSON.stringify(recentDeviceStatus, null, 2));
                     
                     // Recursive function to find any COB values
-                    const findCOBInObject = (obj: any, path = ''): Array<{path: string, value: any, key: string}> => {
-                      const results: Array<{path: string, value: any, key: string}> = [];
-                      if (obj && typeof obj === 'object') {
+                    type CobCandidate = { path: string; value: unknown; key: string };
+                    const isRecord = (value: unknown): value is Record<string, unknown> =>
+                      typeof value === 'object' && value !== null;
+
+                    const findCOBInObject = (obj: unknown, path = ''): CobCandidate[] => {
+                      const results: CobCandidate[] = [];
+
+                      if (isRecord(obj)) {
                         for (const [key, value] of Object.entries(obj)) {
                           const currentPath = path ? `${path}.${key}` : key;
                           
@@ -2904,7 +2891,7 @@ const Dashboard = () => {
                     
                     // If still no COB found, try the first reasonable candidate
                     if (cobValue === null && allCOBCandidates.length > 0) {
-                      const firstCandidate = allCOBCandidates.find((c: any) => 
+                      const firstCandidate = allCOBCandidates.find((c) => 
                         typeof c.value === 'number' && c.value >= 0 && c.value <= 100
                       );
                       if (firstCandidate) {
@@ -2961,9 +2948,10 @@ const Dashboard = () => {
                     console.log('🍎 Available data keys:', Object.keys(data));
                     
                     // Check if there's a separate COB endpoint or field
-                    if ((data as any).cob !== undefined) {
-                      console.log('🍎 Found data.cob:', (data as any).cob);
-                      cobValue = (data as any).cob;
+                    const dataRecord = data as unknown as Record<string, unknown>;
+                    if (dataRecord.cob !== undefined) {
+                      console.log('🍎 Found data.cob:', dataRecord.cob);
+                      cobValue = dataRecord.cob;
                     }
                     
                     // Check profile for COB settings
@@ -3328,10 +3316,7 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <GlucoseChart 
               readings={chartReadings}
-              treatments={data?.treatments?.filter(treatment => {
-                const treatmentTime = new Date(treatment.created_at).getTime();
-                return (Date.now() - treatmentTime) <= timeWindow * 60 * 60 * 1000;
-              }) || []}
+              treatments={chartTreatments}
               title={`Blood Glucose - ${getChartTimeWindowLabel()}`}
               showInsulinDelivery={true}
             />

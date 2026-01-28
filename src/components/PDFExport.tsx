@@ -5,9 +5,22 @@ import jsPDF from 'jspdf';
 import { toMmol } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useNightscout } from '../contexts/NightscoutContext';
+import type {
+  NightscoutDeviceStatus,
+  NightscoutEntry,
+  NightscoutProfile,
+  NightscoutTreatment,
+} from '../types/nightscout';
+
+type PDFExportData = {
+  entries: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
+  profile: NightscoutProfile[];
+  deviceStatus: NightscoutDeviceStatus[];
+};
 
 interface PDFExportProps {
-  data: any;
+  data: PDFExportData | null;
 }
 
 const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
@@ -59,7 +72,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
       const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
       
-      return data.treatments.filter((treatment: any) => {
+      return data.treatments.filter((treatment: NightscoutTreatment) => {
         const treatmentTime = new Date(treatment.created_at).getTime();
         return treatmentTime >= startTime && treatmentTime <= endTime;
       });
@@ -68,7 +81,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       const timeWindowMs = timeWindow * 60 * 60 * 1000;
       const cutoffTime = now - timeWindowMs;
       
-      return data.treatments.filter((treatment: any) => {
+      return data.treatments.filter((treatment: NightscoutTreatment) => {
         const treatmentTime = new Date(treatment.created_at).getTime();
         return treatmentTime >= cutoffTime;
       });
@@ -233,7 +246,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
     });
 
     // Find daily highs and lows
-    Object.values(readingsByDay).forEach((dayReadings: any) => {
+    Object.values(readingsByDay).forEach((dayReadings: number[]) => {
       if (dayReadings.length > 0) {
         dayHighs.push(Math.max(...dayReadings));
         dayLows.push(Math.min(...dayReadings));
@@ -292,17 +305,17 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
       };
     }
 
-    const insulinTreatments = filteredTreatments.filter((t: any) => t.insulin);
-    const carbTreatments = filteredTreatments.filter((t: any) => t.carbs);
-    const mealBoluses = filteredTreatments.filter((t: any) => t.insulin && t.carbs);
-    const correctionBoluses = filteredTreatments.filter((t: any) => t.insulin && !t.carbs);
+    const insulinTreatments = filteredTreatments.filter((t: NightscoutTreatment) => t.insulin);
+    const carbTreatments = filteredTreatments.filter((t: NightscoutTreatment) => t.carbs);
+    const mealBoluses = filteredTreatments.filter((t: NightscoutTreatment) => t.insulin && t.carbs);
+    const correctionBoluses = filteredTreatments.filter((t: NightscoutTreatment) => t.insulin && !t.carbs);
 
-    const totalInsulin = insulinTreatments.reduce((sum: number, t: any) => sum + (t.insulin || 0), 0);
-    const totalCarbs = carbTreatments.reduce((sum: number, t: any) => sum + (t.carbs || 0), 0);
+    const totalInsulin = insulinTreatments.reduce((sum: number, t: NightscoutTreatment) => sum + (t.insulin || 0), 0);
+    const totalCarbs = carbTreatments.reduce((sum: number, t: NightscoutTreatment) => sum + (t.carbs || 0), 0);
 
     // Calculate days span
-    const startDate = new Date(Math.min(...filteredTreatments.map((t: any) => new Date(t.created_at).getTime())));
-    const endDate = new Date(Math.max(...filteredTreatments.map((t: any) => new Date(t.created_at).getTime())));
+    const startDate = new Date(Math.min(...filteredTreatments.map((t: NightscoutTreatment) => new Date(t.created_at).getTime())));
+    const endDate = new Date(Math.max(...filteredTreatments.map((t: NightscoutTreatment) => new Date(t.created_at).getTime())));
     const daysDiff = Math.max(1, differenceInDays(endDate, startDate));
 
     return {
@@ -1063,7 +1076,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         yPos += 10;
         
         // Data quality metrics table with modern styling
-        const createModernTable = (headers: string[], data: any[][], x: number, y: number, width: number) => {
+        const createModernTable = (headers: string[], data: Array<Array<string | number>>, x: number, y: number, width: number) => {
           const rowHeight = 10;
           const colWidth = width / headers.length;
           
@@ -1343,7 +1356,7 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         yPos += 10;
         
         // Create a table for advanced metrics
-        const createTable = (headers: string[], data: any[][], x: number, y: number, width: number) => {
+        const createTable = (headers: string[], data: Array<Array<string | number>>, x: number, y: number, width: number) => {
           const rowHeight = 8;
           const colWidth = width / headers.length;
           
@@ -1443,9 +1456,9 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         // Create hourly analysis
         const hourlyData = [];
         const hourlyStats = Array.from({length: 24}, (_, hour) => {
-          const hourReadings = filteredReadings.filter((reading: any) => new Date(reading.date).getHours() === hour);
+          const hourReadings = filteredReadings.filter((reading: NightscoutEntry) => new Date(reading.date).getHours() === hour);
           if (hourReadings.length === 0) return { hour, avg: 'No data', count: 0 };
-          const avg = hourReadings.reduce((sum: number, r: any) => sum + r.sgv, 0) / hourReadings.length;
+          const avg = hourReadings.reduce((sum: number, r: NightscoutEntry) => sum + r.sgv, 0) / hourReadings.length;
           return { hour, avg: `${formatGlucoseValue(avg, 'mgdl', false)} ${getUnitLabel()}`, count: hourReadings.length };
         });
         
@@ -1484,11 +1497,11 @@ const PDFExport: React.FC<PDFExportProps> = ({ data }) => {
         const weeklyHeaders = ['Day', 'Avg Glucose', 'Time in Range', 'Readings'];
         const weeklyCurrentRanges = getCurrentGlucoseRanges();
         const weeklyData = dayNames.map((day, index) => {
-          const dayReadings = filteredReadings.filter((reading: any) => new Date(reading.date).getDay() === index);
+          const dayReadings = filteredReadings.filter((reading: NightscoutEntry) => new Date(reading.date).getDay() === index);
           if (dayReadings.length === 0) return [day, 'No data', 'No data', '0'];
           
-          const avg = dayReadings.reduce((sum: number, r: any) => sum + r.sgv, 0) / dayReadings.length;
-          const inRange = dayReadings.filter((r: any) => {
+          const avg = dayReadings.reduce((sum: number, r: NightscoutEntry) => sum + r.sgv, 0) / dayReadings.length;
+          const inRange = dayReadings.filter((r: NightscoutEntry) => {
             const glucose = convertToCurrentUnit(r.sgv, 'mgdl');
             return glucose >= weeklyCurrentRanges.TARGET_MIN && glucose <= weeklyCurrentRanges.TARGET_MAX;
           }).length;

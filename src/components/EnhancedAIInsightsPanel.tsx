@@ -3,9 +3,10 @@ import { Brain, Lightbulb, CheckCircle, AlertTriangle, Loader, Cpu, Activity } f
 import { aiService } from '../services/aiService';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import type { NightscoutEntry } from '../types/nightscout';
 
 interface EnhancedAIInsightsPanelProps {
-  readings: any[];
+  readings: NightscoutEntry[];
   timeInRange?: {
     timeInRange: number;
     highPercentage: number;

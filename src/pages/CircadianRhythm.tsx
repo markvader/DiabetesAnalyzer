@@ -7,13 +7,29 @@ import { Line } from 'react-chartjs-2';
 import { format } from 'date-fns';
 import LoadingSpinner from '../components/LoadingSpinner';
 import SunCalc from 'suncalc';
+import type { NightscoutEntry } from '../types/nightscout';
+
+type CircadianSegment = {
+  mean: number;
+  standardDeviation: number;
+  count: number;
+  values: number[];
+};
+
+type CircadianData = {
+  dawn: CircadianSegment | null;
+  day: CircadianSegment | null;
+  dusk: CircadianSegment | null;
+  night: CircadianSegment | null;
+  sunTimes: ReturnType<typeof SunCalc.getTimes>;
+};
 
 const CircadianRhythm = () => {
   const { data, loading, error } = useNightscout();
   const { getUnitLabel, convertToCurrentUnit } = useGlucoseFormatting();
   const { formatTime } = useTimeFormat();
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [circadianData, setCircadianData] = useState<any>(null);
+  const [circadianData, setCircadianData] = useState<CircadianData | null>(null);
 
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
@@ -33,7 +49,7 @@ const CircadianRhythm = () => {
     if (data?.entries && location) {
       const sunTimes = SunCalc.getTimes(new Date(), location.latitude, location.longitude);
       
-      const analyzeTimeSegment = (readings: any[]) => {
+      const analyzeTimeSegment = (readings: NightscoutEntry[]) => {
         if (!readings.length) return null;
         const values = readings.map(r => r.sgv); // Keep values in mg/dL
         const mean = values.reduce((a, b) => a + b, 0) / values.length;
@@ -47,30 +63,32 @@ const CircadianRhythm = () => {
         };
       };
 
-      const isTimeInRange = (timestamp: number, start: Date, end: Date) => {
-        const date = new Date(timestamp);
-        const hours = date.getHours() + date.getMinutes() / 60;
-        const startHours = start.getHours() + start.getMinutes() / 60;
-        const endHours = end.getHours() + end.getMinutes() / 60;
-        
-        return hours >= startHours && hours < endHours;
-      };
+      const dawnStartHours = sunTimes.dawn.getHours() + sunTimes.dawn.getMinutes() / 60;
+      const sunriseHours = sunTimes.sunrise.getHours() + sunTimes.sunrise.getMinutes() / 60;
+      const sunsetHours = sunTimes.sunset.getHours() + sunTimes.sunset.getMinutes() / 60;
+      const nightStartHours = sunTimes.night.getHours() + sunTimes.night.getMinutes() / 60;
 
-      const dawnReadings = data.entries.filter(r => 
-        isTimeInRange(r.date, sunTimes.dawn, sunTimes.sunrise)
-      );
-      
-      const dayReadings = data.entries.filter(r => 
-        isTimeInRange(r.date, sunTimes.sunrise, sunTimes.sunset)
-      );
-      
-      const duskReadings = data.entries.filter(r => 
-        isTimeInRange(r.date, sunTimes.sunset, sunTimes.night)
-      );
-      
-      const nightReadings = data.entries.filter(r => 
-        !isTimeInRange(r.date, sunTimes.dawn, sunTimes.night)
-      );
+      const dawnReadings: NightscoutEntry[] = [];
+      const dayReadings: NightscoutEntry[] = [];
+      const duskReadings: NightscoutEntry[] = [];
+      const nightReadings: NightscoutEntry[] = [];
+
+      for (const reading of data.entries) {
+        const date = new Date(reading.date);
+        const hours = date.getHours() + date.getMinutes() / 60;
+
+        if (hours >= dawnStartHours && hours < sunriseHours) {
+          dawnReadings.push(reading);
+        } else if (hours >= sunriseHours && hours < sunsetHours) {
+          dayReadings.push(reading);
+        } else if (hours >= sunsetHours && hours < nightStartHours) {
+          duskReadings.push(reading);
+        }
+
+        if (!(hours >= dawnStartHours && hours < nightStartHours)) {
+          nightReadings.push(reading);
+        }
+      }
 
       setCircadianData({
         dawn: analyzeTimeSegment(dawnReadings),

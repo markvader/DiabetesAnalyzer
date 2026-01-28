@@ -47,15 +47,16 @@ const TimeInRangeChart: React.FC<TimeInRangeProps> = ({
   }
   
   // Ultra-safe percentage formatter to prevent {percent} object errors
-  const ultraSafeFormatPercentage = (value: any): string => {
+  const ultraSafeFormatPercentage = (value: unknown): string => {
     if (typeof value === 'number' && !isNaN(value)) {
       return formatPercentage(value);
     }
     if (typeof value === 'object' && value !== null) {
       console.error('❌ ultraSafeFormatPercentage caught object:', value);
       // If it's an object with percent property, extract it
-      if ('percent' in value && typeof value.percent === 'number') {
-        return formatPercentage(value.percent);
+      const rec = value as Record<string, unknown>;
+      if (typeof rec.percent === 'number') {
+        return formatPercentage(rec.percent);
       }
       return '0.0%';
     }

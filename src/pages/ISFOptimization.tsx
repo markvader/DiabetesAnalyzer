@@ -7,12 +7,17 @@ import { Brain, Calendar, Clock, AlertTriangle, Thermometer, Calculator, Refresh
 import LoadingSpinner from '../components/LoadingSpinner';
 import { aiService } from '../services/aiService';
 import { formatCostEstimate, getModelById } from '../constants/openaiModels';
+import { runSafeAsync } from '../utils/safeAsync';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+
+type ISFOptimizationResult = Awaited<ReturnType<typeof aiService.optimizeInsulinSensitivity>>;
 
 const ISFOptimization = () => {
   const { data, loading, error } = useNightscout();
   const { unit, formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const { formatTimeString, formatDateTime } = useTimeFormat();
-  const [isfAnalysis, setIsfAnalysis] = useState<any>(null);
+  const [isfAnalysis, setIsfAnalysis] = useState<ISFOptimizationResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -33,57 +38,40 @@ const ISFOptimization = () => {
   // Note: Removed lastTimeWindow and lastCustomRange state as they're no longer needed
   // since we removed automatic refresh on time window changes
 
-  // Get filtered readings based on time selection
-  const filteredReadings = React.useMemo(() => {
-    if (!data?.entries?.length) {
-      return [];
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const selectedRange = React.useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
     }
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
-    }
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+    const endMs = Date.now();
+    const startMs = endMs - timeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [isCustomRange, customDateRange.startDate, customDateRange.endDate, timeWindow]);
+
+  // Get filtered readings based on time selection
+  const filteredReadings = React.useMemo(() => {
+    if (!entriesSortedAsc.length) return [];
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Get filtered treatments based on time selection
   const filteredTreatments = React.useMemo(() => {
-    if (!data?.treatments?.length) {
-      return [];
-    }
-
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= startTime && treatmentTime <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= cutoffTime;
-      });
-    }
-  }, [data?.treatments, timeWindow, isCustomRange, customDateRange]);
+    if (!treatmentsSortedAsc.length) return [];
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Note: Automatically loads ISF analysis on initial page load (2 weeks default)
   // Manual refresh required for other time periods to control AI API costs
@@ -133,7 +121,7 @@ const ISFOptimization = () => {
       }
     };
     
-    analyzeISF();
+    runSafeAsync(() => analyzeISF(), { label: 'ISFOptimization: analyzeISF' });
   }, [filteredReadings, filteredTreatments, data?.profile, manualRefresh, hasInitialLoad, unit, formatGlucoseValue, getUnitLabel]);
 
   // Convert ISF values to current unit
@@ -149,13 +137,17 @@ const ISFOptimization = () => {
       return value;
     };
 
-    const convertISFArray = (isfArray: any[]) => {
-      if (!isfArray) return [];
-      return isfArray.map(item => ({
-        ...item,
-        rate: convertISFValue(item.rate),
-        calculatedISF: convertISFValue(item.calculatedISF)
-      }));
+    type IsfCalcLike = Record<string, unknown> & { rate?: unknown; calculatedISF?: unknown };
+
+    const convertISFArray = (isfArray: unknown): IsfCalcLike[] => {
+      if (!Array.isArray(isfArray)) return [];
+      return isfArray.map((raw): IsfCalcLike => {
+        const item: IsfCalcLike = raw && typeof raw === 'object' ? (raw as IsfCalcLike) : {};
+        const convertedRate = typeof item.rate === 'number' ? convertISFValue(item.rate) : item.rate;
+        const convertedCalculatedISF =
+          typeof item.calculatedISF === 'number' ? convertISFValue(item.calculatedISF) : item.calculatedISF;
+        return { ...item, rate: convertedRate, calculatedISF: convertedCalculatedISF };
+      });
     };
 
     return {
@@ -511,10 +503,10 @@ const ISFOptimization = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {convertedISFAnalysis.isfSuggestions.map((isf: any, index: number) => {
+                    {convertedISFAnalysis.isfSuggestions.map((isf, index: number) => {
                       // Find current ISF for this time
                       const currentProfile = data?.profile?.[0]?.store?.[data.profile[0].defaultProfile || 'Default'];
-                      const currentIsf = currentProfile?.sens?.find((s: any) => s.time === isf.time)?.value || 0;
+                      const currentIsf = currentProfile?.sens?.find((s) => s.time === isf.time)?.value || 0;
                       
                       // Convert current ISF to display unit
                       const convertedCurrentIsf = unit === 'mgdl' ? Math.round(currentIsf * 18) : currentIsf;
@@ -584,9 +576,9 @@ const ISFOptimization = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                    {convertedISFAnalysis.calculatedISFs.slice(0, 10).map((calc: any, index: number) => {
+                    {convertedISFAnalysis.calculatedISFs.slice(0, 10).map((calc, index: number) => {
                       // Check if time is a valid date string
-                      const isValidDate = calc.time && !isNaN(new Date(calc.time).getTime());
+                      const isValidDate = !!calc.time && Number.isFinite(Date.parse(calc.time));
                       
                       return (
                         <tr key={index} className={index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'}>

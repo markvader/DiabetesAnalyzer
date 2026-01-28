@@ -2,20 +2,12 @@ import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { analyzeWithAI } from './aiEnhancedAnalysisService';
 import { InsulinPumpProfile, getPumpById } from '../constants/insulinPumps';
+import type { NightscoutEntry, NightscoutProfile, NightscoutTreatment } from '../types/nightscout';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 // Define types for analysis
-interface BGReading {
-  sgv: number;
-  date: number;
-  dateString: string;
-}
-
-interface Treatment {
-  insulin?: number;
-  carbs?: number;
-  eventType: string;
-  created_at: string;
-}
+type BGReading = Pick<NightscoutEntry, 'sgv' | 'date' | 'dateString'>;
+type Treatment = NightscoutTreatment;
 
 interface TimeSegment {
   time: string;
@@ -50,10 +42,17 @@ interface AnalysisResults {
     avgGlucoseResponse: number;
     frequency: number;
   }[];
-  aiEnhanced?: any;
+  aiEnhanced?: unknown;
   safetyWarnings: string[];
   pumpProfile?: InsulinPumpProfile | null;
 }
+
+type CarbPattern = {
+  timeOfDay: string;
+  avgCarbs: number;
+  avgGlucoseResponse: number;
+  frequency: number;
+};
 
 // Constants for analysis - MUCH MORE CONSERVATIVE
 // Default to GLUCOSE_RANGES but allow custom settings to override
@@ -117,7 +116,7 @@ function calculateTimeInRange(readings: BGReading[], customRanges?: CustomGlucos
 }
 
 // Get active profile from Nightscout data
-function getActiveProfile(profiles: any[]): Profile | null {
+function getActiveProfile(profiles: NightscoutProfile[]): Profile | null {
   if (!profiles?.length) return null;
 
   const sortedProfiles = [...profiles].sort((a, b) => {
@@ -134,12 +133,18 @@ function getActiveProfile(profiles: any[]): Profile | null {
 
   if (!profileData) return null;
 
-  const convertTimeSegments = (segments: any[]): TimeSegment[] => {
+  const convertTimeSegments = (segments: unknown): TimeSegment[] => {
     if (!Array.isArray(segments)) return [];
-    return segments.map(segment => ({
-      time: segment.time,
-      rate: Number(segment.value)
-    }));
+    return segments
+      .map((segment) => {
+        if (!segment || typeof segment !== 'object') return null;
+        const record = segment as Record<string, unknown>;
+        const time = typeof record.time === 'string' ? record.time : null;
+        const rate = Number(record.value);
+        if (!time || !Number.isFinite(rate)) return null;
+        return { time, rate };
+      })
+      .filter(Boolean) as TimeSegment[];
   };
 
   return {
@@ -262,9 +267,9 @@ function analyzeCarbAnnouncements(
   treatments: Treatment[], 
   currentProfile: Profile,
   safetyWarnings: string[]
-): { carbRatioSuggestions: TimeSegment[]; carbPatterns: any[] } {
+): { carbRatioSuggestions: TimeSegment[]; carbPatterns: CarbPattern[] } {
   const adjustedCarbRatio: TimeSegment[] = [];
-  const carbPatterns: any[] = [];
+  const carbPatterns: CarbPattern[] = [];
   const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
   
   // Group carb announcements by hour
@@ -272,7 +277,7 @@ function analyzeCarbAnnouncements(
   
   treatments.forEach(treatment => {
     if (treatment.carbs && treatment.carbs > 0) {
-      const hour = new Date(treatment.created_at).getHours();
+      const hour = new Date(getTreatmentMs(treatment)).getHours();
       const response = calculateGlucoseResponse(readings, treatment.created_at);
       const hasPostMealHypo = checkPostMealHypoglycemia(readings, treatment.created_at);
       
@@ -374,7 +379,7 @@ function average(numbers: number[]): number {
 
 // Main analysis function with AI enhancement
 export async function analyzeData(
-  data: any, 
+  data: { entries: NightscoutEntry[]; treatments: NightscoutTreatment[]; profile: NightscoutProfile[] }, 
   pumpId?: string, 
   customGlucoseRanges?: CustomGlucoseRanges
 ): Promise<AnalysisResults | null> {

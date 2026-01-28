@@ -5,11 +5,14 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Activity, Calendar, Clock, Dumbbell, TrendingDown, TrendingUp, AlertTriangle, Brain, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { aiService } from '../services/aiService';
+import { runSafeAsync } from '../utils/safeAsync';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 const ExerciseImpact = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
   const { unit, formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
-  const [exerciseAnalysis, setExerciseAnalysis] = useState<any>(null);
+  const [exerciseAnalysis, setExerciseAnalysis] = useState<Awaited<ReturnType<typeof aiService.analyzeExerciseImpact>> | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -27,57 +30,40 @@ const ExerciseImpact = () => {
   });
   const [isCustomRange, setIsCustomRange] = useState(false);
 
-  // Get filtered readings based on time selection
-  const filteredReadings = React.useMemo(() => {
-    if (!data?.entries?.length) {
-      return [];
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const selectedRange = React.useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
     }
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
-    }
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+    const endMs = Date.now();
+    const startMs = endMs - timeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [isCustomRange, customDateRange.startDate, customDateRange.endDate, timeWindow]);
+
+  // Get filtered readings based on time selection
+  const filteredReadings = React.useMemo(() => {
+    if (!entriesSortedAsc.length) return [];
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Get filtered treatments based on time selection
   const filteredTreatments = React.useMemo(() => {
-    if (!data?.treatments?.length) {
-      return [];
-    }
-
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= startTime && treatmentTime <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= cutoffTime;
-      });
-    }
-  }, [data?.treatments, timeWindow, isCustomRange, customDateRange]);
+    if (!treatmentsSortedAsc.length) return [];
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   useEffect(() => {
     const analyzeExercise = async () => {
@@ -114,7 +100,9 @@ const ExerciseImpact = () => {
     };
     
     // Add a small delay to prevent rapid re-renders
-    const timeoutId = setTimeout(analyzeExercise, 100);
+    const timeoutId = setTimeout(() => {
+      runSafeAsync(() => analyzeExercise(), { label: 'ExerciseImpact analyzeExercise (delayed)' });
+    }, 100);
     return () => clearTimeout(timeoutId);
   }, [filteredReadings.length, filteredTreatments.length, manualRefresh, unit]);
 
@@ -171,7 +159,7 @@ const ExerciseImpact = () => {
       // Fetch more data if needed for longer time periods
       const daysNeeded = Math.ceil(newTimeWindow / 24) + 1;
       if (daysNeeded > 7) {
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'ExerciseImpact fetch more data for time window' });
       }
     }
   };
@@ -194,7 +182,7 @@ const ExerciseImpact = () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     const daysToFetch = Math.max(diffDays + 7, 14);
-    fetchDataForDays(Math.min(daysToFetch, 90));
+    runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'ExerciseImpact fetch data for custom range' });
     
     setIsCustomRange(true);
     setShowCalendar(false);
@@ -202,20 +190,19 @@ const ExerciseImpact = () => {
 
   // Calculate available data span
   const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
+    if (!entriesSortedAsc.length) return null;
     
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
     
     return {
       oldestDate: new Date(oldestEntry.date),
       newestDate: new Date(newestEntry.date),
       spanDays,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
 
   // Handle manual refresh
   const handleRefreshAI = () => {
@@ -289,7 +276,7 @@ const ExerciseImpact = () => {
                 handleCustomDateSubmit();
               } else {
                 const daysNeeded = Math.ceil(timeWindow / 24) + 1;
-                fetchDataForDays(Math.max(daysNeeded, 14));
+                runSafeAsync(() => fetchDataForDays(Math.max(daysNeeded, 14)), { label: 'ExerciseImpact refresh fetch data' });
               }
             }}
             className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
@@ -395,13 +382,13 @@ const ExerciseImpact = () => {
                 <div className="bg-white/10 p-4 rounded-lg">
                   <h4 className="font-medium mb-2">Glucose Impact</h4>
                   <div className="flex items-center">
-                    {exerciseAnalysis?.exerciseTypes?.some((t: any) => (t?.glucoseImpact || 0) < 0) ? (
+                    {exerciseAnalysis?.exerciseTypes?.some((t) => (t?.glucoseImpact || 0) < 0) ? (
                       <TrendingDown className="h-6 w-6 text-green-300 mr-2" />
                     ) : (
                       <TrendingUp className="h-6 w-6 text-red-300 mr-2" />
                     )}
                     <p className="text-xl font-bold">
-                      {exerciseAnalysis?.exerciseTypes?.some((t: any) => (t?.glucoseImpact || 0) < 0) ? 
+                      {exerciseAnalysis?.exerciseTypes?.some((t) => (t?.glucoseImpact || 0) < 0) ? 
                         'Mostly Lowering' : 'Mostly Neutral/Raising'}
                     </p>
                   </div>
@@ -509,7 +496,7 @@ const ExerciseImpact = () => {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {exerciseAnalysis.exerciseTypes.map((type: any, index: number) => {
+                {exerciseAnalysis.exerciseTypes.map((type, index: number) => {
                   if (!type) return null;
                   
                   return (

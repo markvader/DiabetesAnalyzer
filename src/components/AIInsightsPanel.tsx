@@ -5,6 +5,7 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { motion } from 'framer-motion';
 import { formatCostEstimate, getModelById } from '../constants/openaiModels';
+import type { NightscoutEntry } from '../types/nightscout';
 import { 
   Paper, 
   Typography, 
@@ -25,7 +26,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 interface AIInsightsPanelProps {
-  readings: any[];
+  readings: NightscoutEntry[];
   timeInRange: {
     timeInRange: number;
     highPercentage: number;
@@ -42,7 +43,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [riskAssessment, setRiskAssessment] = useState<string | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
-  const [details, setDetails] = useState<any | null>(null);
+  const [details, setDetails] = useState<unknown | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
@@ -98,7 +99,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
         setRecommendations(result.recommendations);
         setRiskAssessment(result.riskAssessment);
         setConfidence(result.confidence);
-        setDetails((result as any).details ?? null);
+        setDetails((result as { details?: unknown }).details ?? null);
         setLastUsageInfo({
           provider: result.provider,
           model: result.model,
@@ -208,16 +209,28 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
     return [];
   };
 
+  type DetailsLike = Record<string, unknown> & {
+    executiveSummary?: unknown;
+    likelyDrivers?: unknown;
+    safetyFlags?: unknown;
+    actionPlan7Days?: unknown;
+    experiments?: unknown;
+    questionsForClinician?: unknown;
+    dataQualityNotes?: unknown;
+  };
+
+  const detailsLike: DetailsLike | null = details && typeof details === 'object' ? (details as DetailsLike) : null;
+
   const hasDetails = (() => {
-    if (!details || typeof details !== 'object') return false;
-    const summary = typeof details.executiveSummary === 'string' ? details.executiveSummary.trim() : '';
+    if (!detailsLike) return false;
+    const summary = typeof detailsLike.executiveSummary === 'string' ? detailsLike.executiveSummary.trim() : '';
     const lists = [
-      normalizeStringArray(details.likelyDrivers),
-      normalizeStringArray(details.safetyFlags),
-      normalizeStringArray(details.actionPlan7Days),
-      normalizeStringArray(details.experiments),
-      normalizeStringArray(details.questionsForClinician),
-      normalizeStringArray(details.dataQualityNotes)
+      normalizeStringArray(detailsLike.likelyDrivers),
+      normalizeStringArray(detailsLike.safetyFlags),
+      normalizeStringArray(detailsLike.actionPlan7Days),
+      normalizeStringArray(detailsLike.experiments),
+      normalizeStringArray(detailsLike.questionsForClinician),
+      normalizeStringArray(detailsLike.dataQualityNotes)
     ];
     return summary.length > 0 || lists.some(arr => arr.length > 0);
   })();
@@ -225,20 +238,22 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   const renderDetailsContentMui = () => {
     if (!hasDetails) return null;
 
+    if (!detailsLike) return null;
+
     const sections: Array<{ title: string; items: string[] }> = [
-      { title: 'Likely drivers', items: normalizeStringArray(details.likelyDrivers) },
-      { title: 'Safety flags', items: normalizeStringArray(details.safetyFlags) },
-      { title: '7-day action plan', items: normalizeStringArray(details.actionPlan7Days) },
-      { title: 'Safe experiments', items: normalizeStringArray(details.experiments) },
-      { title: 'Questions for your clinician', items: normalizeStringArray(details.questionsForClinician) },
-      { title: 'Data quality notes', items: normalizeStringArray(details.dataQualityNotes) }
+      { title: 'Likely drivers', items: normalizeStringArray(detailsLike.likelyDrivers) },
+      { title: 'Safety flags', items: normalizeStringArray(detailsLike.safetyFlags) },
+      { title: '7-day action plan', items: normalizeStringArray(detailsLike.actionPlan7Days) },
+      { title: 'Safe experiments', items: normalizeStringArray(detailsLike.experiments) },
+      { title: 'Questions for your clinician', items: normalizeStringArray(detailsLike.questionsForClinician) },
+      { title: 'Data quality notes', items: normalizeStringArray(detailsLike.dataQualityNotes) }
     ].filter(s => s.items.length > 0);
 
     return (
       <Box>
-        {typeof details.executiveSummary === 'string' && details.executiveSummary.trim().length > 0 && (
+        {typeof detailsLike.executiveSummary === 'string' && detailsLike.executiveSummary.trim().length > 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {details.executiveSummary}
+            {detailsLike.executiveSummary}
           </Typography>
         )}
 
@@ -780,70 +795,70 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
             More details
           </summary>
           <div className="mt-3 space-y-4">
-            {typeof details?.executiveSummary === 'string' && details.executiveSummary.trim().length > 0 && (
-              <p className="text-sm text-gray-700 dark:text-gray-300">{details.executiveSummary}</p>
+            {typeof detailsLike?.executiveSummary === 'string' && detailsLike.executiveSummary.trim().length > 0 && (
+              <p className="text-sm text-gray-700 dark:text-gray-300">{detailsLike.executiveSummary}</p>
             )}
 
-            {normalizeStringArray(details?.likelyDrivers).length > 0 && (
+            {normalizeStringArray(detailsLike?.likelyDrivers).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Likely drivers</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.likelyDrivers).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.likelyDrivers).map((item, idx) => (
                     <li key={`drivers-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {normalizeStringArray(details?.safetyFlags).length > 0 && (
+            {normalizeStringArray(detailsLike?.safetyFlags).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Safety flags</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.safetyFlags).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.safetyFlags).map((item, idx) => (
                     <li key={`safety-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {normalizeStringArray(details?.actionPlan7Days).length > 0 && (
+            {normalizeStringArray(detailsLike?.actionPlan7Days).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">7-day action plan</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.actionPlan7Days).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.actionPlan7Days).map((item, idx) => (
                     <li key={`plan-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {normalizeStringArray(details?.experiments).length > 0 && (
+            {normalizeStringArray(detailsLike?.experiments).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Safe experiments</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.experiments).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.experiments).map((item, idx) => (
                     <li key={`exp-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {normalizeStringArray(details?.questionsForClinician).length > 0 && (
+            {normalizeStringArray(detailsLike?.questionsForClinician).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Questions for your clinician</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.questionsForClinician).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.questionsForClinician).map((item, idx) => (
                     <li key={`q-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {normalizeStringArray(details?.dataQualityNotes).length > 0 && (
+            {normalizeStringArray(detailsLike?.dataQualityNotes).length > 0 && (
               <div>
                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Data quality notes</h4>
                 <ul className="mt-2 space-y-1">
-                  {normalizeStringArray(details.dataQualityNotes).map((item, idx) => (
+                  {normalizeStringArray(detailsLike?.dataQualityNotes).map((item, idx) => (
                     <li key={`dq-${idx}`} className="text-sm text-gray-700 dark:text-gray-300">• {item}</li>
                   ))}
                 </ul>

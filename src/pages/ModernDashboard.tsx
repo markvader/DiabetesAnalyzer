@@ -17,6 +17,7 @@ import { GlucoseMetricCard } from '../components/mui/GlucoseMetricCard';
 import GlucoseChart from '../components/mui/GlucoseChart';
 import TimeInRangeStats from '../components/mui/TimeInRangeStats';
 import { AdvancedDataGrid } from '../components/mui/AdvancedDataGrid';
+import { runSafeAsync } from '../utils/safeAsync';
 
 interface GlucoseReading {
   id: string;
@@ -144,7 +145,7 @@ const ModernDashboard: React.FC = () => {
       setLoading(false);
     };
 
-    fetchData();
+    runSafeAsync(() => fetchData(), { label: 'ModernDashboard: fetchData' });
   }, []);
 
   const handleRefresh = async () => {
@@ -365,7 +366,7 @@ const ModernDashboard: React.FC = () => {
       <Box sx={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <Fab
           color="primary"
-          onClick={handleRefresh}
+          onClick={() => runSafeAsync(() => handleRefresh(), { label: 'ModernDashboard: handleRefresh' })}
           disabled={refreshing}
           sx={{
             animation: refreshing ? 'spin 1s linear infinite' : 'none',

@@ -4,17 +4,32 @@ import { Shield, AlertTriangle, CheckCircle, Brain, Activity, TrendingUp, Refres
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { aiService } from '../services/aiService';
+import type { NightscoutEntry } from '../types/nightscout';
+import { runSafeAsync } from '../utils/safeAsync';
+
+type TimeInRangeStats = { inRange: number; high: number; low: number };
+type VariabilityStats = { cv: number; stdDev: number };
+type HypoglycemiaRiskStats = { lowPercentage: number; severePercentage: number; riskScore: number };
+
+type SafetyAnalysisState = {
+  timeInRange: TimeInRangeStats;
+  variability: VariabilityStats;
+  hypoglycemiaRisk: HypoglycemiaRiskStats;
+  aiInsights: Awaited<ReturnType<typeof aiService.analyzeGlucosePatterns>> | null;
+  safetyScore: number;
+  criticalWarnings: string[];
+};
 
 const SafetyAnalysis = () => {
   const { data, loading, error } = useNightscout();
   const { formatGlucoseValue, getCurrentGlucoseRanges } = useGlucoseFormatting();
-  const [safetyAnalysis, setSafetyAnalysis] = useState<any>(null);
+  const [safetyAnalysis, setSafetyAnalysis] = useState<SafetyAnalysisState | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
 
   // Move calculation functions here to access hook
-  const calculateTimeInRange = (readings: any[]) => {
+  const calculateTimeInRange = (readings: NightscoutEntry[]) => {
     if (!readings.length) return { inRange: 0, high: 0, low: 0 };
     
     const ranges = getCurrentGlucoseRanges();
@@ -39,7 +54,7 @@ const SafetyAnalysis = () => {
     };
   };
 
-  const calculateVariability = (readings: any[]) => {
+  const calculateVariability = (readings: NightscoutEntry[]) => {
     if (!readings.length) return { cv: 0, stdDev: 0 };
     
     const values = readings.map(r => r.sgv);
@@ -53,7 +68,7 @@ const SafetyAnalysis = () => {
     };
   };
 
-  const calculateHypoglycemiaRisk = (readings: any[]) => {
+  const calculateHypoglycemiaRisk = (readings: NightscoutEntry[]) => {
     const ranges = getCurrentGlucoseRanges();
     const lowReadings = readings.filter(r => r.sgv < ranges.TARGET_MIN).length;
     const severelyLowReadings = readings.filter(r => r.sgv < ranges.LOW_THRESHOLD).length; // Use LOW_THRESHOLD for severe hypo
@@ -116,10 +131,14 @@ const SafetyAnalysis = () => {
       }
     };
     
-    analyzeSafety();
+    runSafeAsync(() => analyzeSafety(), { label: 'SafetyAnalysis: analyzeSafety' });
   }, [data, manualRefresh]);
 
-  const calculateSafetyScore = (timeInRange: any, variability: any, hypoglycemiaRisk: any) => {
+  const calculateSafetyScore = (
+    timeInRange: TimeInRangeStats,
+    variability: VariabilityStats,
+    hypoglycemiaRisk: HypoglycemiaRiskStats
+  ) => {
     let score = 100;
     
     // Penalize for time below range
@@ -135,8 +154,12 @@ const SafetyAnalysis = () => {
     return Math.max(0, Math.min(100, Math.round(score)));
   };
 
-  const generateCriticalWarnings = (timeInRange: any, variability: any, hypoglycemiaRisk: any) => {
-    const warnings = [];
+  const generateCriticalWarnings = (
+    timeInRange: TimeInRangeStats,
+    variability: VariabilityStats,
+    hypoglycemiaRisk: HypoglycemiaRiskStats
+  ) => {
+    const warnings: string[] = [];
     
     if (timeInRange.low > 4) {
       warnings.push('CRITICAL: Excessive hypoglycemia detected (>4% time below range). Immediate medical consultation required.');

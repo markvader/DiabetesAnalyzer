@@ -94,7 +94,11 @@ const intelligentSample = (readings: GlucoseReading[]): GlucoseReading[] => {
 };
 
 // Web Worker simulation using setTimeout for non-blocking computation
-const computeStatsAsync = (readings: GlucoseReading[], convertToCurrentUnit: (value: number, fromUnit?: 'mmol' | 'mgdl') => number, getCurrentGlucoseRanges: any): Promise<StatsResult> => {
+const computeStatsAsync = (
+  readings: GlucoseReading[],
+  convertToCurrentUnit: (value: number, fromUnit?: 'mmol' | 'mgdl') => number,
+  getCurrentGlucoseRanges: () => { TARGET_MIN: number; TARGET_MAX: number; LOW_THRESHOLD: number; HIGH_THRESHOLD: number }
+): Promise<StatsResult> => {
   return new Promise((resolve) => {
     setTimeout(() => {
       const originalCount = readings.length;

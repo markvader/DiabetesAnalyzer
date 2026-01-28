@@ -28,6 +28,8 @@ import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw,
 import { motion } from 'framer-motion';
 import { aiService } from '../services/aiService';
 import TimeInRangeSettings from '../components/TimeInRangeSettings';
+import { runSafeAsync } from '../utils/safeAsync';
+import { formatNightscoutErrorForUser } from '../utils/nightscoutErrors';
 
 const Settings = () => {
   const { 
@@ -167,7 +169,7 @@ const Settings = () => {
   };
   
   const handleFetchData = () => {
-    fetchDataForDays(analysisPeriod);
+    runSafeAsync(() => fetchDataForDays(analysisPeriod), { label: 'Settings fetch data' });
     setMessage({
       text: 'Fetching data...',
       type: 'success'
@@ -192,7 +194,10 @@ const Settings = () => {
       });
     } catch (error) {
       setMessage({
-        text: error instanceof Error ? error.message : 'Failed to connect to Nightscout',
+        text: formatNightscoutErrorForUser(error, {
+          url: newUrl,
+          apiVersion: detectedApiVersion || 'v1'
+        }),
         type: 'error'
       });
     } finally {
@@ -253,7 +258,7 @@ const Settings = () => {
 
   useEffect(() => {
     // Test API keys on component mount
-    testApiKeys();
+    runSafeAsync(() => testApiKeys(), { label: 'Settings: testApiKeys (mount)' });
   }, []);
 
   // Sync form state with context values
@@ -273,7 +278,7 @@ const Settings = () => {
     if (openaiKey) {
       localStorage.setItem('openai_api_key', openaiKey);
       // Also update environment variable
-      (window as any).VITE_OPENAI_API_KEY = openaiKey;
+      window.VITE_OPENAI_API_KEY = openaiKey;
     } else {
       localStorage.removeItem('openai_api_key');
     }
@@ -285,7 +290,7 @@ const Settings = () => {
     if (geminiKey) {
       localStorage.setItem('gemini_api_key', geminiKey);
       // Also update environment variable
-      (window as any).VITE_GEMINI_API_KEY = geminiKey;
+      window.VITE_GEMINI_API_KEY = geminiKey;
     } else {
       localStorage.removeItem('gemini_api_key');
     }
@@ -296,7 +301,7 @@ const Settings = () => {
     if (deepseekKey) {
       localStorage.setItem('deepseek_api_key', deepseekKey);
       // Also update environment variable
-      (window as any).VITE_DEEPSEEK_API_KEY = deepseekKey;
+      window.VITE_DEEPSEEK_API_KEY = deepseekKey;
     } else {
       localStorage.removeItem('deepseek_api_key');
     }
@@ -304,7 +309,7 @@ const Settings = () => {
     if (anthropicKey) {
       localStorage.setItem('anthropic_api_key', anthropicKey);
       // Also update environment variable
-      (window as any).VITE_ANTHROPIC_API_KEY = anthropicKey;
+      window.VITE_ANTHROPIC_API_KEY = anthropicKey;
     } else {
       localStorage.removeItem('anthropic_api_key');
     }
@@ -366,7 +371,7 @@ const Settings = () => {
               <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI Provider Settings</h3>
             </div>
             <button
-              onClick={testApiKeys}
+              onClick={() => runSafeAsync(() => testApiKeys(), { label: 'Settings: testApiKeys (button)' })}
               disabled={testingApiKeys}
               className="px-3 py-1 text-sm bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:bg-blue-400 disabled:cursor-not-allowed"
             >
@@ -819,7 +824,7 @@ const Settings = () => {
               <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI Provider Status</h3>
             </div>
             <button
-              onClick={testApiKeys}
+              onClick={() => runSafeAsync(() => testApiKeys(), { label: 'Settings: testApiKeys (button 2)' })}
               disabled={testingApiKeys}
               className="px-3 py-1 text-sm bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:bg-blue-400 disabled:cursor-not-allowed"
             >
@@ -851,7 +856,11 @@ const Settings = () => {
                     <input
                       type="checkbox"
                       checked={tensorFlowContextEnabled}
-                      onChange={(e) => handleTensorFlowToggle(e.target.checked)}
+                      onChange={(e) =>
+                        runSafeAsync(() => handleTensorFlowToggle(e.target.checked), {
+                          label: 'Settings: handleTensorFlowToggle'
+                        })
+                      }
                       className="sr-only"
                     />
                     <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
@@ -1469,7 +1478,7 @@ const Settings = () => {
             <div className="mb-6">
               <button
                 type="button"
-                onClick={handleTestConnection}
+                onClick={() => runSafeAsync(() => handleTestConnection(), { label: 'Settings: handleTestConnection' })}
                 disabled={testing || !newUrl}
                 className="w-full px-4 py-2 bg-indigo-600 dark:bg-indigo-500 text-white rounded-md hover:bg-indigo-700 dark:hover:bg-indigo-600 transition duration-150 disabled:bg-indigo-400 dark:disabled:bg-indigo-400 disabled:cursor-not-allowed"
               >

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { aiService } from '../services/aiService';
+import { runSafeAsync } from '../utils/safeAsync';
 
 // Mock data generator
 const generateMockGlucoseData = () => {
@@ -47,7 +48,7 @@ const generateMockTreatments = () => {
 
 const TensorFlowTest = () => {
   const { isReady, isEnabled, error, toggleEnabled } = useTensorFlow();
-  const [testResults, setTestResults] = useState<any>({});
+  const [testResults, setTestResults] = useState<Record<string, unknown>>({});
   const [isRunning, setIsRunning] = useState(false);
 
   const mockReadings = generateMockGlucoseData();
@@ -65,7 +66,7 @@ const TensorFlowTest = () => {
     if (!isReady) return;
     
     setIsRunning(true);
-    const results: any = {};
+    const results: Record<string, unknown> = {};
 
     try {
       console.log('🧪 Running comprehensive TensorFlow analysis tests...');
@@ -107,7 +108,7 @@ const TensorFlowTest = () => {
   };
 
   const handleToggleEnabled = () => {
-    toggleEnabled(!isEnabled);
+    runSafeAsync(() => toggleEnabled(!isEnabled), { label: 'TensorFlowTest: toggleEnabled' });
   };
 
   return (
@@ -169,7 +170,7 @@ const TensorFlowTest = () => {
             </button>
             
             <button
-              onClick={runAllTests}
+              onClick={() => runSafeAsync(() => runAllTests(), { label: 'TensorFlowTest: runAllTests' })}
               disabled={!isReady || !isEnabled || isRunning}
               className={`px-6 py-2 rounded-lg font-medium ${
                 isReady && isEnabled && !isRunning

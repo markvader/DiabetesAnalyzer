@@ -2,6 +2,8 @@
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol, GLUCOSE_RANGES, getGlucoseRanges } from '../utils/glucoseUtils';
 import { aiAnalysisService } from './aiAnalysisService';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 // Interface for custom glucose range settings
 export interface CustomGlucoseRanges {
@@ -15,6 +17,12 @@ interface TimeSegment {
   time: string;
   rate: number;
 }
+
+type ProfileLike = {
+  basal?: TimeSegment[];
+  sens?: TimeSegment[];
+  carbratio?: TimeSegment[];
+};
 
 interface AIEnhancedSuggestions {
   basalSuggestions: TimeSegment[];
@@ -30,10 +38,12 @@ interface AIEnhancedSuggestions {
   hypoglycemiaRisk: number;
 }
 
+type AIInsightsRisk = { riskAssessment?: string };
+
 export const analyzeWithAI = async (
-  readings: any[],
-  treatments: any[],
-  currentProfile: any,
+  readings: NightscoutEntry[],
+  treatments: NightscoutTreatment[],
+  currentProfile: ProfileLike,
   customGlucoseRanges?: CustomGlucoseRanges
 ): Promise<AIEnhancedSuggestions> => {
   
@@ -70,7 +80,7 @@ export const analyzeWithAI = async (
   };
 };
 
-function calculateSafetyScore(readings: any[], treatments: any[], customRanges?: CustomGlucoseRanges): number {
+function calculateSafetyScore(readings: NightscoutEntry[], treatments: NightscoutTreatment[], customRanges?: CustomGlucoseRanges): number {
   const timeInRange = calculateTimeInRange(readings, customRanges);
   const variability = calculateVariability(readings);
   const hypoglycemiaEpisodes = readings.filter(r => toMmol(r.sgv) < 3.9).length;
@@ -91,7 +101,7 @@ function calculateSafetyScore(readings: any[], treatments: any[], customRanges?:
   return Math.max(0, Math.min(100, score));
 }
 
-function calculateHypoglycemiaRisk(readings: any[]): number {
+function calculateHypoglycemiaRisk(readings: NightscoutEntry[]): number {
   const lowReadings = readings.filter(r => toMmol(r.sgv) < 3.9).length;
   const severelyLowReadings = readings.filter(r => toMmol(r.sgv) < 3.0).length;
   const total = readings.length;
@@ -103,17 +113,17 @@ function calculateHypoglycemiaRisk(readings: any[]): number {
 }
 
 function generateSafeBasalSuggestions(
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any, 
-  aiInsights: any
+  readings: NightscoutEntry[], 
+  treatments: NightscoutTreatment[], 
+  currentProfile: ProfileLike, 
+  aiInsights: AIInsightsRisk
 ): TimeSegment[] {
   if (!currentProfile?.basal?.length) return [];
   
   const timeGroups = groupReadingsByTimeOfDay(readings);
   const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
   
-  return currentProfile.basal.map((basal: any) => {
+  return currentProfile.basal.map((basal) => {
     const hour = parseInt(basal.time.split(':')[0]);
     const bgValues = timeGroups[`${hour}`];
     
@@ -164,22 +174,22 @@ function generateSafeBasalSuggestions(
 }
 
 function generateSafeISFSuggestions(
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any, 
-  aiInsights: any
+  readings: NightscoutEntry[], 
+  treatments: NightscoutTreatment[], 
+  currentProfile: ProfileLike, 
+  aiInsights: AIInsightsRisk
 ): TimeSegment[] {
   if (!currentProfile?.sens?.length) return [];
   
   const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
   const corrections = treatments.filter(t => t.insulin && !t.carbs);
   
-  return currentProfile.sens.map((sens: any) => {
+  return currentProfile.sens.map((sens) => {
     const hour = parseInt(sens.time.split(':')[0]);
     
     // Find corrections in this time period
     const hourCorrections = corrections.filter(c => {
-      const correctionHour = new Date(c.created_at).getHours();
+      const correctionHour = new Date(getTreatmentMs(c)).getHours();
       return correctionHour === hour;
     });
     
@@ -211,22 +221,22 @@ function generateSafeISFSuggestions(
 }
 
 function generateSafeCarbRatioSuggestions(
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any, 
-  aiInsights: any
+  readings: NightscoutEntry[], 
+  treatments: NightscoutTreatment[], 
+  currentProfile: ProfileLike, 
+  aiInsights: AIInsightsRisk
 ): TimeSegment[] {
   if (!currentProfile?.carbratio?.length) return [];
   
   const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
   const mealTreatments = treatments.filter(t => t.carbs && t.insulin);
   
-  return currentProfile.carbratio.map((ratio: any) => {
+  return currentProfile.carbratio.map((ratio) => {
     const hour = parseInt(ratio.time.split(':')[0]);
     
     // Find meals in this time period
     const hourMeals = mealTreatments.filter(m => {
-      const mealHour = new Date(m.created_at).getHours();
+      const mealHour = new Date(getTreatmentMs(m)).getHours();
       return mealHour === hour;
     });
     
@@ -235,7 +245,7 @@ function generateSafeCarbRatioSuggestions(
     if (hourMeals.length > 0) {
       // Analyze post-meal glucose responses
       const responses = hourMeals.map(meal => {
-        const mealTime = new Date(meal.created_at).getTime();
+        const mealTime = getTreatmentMs(meal);
         const postMealReadings = readings.filter(r => 
           r.date > mealTime && r.date <= mealTime + 3 * 60 * 60 * 1000
         );
@@ -284,7 +294,7 @@ function generateSafeCarbRatioSuggestions(
 }
 
 // Helper functions
-function groupReadingsByTimeOfDay(readings: any[]) {
+function groupReadingsByTimeOfDay(readings: NightscoutEntry[]) {
   const timeGroups: { [key: string]: number[] } = {};
   const hours = Array.from({ length: 24 }, (_, i) => i);
   
@@ -301,7 +311,7 @@ function groupReadingsByTimeOfDay(readings: any[]) {
   return timeGroups;
 }
 
-function calculateTimeInRange(readings: any[], customRanges?: CustomGlucoseRanges) {
+function calculateTimeInRange(readings: NightscoutEntry[], customRanges?: CustomGlucoseRanges) {
   if (!readings.length) return { inRange: 0, high: 0, low: 0 };
   
   // Get glucose thresholds based on custom ranges or defaults
@@ -330,7 +340,7 @@ function calculateTimeInRange(readings: any[], customRanges?: CustomGlucoseRange
   };
 }
 
-function calculateVariability(readings: any[]) {
+function calculateVariability(readings: NightscoutEntry[]) {
   if (!readings.length) return { cv: 0, stdDev: 0 };
   
   const values = readings.map(r => r.sgv);

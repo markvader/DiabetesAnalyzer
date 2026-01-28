@@ -75,7 +75,14 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({
+    active,
+    payload,
+  }: {
+    active?: boolean;
+    payload?: Array<{ payload: GlucoseReading }>;
+    label?: unknown;
+  }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (

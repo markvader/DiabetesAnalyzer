@@ -2,17 +2,20 @@ import React, { useState } from 'react';
 import { Brain, Zap, Shield, TrendingUp, AlertTriangle, CheckCircle, Settings, Target } from 'lucide-react';
 import { aiOpenAPSOptimizer } from '../services/aiOpenAPSOptimizer';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+
+type OptimizationResult = Awaited<ReturnType<typeof aiOpenAPSOptimizer.optimizeOpenAPSSettings>>;
 
 interface AIOptimizerProps {
-  readings: any[];
-  treatments: any[];
+  readings: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
   analysisDays: number;
-  onOptimizationComplete?: (results: any) => void;
+  onOptimizationComplete?: (results: OptimizationResult) => void;
 }
 
 const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, analysisDays, onOptimizationComplete }) => {
   const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimization, setOptimization] = useState<any>(null);
+  const [optimization, setOptimization] = useState<OptimizationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { formatGlucoseValue } = useGlucoseFormatting();
 

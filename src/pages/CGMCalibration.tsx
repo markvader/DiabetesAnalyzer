@@ -17,9 +17,14 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { format, startOfDay, endOfDay } from 'date-fns';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { createTreatment } from '../services/nightscoutService';
+import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
+import { lowerBoundByMs, sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { runSafeAsync, safeAsync } from '../utils/safeAsync';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 
 interface CalibrationEvent {
   timestamp: string;
+  timestampMs: number;
   cgmReading: number;
   bgCheck: number;
   difference: number;
@@ -70,37 +75,6 @@ const CGMCalibration = () => {
   const [sensorEventError, setSensorEventError] = useState<string | null>(null);
   const [sensorEventSaving, setSensorEventSaving] = useState(false);
 
-  const getEntryTimeMs = (entry: any): number | null => {
-    const candidate = entry?.date ?? entry?.srvCreated ?? entry?.mills ?? entry?.dateString ?? entry?.created_at;
-    if (candidate == null) return null;
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
-    if (typeof candidate === 'string') {
-      const asNumber = Number(candidate);
-      if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
-      const asDate = Date.parse(candidate);
-      if (Number.isFinite(asDate)) return asDate;
-    }
-    return null;
-  };
-
-  const getTreatmentTimeMs = (treatment: any): number | null => {
-    const candidate = treatment?.created_at ?? treatment?.timestamp ?? treatment?.mills;
-    if (candidate == null) return null;
-    const normalizeEpochMs = (value: number): number => {
-      // Heuristic: epoch seconds are ~1e9, epoch ms are ~1e12.
-      if (value > 0 && value < 1e11) return value * 1000;
-      return value;
-    };
-    if (typeof candidate === 'number' && Number.isFinite(candidate)) return normalizeEpochMs(candidate);
-    if (typeof candidate === 'string') {
-      const asNumber = Number(candidate);
-      if (Number.isFinite(asNumber) && asNumber > 0) return normalizeEpochMs(asNumber);
-      const asDate = Date.parse(candidate);
-      if (Number.isFinite(asDate)) return asDate;
-    }
-    return null;
-  };
-
   const selectedRange = useMemo(() => {
     const now = Date.now();
     if (isCustomRange) {
@@ -117,8 +91,7 @@ const CGMCalibration = () => {
     let min = Number.POSITIVE_INFINITY;
     let max = 0;
     for (const entry of data.entries) {
-      const t = getEntryTimeMs(entry);
-      if (!t) continue;
+      const t = getEntryMs(entry);
       if (t < min) min = t;
       if (t > max) max = t;
     }
@@ -132,23 +105,23 @@ const CGMCalibration = () => {
     };
   }, [data?.entries]);
 
+  const entriesSortedAsc = useMemo(() => {
+    if (!data?.entries?.length) return [] as NightscoutEntry[];
+    return [...data.entries].sort((a, b) => getEntryMs(a) - getEntryMs(b));
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = useMemo(() => {
+    if (!data?.treatments?.length) return [] as NightscoutTreatment[];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
   const filteredEntries = useMemo(() => {
-    if (!data?.entries?.length) return [];
-    return data.entries.filter((entry) => {
-      const t = getEntryTimeMs(entry);
-      if (!t) return false;
-      return t >= selectedRange.start && t <= selectedRange.end;
-    });
-  }, [data?.entries, selectedRange.start, selectedRange.end]);
+    return sliceSortedByTimeRange(entriesSortedAsc, getEntryMs, selectedRange.start, selectedRange.end);
+  }, [entriesSortedAsc, selectedRange.end, selectedRange.start]);
 
   const filteredTreatments = useMemo(() => {
-    if (!data?.treatments?.length) return [];
-    return data.treatments.filter((treatment) => {
-      const t = getTreatmentTimeMs(treatment);
-      if (!t) return false;
-      return t >= selectedRange.start && t <= selectedRange.end;
-    });
-  }, [data?.treatments, selectedRange.start, selectedRange.end]);
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.start, selectedRange.end);
+  }, [selectedRange.end, selectedRange.start, treatmentsSortedAsc]);
 
   useEffect(() => {
     if (filteredTreatments.length && filteredEntries.length) {
@@ -222,7 +195,7 @@ const CGMCalibration = () => {
 
     const daysNeeded = Math.ceil(newWindow / 24);
     if (daysNeeded > analysisPeriod && !hasEnoughData(daysNeeded)) {
-      fetchDataForDays(Math.min(daysNeeded, 90));
+      runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'CGMCalibration fetch more data for time window' });
     }
   };
 
@@ -243,7 +216,7 @@ const CGMCalibration = () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     if (!hasEnoughData(diffDays + 1)) {
       const daysToFetch = Math.max(diffDays + 7, analysisPeriod);
-      fetchDataForDays(Math.min(daysToFetch, 90));
+      runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'CGMCalibration fetch data for custom range' });
     }
 
     setIsCustomRange(true);
@@ -271,15 +244,23 @@ const CGMCalibration = () => {
   };
 
   type SensorEventKind = 'start' | 'end' | 'other';
+  type SensorEventType = 'CGM Sensor Start' | 'CGM Sensor Insert' | 'CGM Sensor Stop';
 
-  const getTreatmentEventType = (treatment: any) => {
-    const raw = treatment?.eventType ?? treatment?.event_type;
+  const isSensorEventType = (value: string): value is SensorEventType => {
+    return value === 'CGM Sensor Start' || value === 'CGM Sensor Insert' || value === 'CGM Sensor Stop';
+  };
+
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null;
+
+  const getTreatmentEventType = (treatment: unknown): string => {
+    const raw = isRecord(treatment) ? (treatment.eventType ?? treatment.event_type) : undefined;
     return raw == null ? '' : String(raw);
   };
 
-  const classifySensorEvent = (treatment: any): SensorEventKind => {
+  const classifySensorEvent = (treatment: unknown): SensorEventKind => {
     const eventType = getTreatmentEventType(treatment).trim();
-    const notes = treatment?.notes == null ? '' : String(treatment.notes);
+    const notes = isRecord(treatment) && treatment.notes != null ? String(treatment.notes) : '';
     const combined = `${eventType} ${notes}`.toLowerCase();
     const normalized = combined.replace(/\s+/g, ' ').trim();
 
@@ -326,8 +307,8 @@ const CGMCalibration = () => {
     return 'other';
   };
 
-  const isSensorStartEvent = (treatment: any) => classifySensorEvent(treatment) === 'start';
-  const isSensorEndEvent = (treatment: any) => classifySensorEvent(treatment) === 'end';
+  const isSensorStartEvent = (treatment: NightscoutTreatment) => classifySensorEvent(treatment) === 'start';
+  const isSensorEndEvent = (treatment: NightscoutTreatment) => classifySensorEvent(treatment) === 'end';
 
   const sensorPeriods = useMemo(() => {
     if (!data?.treatments?.length) {
@@ -342,8 +323,7 @@ const CGMCalibration = () => {
 
     const mapped = data.treatments
       .map((t) => {
-        const tMs = getTreatmentTimeMs(t);
-        if (!tMs) return null;
+        const tMs = getTreatmentMs(t);
         const kind = classifySensorEvent(t);
         if (kind === 'other') return null;
         return {
@@ -355,7 +335,7 @@ const CGMCalibration = () => {
         };
       })
       .filter(Boolean) as Array<{
-      t: any;
+      t: NightscoutTreatment;
       time: number;
       kind: SensorEventKind;
       notes?: string;
@@ -450,7 +430,7 @@ const CGMCalibration = () => {
     }
   };
 
-  const analyzeRealCalibrations = (treatmentsInRange: any[], entriesInRange: any[]) => {
+  const analyzeRealCalibrations = (treatmentsInRange: NightscoutTreatment[], entriesInRange: NightscoutEntry[]) => {
     if (!treatmentsInRange.length || !entriesInRange.length) {
       setRealCalibrations([]);
       return;
@@ -470,23 +450,25 @@ const CGMCalibration = () => {
     }
 
     const calibrationEvents: CalibrationEvent[] = actualBGChecks.map(treatment => {
-      const treatmentTime = getTreatmentTimeMs(treatment);
-      if (!treatmentTime) return null;
-      
-      // Find closest CGM reading within 5 minutes
-      let closestReading: any | null = null;
+      const treatmentTime = getTreatmentMs(treatment);
+
+      const idx = lowerBoundByMs(entriesInRange, getEntryMs, treatmentTime);
+      const candidates = [
+        idx > 0 ? entriesInRange[idx - 1] : null,
+        idx < entriesInRange.length ? entriesInRange[idx] : null,
+      ].filter(Boolean) as NightscoutEntry[];
+
+      let closestReading: NightscoutEntry | null = null;
       let closestDiff = Number.POSITIVE_INFINITY;
-      for (const entry of entriesInRange) {
-        const entryTime = getEntryTimeMs(entry);
-        if (!entryTime) continue;
-        const timeDiff = Math.abs(entryTime - treatmentTime);
-        if (timeDiff <= 5 * 60 * 1000 && timeDiff < closestDiff) {
-          closestDiff = timeDiff;
+      for (const entry of candidates) {
+        const diff = Math.abs(getEntryMs(entry) - treatmentTime);
+        if (diff < closestDiff) {
+          closestDiff = diff;
           closestReading = entry;
         }
       }
 
-      if (!closestReading) return null;
+      if (!closestReading || closestDiff > 5 * 60 * 1000) return null;
 
       const bgCheck = treatment.glucose!;
       const cgmReading = closestReading.sgv;
@@ -500,7 +482,8 @@ const CGMCalibration = () => {
       else accuracy = 'poor';
 
       return {
-        timestamp: treatment.created_at || treatment.timestamp!,
+        timestamp: treatment.created_at,
+        timestampMs: treatmentTime,
         cgmReading,
         bgCheck,
         difference,
@@ -509,12 +492,10 @@ const CGMCalibration = () => {
       };
     }).filter(Boolean) as CalibrationEvent[];
 
-    setRealCalibrations(calibrationEvents.sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    ));
+    setRealCalibrations(calibrationEvents.sort((a, b) => b.timestampMs - a.timestampMs));
   };
 
-  const calculateCGMMetrics = (entriesInRange: any[]) => {
+  const calculateCGMMetrics = (entriesInRange: NightscoutEntry[]) => {
     if (!entriesInRange || entriesInRange.length === 0) {
       setCgmMetrics(null);
       return;
@@ -524,17 +505,11 @@ const CGMCalibration = () => {
     const recentReadings = entriesInRange;
 
     // Calculate sensor age (estimate based on data gaps)
-    const readings = [...entriesInRange]
-      .map((e) => ({ e, t: getEntryTimeMs(e) }))
-      .filter((x) => x.t != null)
-      .sort((a, b) => (a.t as number) - (b.t as number));
-    
-    const firstReading = readings.length ? (readings[0].t as number) : null;
+    const firstReading = entriesInRange.length ? getEntryMs(entriesInRange[0]) : null;
 
     // Prefer explicit sensor insert/change events if present
     const latestSensorEvent = data?.treatments?.filter(isSensorStartEvent)
-      .map(getTreatmentTimeMs)
-      .filter((t): t is number => typeof t === 'number' && Number.isFinite(t))
+      .map(getTreatmentMs)
       .sort((a, b) => b - a)[0];
 
     const sensorAge = latestSensorEvent
@@ -546,8 +521,8 @@ const CGMCalibration = () => {
     // Calculate reliability score based on data consistency
     const last24Cutoff = now.getTime() - 24 * 60 * 60 * 1000;
     const last24Hours = entriesInRange.filter(entry => {
-      const t = getEntryTimeMs(entry);
-      return !!t && t > last24Cutoff;
+      const t = getEntryMs(entry);
+      return t > last24Cutoff;
     });
     
     const expectedReadings = 24 * 12; // Every 5 minutes
@@ -695,7 +670,7 @@ const CGMCalibration = () => {
                       You selected ~{daysNeeded} days, but only ~{dataSpanInfo.spanDays} days are currently loaded.
                     </p>
                     <button
-                      onClick={handleFetchMore}
+                      onClick={safeAsync(handleFetchMore, { label: 'CGMCalibration fetch more data' })}
                       disabled={fetchingMoreData}
                       className="mt-2 inline-flex items-center px-3 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-400 text-white rounded-lg text-sm"
                     >
@@ -738,7 +713,10 @@ const CGMCalibration = () => {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Event Type</label>
                 <select
                   value={sensorEventType}
-                  onChange={(e) => setSensorEventType(e.target.value as any)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (isSensorEventType(next)) setSensorEventType(next);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100"
                 >
                   <option value="CGM Sensor Start">CGM Sensor Start</option>

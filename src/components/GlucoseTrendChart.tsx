@@ -9,7 +9,9 @@ import {
   Title,
   Tooltip,
   Legend,
-  ChartOptions
+  ChartOptions,
+  ChartDataset,
+  TooltipItem
 } from 'chart.js';
 import { format } from 'date-fns';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
@@ -112,7 +114,7 @@ const GlucoseTrendChart: React.FC<GlucoseTrendChartProps> = ({ readings, hours }
     }
 
     // Create datasets for each segment
-    const datasets: any[] = [];
+    const datasets: ChartDataset<'line', (number | null)[]>[] = [];
 
     // Process in-range segments
     segments.inRange.forEach((segment, i) => {
@@ -192,7 +194,7 @@ const GlucoseTrendChart: React.FC<GlucoseTrendChartProps> = ({ readings, hours }
           mode: 'index',
           intersect: false,
           callbacks: {
-            label: function(context: any) {
+            label: function(context: TooltipItem<'line'>) {
               const value = context.parsed.y;
               const formattedValue = unit === 'mmol' ? value.toFixed(1) : Math.round(value);
               return `${context.dataset.label}: ${formattedValue} ${unit === 'mmol' ? 'mmol/L' : 'mg/dL'}`;

@@ -8,6 +8,9 @@ import AdvancedPDFReport from '../components/AdvancedPDFReport';
 import ComprehensivePDFReport from '../components/ComprehensivePDFReport';
 import DataExport from '../components/DataExport';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { runSafeAsync } from '../utils/safeAsync';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 const ExportData: React.FC = () => {
   const { 
@@ -23,6 +26,37 @@ const ExportData: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'comprehensive' | 'advanced' | 'standard' | 'data'>('comprehensive');
 
+  const tabs = [
+    {
+      key: 'comprehensive',
+      name: 'Comprehensive Report',
+      icon: Award,
+      description: '16-page clinical analysis',
+      color: 'text-indigo-600'
+    },
+    {
+      key: 'advanced',
+      name: 'Advanced Analytics',
+      icon: Brain,
+      description: 'AI-powered comprehensive analysis',
+      color: 'text-purple-600'
+    },
+    {
+      key: 'standard',
+      name: 'Standard Reports',
+      icon: FileText,
+      description: 'Professional medical reports',
+      color: 'text-blue-600'
+    },
+    {
+      key: 'data',
+      name: 'Raw Data Export',
+      icon: Database,
+      description: 'CSV and JSON formats',
+      color: 'text-green-600'
+    }
+  ] as const;
+
   // Comprehensive Report time range selection (mirrors Standard Reports UX)
   const [comprehensiveTimeWindow, setComprehensiveTimeWindow] = useState(168); // 7 days
   const [comprehensiveIsCustomRange, setComprehensiveIsCustomRange] = useState(false);
@@ -33,12 +67,39 @@ const ExportData: React.FC = () => {
   const [comprehensiveShowCalendar, setComprehensiveShowCalendar] = useState(false);
   const [comprehensiveFetchingMoreData, setComprehensiveFetchingMoreData] = useState(false);
 
-  const comprehensiveDataSpanInfo = useMemo(() => {
-    if (!data?.entries?.length) return null;
+  const entriesSortedAsc = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => (a?.date ?? 0) - (b?.date ?? 0));
+  }, [data?.entries]);
 
-    const sortedEntries = [...data.entries].sort((a: any, b: any) => (a?.date ?? 0) - (b?.date ?? 0));
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+  const treatmentsSortedAsc = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const comprehensiveSelectedRange = useMemo(() => {
+    if (comprehensiveIsCustomRange) {
+      return {
+        startMs: startOfDay(new Date(comprehensiveCustomDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(comprehensiveCustomDateRange.endDate)).getTime()
+      };
+    }
+
+    const endMs = Date.now();
+    const startMs = endMs - comprehensiveTimeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [
+    comprehensiveIsCustomRange,
+    comprehensiveCustomDateRange.startDate,
+    comprehensiveCustomDateRange.endDate,
+    comprehensiveTimeWindow
+  ]);
+
+  const comprehensiveDataSpanInfo = useMemo(() => {
+    if (!entriesSortedAsc.length) return null;
+
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round(((newestEntry?.date ?? 0) - (oldestEntry?.date ?? 0)) / (1000 * 60 * 60 * 24));
     const spanHours = Math.round(((newestEntry?.date ?? 0) - (oldestEntry?.date ?? 0)) / (1000 * 60 * 60));
 
@@ -47,9 +108,9 @@ const ExportData: React.FC = () => {
       newestDate: new Date(newestEntry.date),
       spanDays,
       spanHours,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
 
   const comprehensiveGetTimeWindowLabel = (hours: number) => {
     if (hours < 24) return `${hours} hours`;
@@ -151,39 +212,14 @@ const ExportData: React.FC = () => {
   };
 
   const comprehensiveFilteredReadings = useMemo(() => {
-    if (!data?.entries?.length) return [];
-    const sortedEntries = [...data.entries].sort((a: any, b: any) => (a?.date ?? 0) - (b?.date ?? 0));
-
-    if (comprehensiveIsCustomRange) {
-      const startTime = startOfDay(new Date(comprehensiveCustomDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(comprehensiveCustomDateRange.endDate)).getTime();
-      return sortedEntries.filter((reading: any) => reading?.date >= startTime && reading?.date <= endTime);
-    }
-
-    const now = Date.now();
-    const cutoffTime = now - comprehensiveTimeWindow * 60 * 60 * 1000;
-    return sortedEntries.filter((reading: any) => reading?.date >= cutoffTime);
-  }, [data?.entries, comprehensiveTimeWindow, comprehensiveIsCustomRange, comprehensiveCustomDateRange]);
+    if (!entriesSortedAsc.length) return [];
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading?.date ?? 0, comprehensiveSelectedRange.startMs, comprehensiveSelectedRange.endMs);
+  }, [entriesSortedAsc, comprehensiveSelectedRange.startMs, comprehensiveSelectedRange.endMs]);
 
   const comprehensiveFilteredTreatments = useMemo(() => {
-    if (!data?.treatments?.length) return [];
-
-    if (comprehensiveIsCustomRange) {
-      const startTime = startOfDay(new Date(comprehensiveCustomDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(comprehensiveCustomDateRange.endDate)).getTime();
-      return data.treatments.filter((treatment: any) => {
-        const treatmentTime = new Date(treatment?.created_at).getTime();
-        return treatmentTime >= startTime && treatmentTime <= endTime;
-      });
-    }
-
-    const now = Date.now();
-    const cutoffTime = now - comprehensiveTimeWindow * 60 * 60 * 1000;
-    return data.treatments.filter((treatment: any) => {
-      const treatmentTime = new Date(treatment?.created_at).getTime();
-      return treatmentTime >= cutoffTime;
-    });
-  }, [data?.treatments, comprehensiveTimeWindow, comprehensiveIsCustomRange, comprehensiveCustomDateRange]);
+    if (!treatmentsSortedAsc.length) return [];
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, comprehensiveSelectedRange.startMs, comprehensiveSelectedRange.endMs);
+  }, [treatmentsSortedAsc, comprehensiveSelectedRange.startMs, comprehensiveSelectedRange.endMs]);
 
   const comprehensiveReportData = useMemo(() => {
     if (!data) return data;
@@ -249,39 +285,10 @@ const ExportData: React.FC = () => {
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg">
         <div className="border-b border-gray-200 dark:border-gray-700">
           <nav className="flex space-x-8 px-6" aria-label="Tabs">
-            {[
-              {
-                key: 'comprehensive',
-                name: 'Comprehensive Report',
-                icon: Award,
-                description: '16-page clinical analysis',
-                color: 'text-indigo-600'
-              },
-              {
-                key: 'advanced',
-                name: 'Advanced Analytics',
-                icon: Brain,
-                description: 'AI-powered comprehensive analysis',
-                color: 'text-purple-600'
-              },
-              {
-                key: 'standard',
-                name: 'Standard Reports',
-                icon: FileText,
-                description: 'Professional medical reports',
-                color: 'text-blue-600'
-              },
-              {
-                key: 'data',
-                name: 'Raw Data Export',
-                icon: Database,
-                description: 'CSV and JSON formats',
-                color: 'text-green-600'
-              }
-            ].map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setActiveTab(tab.key as any)}
+                onClick={() => setActiveTab(tab.key)}
                 className={`py-4 px-2 border-b-2 font-medium text-sm transition-colors duration-200 ${
                   activeTab === tab.key
                     ? 'border-blue-500 text-blue-600 dark:text-blue-400'
@@ -324,10 +331,14 @@ const ExportData: React.FC = () => {
                 <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
                   <select
                     value={comprehensiveIsCustomRange ? 'custom' : comprehensiveTimeWindow.toString()}
-                    onChange={(e) => comprehensiveHandleTimeWindowChange(e.target.value)}
+                    onChange={(e) =>
+                      runSafeAsync(() => comprehensiveHandleTimeWindowChange(e.target.value), {
+                        label: 'ExportData: comprehensiveHandleTimeWindowChange'
+                      })
+                    }
                     className="flex-1 rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
                   >
-                    {comprehensiveGetAvailableTimeWindows().map((option: any) => (
+                    {comprehensiveGetAvailableTimeWindows().map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
@@ -359,17 +370,22 @@ const ExportData: React.FC = () => {
                       </div>
                       {!comprehensiveFetchingMoreData && (
                         <button
-                          onClick={async () => {
-                            const requestedDays = Math.ceil(comprehensiveTimeWindow / 24);
-                            setComprehensiveFetchingMoreData(true);
-                            try {
-                              await fetchDataForDays(requestedDays);
-                            } catch (err) {
-                              console.error('Failed to fetch more data:', err);
-                            } finally {
-                              setComprehensiveFetchingMoreData(false);
-                            }
-                          }}
+                          onClick={() =>
+                            runSafeAsync(
+                              async () => {
+                                const requestedDays = Math.ceil(comprehensiveTimeWindow / 24);
+                                setComprehensiveFetchingMoreData(true);
+                                try {
+                                  await fetchDataForDays(requestedDays);
+                                } catch (err) {
+                                  console.error('Failed to fetch more data:', err);
+                                } finally {
+                                  setComprehensiveFetchingMoreData(false);
+                                }
+                              },
+                              { label: 'ExportData: fetchMoreData' }
+                            )
+                          }
                           className="ml-2 px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded flex items-center transition-colors duration-200"
                         >
                           <RefreshCw className="w-3 h-3 mr-1" />
@@ -433,16 +449,21 @@ const ExportData: React.FC = () => {
                       </button>
                       {comprehensiveDataSpanInfo?.spanDays != null && comprehensiveDataSpanInfo.spanDays < 90 && (
                         <button
-                          onClick={async () => {
-                            setComprehensiveFetchingMoreData(true);
-                            try {
-                              await fetchDataForDays(90);
-                            } catch (err) {
-                              console.error('Failed to fetch 3 months of data:', err);
-                            } finally {
-                              setComprehensiveFetchingMoreData(false);
-                            }
-                          }}
+                          onClick={() =>
+                            runSafeAsync(
+                              async () => {
+                                setComprehensiveFetchingMoreData(true);
+                                try {
+                                  await fetchDataForDays(90);
+                                } catch (err) {
+                                  console.error('Failed to fetch 3 months of data:', err);
+                                } finally {
+                                  setComprehensiveFetchingMoreData(false);
+                                }
+                              },
+                              { label: 'ExportData: fetch3Months' }
+                            )
+                          }
                           disabled={comprehensiveFetchingMoreData}
                           className="ml-auto px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded flex items-center transition-colors duration-200"
                         >

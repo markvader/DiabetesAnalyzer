@@ -6,6 +6,8 @@ import { Calendar, Clock } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useDesignMode } from '../contexts/DesignModeContext';
+import { runSafeAsync } from '../utils/safeAsync';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { 
   Container, 
   Paper, 
@@ -39,31 +41,32 @@ const A1C = () => {
   const [lastTimeWindow, setLastTimeWindow] = useState<number | null>(null);
   const [lastCustomRange, setLastCustomRange] = useState<{startDate: string, endDate: string} | null>(null);
 
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const selectedRange = React.useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
+    }
+
+    const endMs = Date.now();
+    const startMs = endMs - timeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [isCustomRange, customDateRange.startDate, customDateRange.endDate, timeWindow]);
+
   // Get filtered readings based on time selection
   const filteredReadings = React.useMemo(() => {
-    if (!data?.entries?.length) {
+    if (!entriesSortedAsc.length) {
       return [];
     }
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
-    }
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Calculate average BG for the filtered readings
   const averageBG = React.useMemo(() => {
@@ -162,7 +165,7 @@ const A1C = () => {
       // Fetch more data if needed for longer time periods
       const daysNeeded = Math.ceil(newTimeWindow / 24) + 1;
       if (daysNeeded > 7) {
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'A1C fetch more data for time window' });
       }
     }
   };
@@ -191,7 +194,7 @@ const A1C = () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     const daysToFetch = Math.max(diffDays + 7, 14);
-    fetchDataForDays(Math.min(daysToFetch, 90));
+    runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'A1C fetch data for custom range' });
     
     setIsCustomRange(true);
     setShowCalendar(false);
@@ -199,20 +202,19 @@ const A1C = () => {
 
   // Calculate available data span
   const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
+    if (!entriesSortedAsc.length) return null;
     
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
     
     return {
       oldestDate: new Date(oldestEntry.date),
       newestDate: new Date(newestEntry.date),
       spanDays,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -333,7 +335,7 @@ const A1C = () => {
                 handleCustomDateSubmit();
               } else {
                 const daysNeeded = Math.ceil(timeWindow / 24) + 1;
-                fetchDataForDays(Math.max(daysNeeded, 14));
+                runSafeAsync(() => fetchDataForDays(Math.max(daysNeeded, 14)), { label: 'A1C refresh fetch data' });
               }
             }}
             className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"

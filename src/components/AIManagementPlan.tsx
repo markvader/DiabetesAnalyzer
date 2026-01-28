@@ -17,10 +17,11 @@ import {
   alpha
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 
 interface AIManagementPlanProps {
-  readings: any[];
-  treatments: any[];
+  readings: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
   manualRefresh?: boolean;
 }
 

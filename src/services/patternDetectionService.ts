@@ -1,7 +1,57 @@
 import { toMmol } from '../utils/glucoseUtils';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+
+type MealTreatmentType = 'combined' | 'carbAnnouncement' | 'mealBolus';
+
+type MealTreatment = NightscoutTreatment & {
+  type: MealTreatmentType;
+  correspondingInsulin?: NightscoutTreatment | null;
+  correspondingCarb?: NightscoutTreatment | null;
+  effectiveInsulin?: number;
+  insulinSource?: 'direct' | 'subsequent' | 'corresponding';
+  subsequentInsulinCount?: number;
+};
+
+type MealTypesCount = {
+  carbAnnouncements: number;
+  mealBolus: number;
+  combinedMeals: number;
+};
+
+type MealPatternSummary = {
+  timeOfDay: string;
+  avgCarbIntake: number;
+  avgInsulinIntake: number;
+  avgGlucoseResponse: number;
+  insulinSensitivity: number;
+  mealCount: number;
+  mealTypes: MealTypesCount;
+  carbAnnouncementStats?: {
+    count: number;
+    avgInsulinAfterAnnouncement: number;
+    enhancedTrackingCount: number;
+  };
+};
+
+type MealCluster = {
+  carbs: number;
+  insulin: number;
+  originalInsulin: number;
+  insulinSource: 'direct' | 'subsequent' | 'corresponding';
+  maxGlucose: number;
+  carbInsulinRatio: number;
+  time: number;
+  type: MealTreatmentType;
+  eventType: string;
+  hasCarbs: boolean;
+  hasInsulin: boolean;
+  isEnhancedInsulinTracking: boolean;
+  cluster: 0 | 1 | 2;
+};
 
 // Update the predictGlucose function
-export const predictGlucose = async (readings: any[]): Promise<number[]> => {
+export const predictGlucose = async (readings: Array<Pick<NightscoutEntry, 'sgv'>>): Promise<number[]> => {
   if (!readings || readings.length < 24) return [];
 
   const lookback = 12; // Use last hour of readings
@@ -47,7 +97,7 @@ export const predictGlucose = async (readings: any[]): Promise<number[]> => {
 };
 
 // Detect glucose patterns throughout the day
-export const detectGlucosePatterns = (entries: any[]): any[] => {
+export const detectGlucosePatterns = (entries: NightscoutEntry[]) => {
   const timeSlots = [
     { name: 'Early Morning', start: 4, end: 8 },
     { name: 'Morning', start: 8, end: 12 },
@@ -98,7 +148,7 @@ export const detectGlucosePatterns = (entries: any[]): any[] => {
 };
 
 // Analyze meal patterns with support for both Carb Announcements and Meal Bolus
-export const analyzeMealPatterns = (entries: any[], treatments: any[]): any[] => {
+export const analyzeMealPatterns = (entries: NightscoutEntry[], treatments: NightscoutTreatment[]): MealPatternSummary[] => {
   const timeSlots = [
     { name: 'Breakfast', start: 5, end: 11 }, // Extended breakfast window
     { name: 'Lunch', start: 10, end: 16 },    // Overlapping lunch window
@@ -141,10 +191,10 @@ export const analyzeMealPatterns = (entries: any[], treatments: any[]): any[] =>
     const mealsWithEnhancedInsulin = slotMeals.map(meal => {
       if (meal.type === 'carbAnnouncement') {
         // For carb announcements, look for subsequent insulin doses
-        const carbTime = new Date(meal.created_at || meal.timestamp || meal.mills).getTime();
+            const carbTime = getTreatmentMs(meal);
         
         const subsequentInsulin = treatments.filter(t => {
-          const treatmentTime = new Date(t.created_at || t.timestamp || t.mills).getTime();
+              const treatmentTime = getTreatmentMs(t);
           const timeDiff = treatmentTime - carbTime;
           
           // Look for insulin treatments 0-120 minutes after carb announcement
@@ -217,7 +267,7 @@ export const analyzeMealPatterns = (entries: any[], treatments: any[]): any[] =>
 
     // Calculate average glucose response using enhanced meal data
     const glucoseResponses = mealsWithEnhancedInsulin.map(meal => {
-      const mealTime = new Date(meal.created_at || meal.timestamp || meal.mills).getTime();
+          const mealTime = getTreatmentMs(meal);
       const postMealReadings = entries.filter(entry => {
         const readingTime = new Date(entry.date).getTime();
         return readingTime > mealTime && readingTime <= mealTime + 2 * 60 * 60 * 1000; // 2 hours post-meal
@@ -284,19 +334,19 @@ export const analyzeMealPatterns = (entries: any[], treatments: any[]): any[] =>
 };
 
 // Helper function to find meal-related treatments
-const findMealTreatments = (treatments: any[], startHour: number, endHour: number): any[] => {
-  const mealTreatments: any[] = [];
+const findMealTreatments = (treatments: NightscoutTreatment[], startHour: number, endHour: number): MealTreatment[] => {
+  const mealTreatments: MealTreatment[] = [];
   
   // Filter treatments by time window
   const timeFilteredTreatments = treatments.filter(treatment => {
-    const hour = new Date(treatment.created_at || treatment.timestamp || treatment.mills).getHours();
+    const hour = new Date(getTreatmentMs(treatment)).getHours();
     return startHour <= hour && hour < endHour;
   });
 
   console.log(`🍽️ Analyzing ${timeFilteredTreatments.length} treatments between ${startHour}:00-${endHour}:00`);
 
   // More comprehensive detection of meal-related treatments
-  const identifyMealTreatment = (treatment: any) => {
+  const identifyMealTreatment = (treatment: NightscoutTreatment) => {
     const eventType = (treatment.eventType || '').toLowerCase();
     const notes = (treatment.notes || '').toLowerCase();
     const hasCarbs = treatment.carbs && treatment.carbs > 0;
@@ -360,15 +410,15 @@ const findMealTreatments = (treatments: any[], startHour: number, endHour: numbe
   };
 
   // Group treatments by time proximity (within 45 minutes instead of 30 for better grouping)
-  const treatmentGroups: any[][] = [];
+  const treatmentGroups: NightscoutTreatment[][] = [];
   
   timeFilteredTreatments.forEach(treatment => {
-    const treatmentTime = new Date(treatment.created_at || treatment.timestamp || treatment.mills).getTime();
+    const treatmentTime = getTreatmentMs(treatment);
     
     // Find existing group within 45 minutes
     const existingGroup = treatmentGroups.find(group => {
       return group.some(t => {
-        const groupTime = new Date(t.created_at || t.timestamp || t.mills).getTime();
+        const groupTime = getTreatmentMs(t);
         return Math.abs(treatmentTime - groupTime) <= 45 * 60 * 1000; // 45 minutes
       });
     });
@@ -473,14 +523,14 @@ const findMealTreatments = (treatments: any[], startHour: number, endHour: numbe
 };
 
 // Identify meal clusters with enhanced insulin tracking for carb announcements
-export const identifyMealClusters = (treatments: any[], entries: any[]): any[] => {
+export const identifyMealClusters = (treatments: NightscoutTreatment[], entries: NightscoutEntry[]): MealCluster[] => {
   // Get all meal treatments using the same logic as analyzeMealPatterns
   const allMealTreatments = findMealTreatments(treatments, 0, 24);
   
   console.log('🔍 Analyzing meal clusters with enhanced insulin tracking...');
   
   const meals = allMealTreatments.map(treatment => {
-    const mealTime = new Date(treatment.created_at || treatment.timestamp || treatment.mills).getTime();
+    const mealTime = getTreatmentMs(treatment);
     
     // Find glucose response
     const postMealReadings = entries.filter(entry => {
@@ -499,10 +549,10 @@ export const identifyMealClusters = (treatments: any[], entries: any[]): any[] =
     if (treatment.type === 'carbAnnouncement') {
       // For carb announcements, we want to capture ALL insulin given after the announcement
       // Look for insulin treatments within 2 hours after the carb announcement
-      const carbTime = new Date(treatment.created_at || treatment.timestamp || treatment.mills).getTime();
+      const carbTime = getTreatmentMs(treatment);
       
       const subsequentInsulin = treatments.filter(t => {
-        const treatmentTime = new Date(t.created_at || t.timestamp || t.mills).getTime();
+        const treatmentTime = getTreatmentMs(t);
         const timeDiff = treatmentTime - carbTime;
         
         // Look for insulin treatments 0-120 minutes after carb announcement
@@ -528,7 +578,7 @@ export const identifyMealClusters = (treatments: any[], entries: any[]): any[] =
           subsequentInsulinDoses: subsequentInsulin.map(i => ({ 
             insulin: i.insulin, 
             eventType: i.eventType,
-            timeDiff: Math.round((new Date(i.created_at || i.timestamp || i.mills).getTime() - carbTime) / (60 * 1000))
+            timeDiff: Math.round((getTreatmentMs(i) - carbTime) / (60 * 1000))
           })),
           totalEffectiveInsulin: effectiveInsulin
         });
@@ -547,7 +597,7 @@ export const identifyMealClusters = (treatments: any[], entries: any[]): any[] =
       insulinSource,
       maxGlucose,
       carbInsulinRatio,
-      time: new Date(treatment.created_at || treatment.timestamp || treatment.mills).getHours(),
+      time: new Date(mealTime).getHours(),
       type: treatment.type,
       eventType: treatment.eventType,
       hasCarbs: (treatment.carbs && treatment.carbs > 0),
@@ -558,7 +608,7 @@ export const identifyMealClusters = (treatments: any[], entries: any[]): any[] =
   });
 
   // Enhanced clustering based on carb amount, insulin presence, and meal type
-  const assignCluster = (meal: any) => {
+  const assignCluster = (meal: Pick<MealCluster, 'carbs'>): 0 | 1 | 2 => {
     // Cluster 0: Small meals/snacks (<=30g carbs)
     if (meal.carbs <= 30) return 0;
     // Cluster 1: Medium meals (31-60g carbs)
@@ -567,7 +617,7 @@ export const identifyMealClusters = (treatments: any[], entries: any[]): any[] =
     return 2;
   };
 
-  const clusteredMeals = meals.map(meal => ({
+  const clusteredMeals: MealCluster[] = meals.map(meal => ({
     ...meal,
     cluster: assignCluster(meal)
   }));

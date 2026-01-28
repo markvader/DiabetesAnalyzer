@@ -1,12 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from 'react';
 import { fetchData } from '../services/nightscoutService';
+import type { NightscoutFetchResult } from '../types/nightscout';
+import { runSafeAsync } from '../utils/safeAsync';
+import { formatNightscoutErrorForUser } from '../utils/nightscoutErrors';
 
-interface NightscoutData {
-  entries: any[];
-  treatments: any[];
-  profile: any[];
-  deviceStatus: any[];
-}
+type NightscoutData = Omit<NightscoutFetchResult, 'detectedApiVersion'>;
 
 interface NightscoutContextType {
   url: string;
@@ -425,8 +423,11 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
       
-      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch data';
-      
+      const errorMessage = formatNightscoutErrorForUser(err, {
+        url,
+        apiVersion: detectedApiVersion
+      });
+
       setError(errorMessage);
       if (!lastSuccessfulFetchRef.current) {
         setData(null);
@@ -481,7 +482,7 @@ export const NightscoutProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (refreshCounter > 0) {
       console.log(`🔄 Refresh counter changed to ${refreshCounter}, fetching data...`);
-      fetchDataForDays(analysisPeriod); // Fetch based on analysis period setting for a forced refresh
+      runSafeAsync(() => fetchDataForDays(analysisPeriod), { label: 'Nightscout forced refresh' });
     }
   }, [refreshCounter, fetchDataForDays]);
 

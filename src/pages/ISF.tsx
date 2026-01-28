@@ -7,11 +7,14 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { toMgdl, toMmol } from '../utils/glucoseUtils';
+import { runSafeAsync } from '../utils/safeAsync';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 const ISF = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
   const { getUnitLabel, unit } = useGlucoseFormatting();
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
@@ -28,6 +31,29 @@ const ISF = () => {
   });
   const [isCustomRange, setIsCustomRange] = useState(false);
 
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const selectedRange = React.useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
+    }
+
+    const endMs = Date.now();
+    const startMs = endMs - timeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [isCustomRange, customDateRange.startDate, customDateRange.endDate, timeWindow]);
+
   // Update timeWindow when analysisPeriod changes
   useEffect(() => {
     if (!isCustomRange) {
@@ -41,60 +67,26 @@ const ISF = () => {
 
   // Fetch data when analysisPeriod changes
   useEffect(() => {
-    fetchDataForDays(Math.max(analysisPeriod, 7)); // Ensure we have at least 7 days of data
+    runSafeAsync(() => fetchDataForDays(Math.max(analysisPeriod, 7)), { label: 'ISF initial fetch' });
   }, [analysisPeriod, fetchDataForDays]);
 
   // Get filtered readings based on time selection
   const filteredReadings = React.useMemo(() => {
-    if (!data?.entries?.length) {
+    if (!entriesSortedAsc.length) {
       return [];
     }
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
-    }
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Get filtered treatments based on time selection
   const filteredTreatments = React.useMemo(() => {
-    if (!data?.treatments?.length) {
+    if (!treatmentsSortedAsc.length) {
       return [];
     }
 
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= startTime && treatmentTime <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= cutoffTime;
-      });
-    }
-  }, [data?.treatments, timeWindow, isCustomRange, customDateRange]);
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Create filtered data object for analysis
   const filteredData = React.useMemo(() => {
@@ -133,7 +125,7 @@ const ISF = () => {
       }
     };
 
-    performAnalysis();
+    runSafeAsync(() => performAnalysis(), { label: 'ISF performAnalysis effect' });
   }, [filteredData, manualRefresh, hasInitialLoad, unit]);
 
   // Convert ISF values to current unit
@@ -149,12 +141,15 @@ const ISF = () => {
       return value;
     };
 
-    const convertIsfArray = (isfArray: any[]) => {
-      if (!isfArray) return [];
-      return isfArray.map(item => ({
-        ...item,
-        rate: convertIsfValue(item.rate)
-      }));
+    type IsfLike = Record<string, unknown> & { rate?: unknown };
+
+    const convertIsfArray = (isfArray: unknown): IsfLike[] => {
+      if (!Array.isArray(isfArray)) return [];
+      return isfArray.map((raw): IsfLike => {
+        const item: IsfLike = raw && typeof raw === 'object' ? (raw as IsfLike) : {};
+        const convertedRate = typeof item.rate === 'number' ? convertIsfValue(item.rate) : item.rate;
+        return { ...item, rate: convertedRate };
+      });
     };
 
     return {
@@ -223,7 +218,7 @@ const ISF = () => {
       // Fetch more data if needed for longer time periods
       const daysNeeded = Math.ceil(newTimeWindow / 24) + 1;
       if (daysNeeded > analysisPeriod) {
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'ISF fetch more data for time window' });
       }
     }
   };
@@ -246,7 +241,7 @@ const ISF = () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     const daysToFetch = Math.max(diffDays + 7, analysisPeriod);
-    fetchDataForDays(Math.min(daysToFetch, 90));
+    runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'ISF fetch data for custom range' });
     
     // Clear existing analysis when changing date range
     setAnalysisResults(null);
@@ -257,20 +252,19 @@ const ISF = () => {
 
   // Calculate available data span
   const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
+    if (!entriesSortedAsc.length) return null;
     
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
     
     return {
       oldestDate: new Date(oldestEntry.date),
       newestDate: new Date(newestEntry.date),
       spanDays,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
 
   const handleRefreshAI = () => {
     setManualRefresh(true);
@@ -338,7 +332,7 @@ const ISF = () => {
                 handleCustomDateSubmit();
               } else {
                 const daysNeeded = Math.ceil(timeWindow / 24) + 1;
-                fetchDataForDays(Math.max(daysNeeded, analysisPeriod));
+                runSafeAsync(() => fetchDataForDays(Math.max(daysNeeded, analysisPeriod)), { label: 'ISF refresh fetch data' });
               }
             }}
             className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"

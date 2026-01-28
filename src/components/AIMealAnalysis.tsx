@@ -17,20 +17,28 @@ import {
   useTheme,
   alpha
 } from '@mui/material';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 
 interface AIMealAnalysisProps {
-  readings: any[];
-  treatments: any[];
+  readings: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
   manualRefresh?: boolean;
 }
+
+type MealDetailsLike = Record<string, unknown> & {
+  executiveSummary?: unknown;
+  safetyFlags?: unknown;
+  actionPlan7Days?: unknown;
+  dataQualityNotes?: unknown;
+};
 
 const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, manualRefresh = false }) => {
   const { isModern, isPremium } = useDesignMode();
   const theme = useTheme();
   const [insights, setInsights] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<string[]>([]);
-  const [mealTiming, setMealTiming] = useState<any[]>([]);
-  const [details, setDetails] = useState<any>(null);
+  const [mealTiming, setMealTiming] = useState<unknown[]>([]);
+  const [details, setDetails] = useState<unknown | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
@@ -67,7 +75,7 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
         setInsights(result.insights);
         setRecommendations(result.recommendations);
         setMealTiming(result.mealTiming);
-        setDetails((result as any).details ?? null);
+        setDetails((result as { details?: unknown }).details ?? null);
         setLastAnalyzedData(dataHash);
         setInitialLoadDone(true);
       } else {
@@ -346,6 +354,8 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
     );
   }
 
+  const detailsLike: MealDetailsLike | null = details && typeof details === 'object' ? (details as MealDetailsLike) : null;
+
   if (insights.length === 0 && recommendations.length === 0) {
     return null;
   }
@@ -536,7 +546,7 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
             )}
           </Box>
 
-          {details && (
+          {detailsLike && (
             <Paper
               elevation={0}
               sx={{
@@ -554,19 +564,21 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
                 </Typography>
               </Box>
 
-              {details.executiveSummary && (
+              {typeof detailsLike.executiveSummary === 'string' && detailsLike.executiveSummary.trim().length > 0 && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2, lineHeight: 1.6 }}>
-                  {details.executiveSummary}
+                  {detailsLike.executiveSummary}
                 </Typography>
               )}
 
-              {Array.isArray(details.safetyFlags) && details.safetyFlags.length > 0 && (
+              {Array.isArray(detailsLike.safetyFlags) && detailsLike.safetyFlags.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
                     Safety flags
                   </Typography>
                   <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
-                    {details.safetyFlags.map((item: string, idx: number) => (
+                    {detailsLike.safetyFlags
+                      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                      .map((item, idx: number) => (
                       <ListItem key={idx} sx={{ py: 0.25 }}>
                         <ListItemIcon sx={{ minWidth: 20 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.warning.main }} />
@@ -578,13 +590,15 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
                 </Box>
               )}
 
-              {Array.isArray(details.actionPlan7Days) && details.actionPlan7Days.length > 0 && (
+              {Array.isArray(detailsLike.actionPlan7Days) && detailsLike.actionPlan7Days.length > 0 && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
                     7-day action plan
                   </Typography>
                   <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
-                    {details.actionPlan7Days.map((item: string, idx: number) => (
+                    {detailsLike.actionPlan7Days
+                      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                      .map((item, idx: number) => (
                       <ListItem key={idx} sx={{ py: 0.25 }}>
                         <ListItemIcon sx={{ minWidth: 20 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.text.secondary }} />
@@ -596,13 +610,15 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
                 </Box>
               )}
 
-              {Array.isArray(details.dataQualityNotes) && details.dataQualityNotes.length > 0 && (
+              {Array.isArray(detailsLike.dataQualityNotes) && detailsLike.dataQualityNotes.length > 0 && (
                 <Box>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 1 }}>
                     Data quality notes
                   </Typography>
                   <List dense sx={{ '& .MuiListItem-root': { px: 0 } }}>
-                    {details.dataQualityNotes.map((item: string, idx: number) => (
+                    {detailsLike.dataQualityNotes
+                      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                      .map((item, idx: number) => (
                       <ListItem key={idx} sx={{ py: 0.25 }}>
                         <ListItemIcon sx={{ minWidth: 20 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', background: theme.palette.divider }} />

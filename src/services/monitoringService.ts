@@ -11,9 +11,13 @@ interface SystemEvent {
   id: string;
   timestamp: number;
   type: 'refresh' | 'timeSelection' | 'dataFetch' | 'error' | 'unresponsive';
-  details: any;
+  details: Record<string, unknown>;
   duration?: number;
   resolved?: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 interface WeatherData {
@@ -72,7 +76,7 @@ class MonitoringService {
   }
 
   // System event logging
-  logSystemEvent(type: SystemEvent['type'], details: any, duration?: number) {
+  logSystemEvent(type: SystemEvent['type'], details: SystemEvent['details'], duration?: number) {
     const event: SystemEvent = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
@@ -249,7 +253,7 @@ class MonitoringService {
     };
   }
 
-  private generateDetailedFindings(analysis: any) {
+  private generateDetailedFindings(analysis: ReturnType<MonitoringService['analyzePerformanceForPeriod']>) {
     const findings = [];
     
     // Analyze refresh patterns
@@ -296,7 +300,7 @@ class MonitoringService {
     return findings;
   }
 
-  private generateRecommendations(analysis: any) {
+  private generateRecommendations(analysis: ReturnType<MonitoringService['analyzePerformanceForPeriod']>) {
     const recommendations = [];
     
     if (analysis.summary.timeSelectionIssues > 0) {
@@ -407,7 +411,7 @@ class MonitoringService {
 
     // Time selection issues
     const timeSelectionIssues = events.filter(e => 
-      e.type === 'unresponsive' && e.details.action === 'timeWindowChange'
+      e.type === 'unresponsive' && isRecord(e.details) && e.details.action === 'timeWindowChange'
     );
 
     if (timeSelectionIssues.length > 0) {
@@ -428,7 +432,7 @@ class MonitoringService {
 
     // Multiple day selection failures
     const multiDayFailures = events.filter(e => 
-      e.type === 'error' && e.details.timeWindow > 336
+      e.type === 'error' && isRecord(e.details) && typeof e.details.timeWindow === 'number' && e.details.timeWindow > 336
     );
 
     if (multiDayFailures.length > 0) {

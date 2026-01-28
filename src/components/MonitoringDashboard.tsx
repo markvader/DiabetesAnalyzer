@@ -3,15 +3,61 @@ import { monitoringService } from '../services/monitoringService';
 import { Activity, AlertTriangle, Clock, TrendingUp, Download, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 
+interface MonitoringFinding {
+  category: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  description: string;
+  impact?: string;
+}
+
+interface MonitoringRecommendation {
+  priority: 'high' | 'medium' | 'low';
+  category: string;
+  issue: string;
+  solution: string;
+  implementation: string;
+}
+
+interface MonitoringReproductionStep {
+  issue: string;
+  steps: string[];
+  expectedBehavior: string;
+  actualBehavior: string;
+  frequency: string;
+}
+
+interface MonitoringWeatherEvent {
+  timestamp: string;
+  conditions: string;
+  temperature: number;
+  humidity: number;
+  concurrentIssues: number;
+}
+
+interface MonitoringReport {
+  period: { start: string; end: string; days: number };
+  summary: {
+    totalInteractions: number;
+    successRate: number;
+    averageResponseTime: number;
+    unresponsiveCount: number;
+  };
+  detailedFindings: MonitoringFinding[];
+  recommendations: MonitoringRecommendation[];
+  reproductionSteps: MonitoringReproductionStep[];
+  weatherCorrelations: null | { weatherEvents: MonitoringWeatherEvent[] };
+  performanceMetrics: null | { totalOperations: number; averageDuration: number; successRate: number };
+}
+
 const MonitoringDashboard: React.FC = () => {
-  const [report, setReport] = useState<any>(null);
+  const [report, setReport] = useState<MonitoringReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState(7);
 
   const generateReport = async () => {
     setLoading(true);
     try {
-      const newReport = monitoringService.generateComprehensiveReport(selectedPeriod);
+      const newReport = monitoringService.generateComprehensiveReport(selectedPeriod) as unknown as MonitoringReport;
       setReport(newReport);
     } catch (error) {
       console.error('Failed to generate report:', error);
@@ -158,7 +204,7 @@ const MonitoringDashboard: React.FC = () => {
           Detailed Findings
         </h3>
         <div className="space-y-4">
-          {report.detailedFindings.map((finding: any, index: number) => (
+          {report.detailedFindings.map((finding: MonitoringFinding, index: number) => (
             <div
               key={index}
               className={`p-4 rounded-lg border-l-4 ${
@@ -204,7 +250,7 @@ const MonitoringDashboard: React.FC = () => {
           Recommended Solutions
         </h3>
         <div className="space-y-4">
-          {report.recommendations.map((rec: any, index: number) => (
+          {report.recommendations.map((rec: MonitoringRecommendation, index: number) => (
             <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <div className="flex justify-between items-start mb-2">
                 <h4 className="font-medium text-gray-900 dark:text-gray-100">
@@ -238,7 +284,7 @@ const MonitoringDashboard: React.FC = () => {
             Issue Reproduction Steps
           </h3>
           <div className="space-y-6">
-            {report.reproductionSteps.map((issue: any, index: number) => (
+            {report.reproductionSteps.map((issue: MonitoringReproductionStep, index: number) => (
               <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                 <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">
                   {issue.issue}
@@ -294,7 +340,7 @@ const MonitoringDashboard: React.FC = () => {
             Weather Pattern Analysis
           </h3>
           <div className="space-y-4">
-            {report.weatherCorrelations.weatherEvents.map((event: any, index: number) => (
+            {report.weatherCorrelations.weatherEvents.map((event: MonitoringWeatherEvent, index: number) => (
               <div key={index} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
                 <div>
                   <p className="font-medium text-gray-900 dark:text-gray-100">

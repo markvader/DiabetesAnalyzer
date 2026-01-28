@@ -296,8 +296,23 @@ const darkTheme: ThemeOptions = {
     '0px 20px 40px rgba(0, 0, 0, 0.8)',
     '0px 25px 50px rgba(0, 0, 0, 0.9)',
     '0px 30px 60px rgba(0, 0, 0, 1)',
-    // ... continuing shadow array similar to light theme but darker
-  ] as any,
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)',
+    '0px 30px 60px rgba(0, 0, 0, 1)'
+  ],
   components: {
     ...lightTheme.components,
     MuiCssBaseline: {

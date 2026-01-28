@@ -7,6 +7,7 @@ import { Line } from 'react-chartjs-2';
 import { format, addMinutes } from 'date-fns';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { runSafeAsync } from '../utils/safeAsync';
 
 const TrendAnalysis = () => {
   const { data, loading, error } = useNightscout();
@@ -43,7 +44,7 @@ const TrendAnalysis = () => {
       }
     };
 
-    fetchPredictions();
+  runSafeAsync(() => fetchPredictions(), { label: 'TrendAnalysis: fetchPredictions' });
 
     return () => {
       isMounted = false;

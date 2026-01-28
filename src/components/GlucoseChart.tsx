@@ -14,7 +14,11 @@ import {
   Title,
   Tooltip,
   Legend,
-  ChartOptions
+  ChartOptions,
+  ChartDataset,
+  LegendItem,
+  TooltipItem,
+  Plugin
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
@@ -49,15 +53,22 @@ interface Treatment {
   created_at: string;
   eventType?: string;
   insulin?: number;
+  units?: number;
+  amount?: number;
   carbs?: number;
+  carbohydrates?: number;
+  glucose?: number;
+  cob?: number;
   notes?: string;
   enteredBy?: string;
   absolute?: number;
   rate?: number;
   duration?: number;
   percent?: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }
+
+type MixedChartType = 'line' | 'bar' | 'scatter';
 
 interface GlucoseChartProps {
   readings: GlucoseReading[];
@@ -96,7 +107,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
       const treatmentTime = new Date(t.created_at).getTime();
       
       // Check for any insulin delivery (be flexible about field names)
-      const insulinValue = t.insulin || (t as any).units || (t as any).amount;
+      const insulinValue = t.insulin || t.units || t.amount;
       if (insulinValue && insulinValue > 0) {
         // For SMBs, find closest glucose reading for positioning
         const isSMB = t.notes?.includes('SMB') || 
@@ -127,7 +138,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
       }
       
       // Check for carbs (be flexible about field names)
-      const carbValue = t.carbs || (t as any).carbohydrates || (t as any).glucose;
+      const carbValue = t.carbs || t.carbohydrates || t.glucose;
       if (carbValue && carbValue > 0) {
         carbBoluses.push({
           x: treatmentTime,
@@ -225,7 +236,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
     const sortedReadings = [...readings].sort((a, b) => a.date - b.date);
     const ranges = getCurrentGlucoseRanges();
 
-    const datasets: any[] = [];
+    const datasets: ChartDataset[] = [];
 
     // Create continuous segments for each range
     let currentSegment: { type: 'inRange' | 'high' | 'low' | null; data: { x: number; y: number }[] } = {
@@ -313,7 +324,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
         legend: {
           position: 'top' as const,
           labels: {
-            filter: (item: any) => !item.text.includes('(continued)'),
+            filter: (item: LegendItem) => !item.text.includes('(continued)'),
             color: isDark ? '#e5e7eb' : '#111827'
           }
         },
@@ -326,10 +337,10 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
           intersect: false,
           mode: 'index',
           callbacks: {
-            label: function(context: any) {
+            label: function(context: TooltipItem<MixedChartType>) {
               const value = context.parsed.y;
               const dataPoint = context.dataset.data[context.dataIndex];
-              const treatment = dataPoint?.treatment;
+              const treatment = (dataPoint as unknown as { treatment?: Treatment })?.treatment;
 
               if (context.dataset.label === 'SMBs') {
                 const insulinAmount = treatment?.insulin || treatment?.units || treatment?.amount || 0;
@@ -441,7 +452,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
     
     return {
       id: 'targetRange',
-      beforeDraw(chart: any) {
+      beforeDraw(chart: ChartJS<MixedChartType>) {
         const { ctx, chartArea, scales } = chart;
         
         const highY = scales.y.getPixelForValue(ranges.HIGH_THRESHOLD);
@@ -455,7 +466,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
         ctx.fillStyle = colors.LOW_BG;
         ctx.fillRect(chartArea.left, lowY, chartArea.width, chartArea.bottom - lowY);
       }
-    };
+    } satisfies Plugin<MixedChartType>;
   }, [colors, getCurrentGlucoseRanges, unit]);
   
   // Premium Design with Advanced Effects

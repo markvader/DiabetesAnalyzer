@@ -2,6 +2,7 @@ import axios from 'axios';
 import SunCalc from 'suncalc';
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
+import type { NightscoutEntry } from '../types/nightscout';
 
 interface WeatherData {
   temp: number;
@@ -15,7 +16,7 @@ interface Location {
   longitude: number;
 }
 
-export const analyzeWeatherImpact = async (readings: any[], location: Location) => {
+export const analyzeWeatherImpact = async (readings: NightscoutEntry[], location: Location) => {
   // Check if API key exists before attempting to fetch weather data
   if (!import.meta.env.VITE_OPENWEATHER_API_KEY) {
     console.warn('OpenWeather API key not found. Weather analysis will be skipped.');
@@ -93,7 +94,7 @@ const isTimeInRange = (timestamp: number, start: Date, end: Date): boolean => {
   return hours >= startHours && hours < endHours;
 };
 
-const calculateStats = (readings: any[]) => {
+const calculateStats = (readings: NightscoutEntry[]) => {
   if (!readings.length) return null;
   
   const values = readings.map(r => r.sgv); // Keep in original mg/dL
@@ -107,7 +108,7 @@ const calculateStats = (readings: any[]) => {
   };
 };
 
-const calculateCorrelation = (readings: any[], weatherValue: number): number => {
+const calculateCorrelation = (readings: NightscoutEntry[], weatherValue: number): number => {
   if (!readings.length || typeof weatherValue !== 'number') return 0;
   
   const glucoseValues = readings.map(r => toMmol(r.sgv));

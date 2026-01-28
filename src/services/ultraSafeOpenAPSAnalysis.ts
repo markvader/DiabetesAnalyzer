@@ -2,6 +2,43 @@
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
 import { aiAnalysisService } from './aiAnalysisService';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+
+type SafetyChecks = {
+  hypoglycemiaHistory: boolean;
+  pediatricPatient: boolean;
+  dataQuality: 'high' | 'medium' | 'low';
+  variabilityRisk: 'low' | 'medium' | 'high';
+};
+
+type TimeInRangeStats = {
+  low: number;
+  high: number;
+  inRange: number;
+};
+
+type AIAnalysisResult = Awaited<ReturnType<typeof aiAnalysisService.analyzeGlucoseData>>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function extractMaxBasalRateUph(profile: unknown): number | null {
+  if (!isRecord(profile)) return null;
+  const basal = profile.basal;
+  if (!Array.isArray(basal) || basal.length === 0) return null;
+
+  const rates: number[] = [];
+  for (const entry of basal) {
+    if (!isRecord(entry)) continue;
+    const rate = entry.rate;
+    const value = typeof rate === 'number' ? rate : typeof rate === 'string' ? Number.parseFloat(rate) : NaN;
+    if (Number.isFinite(value)) rates.push(value);
+  }
+
+  if (rates.length === 0) return null;
+  return Math.max(...rates);
+}
 
 interface UltraSafeOpenAPSAnalysis {
   maxTempBasal: number;
@@ -16,14 +53,9 @@ interface UltraSafeOpenAPSAnalysis {
   safetyLevel: 'ultra-conservative' | 'conservative' | 'standard';
   hypoglycemiaRiskScore: number;
   recommendedStartingLevel: 'ultra-conservative' | 'conservative' | 'standard';
-  aiAnalysis?: any;
+  aiAnalysis?: AIAnalysisResult;
   criticalWarnings: string[];
-  safetyChecks: {
-    hypoglycemiaHistory: boolean;
-    pediatricPatient: boolean;
-    dataQuality: 'high' | 'medium' | 'low';
-    variabilityRisk: 'low' | 'medium' | 'high';
-  };
+  safetyChecks: SafetyChecks;
   carbCoverage?: {
     recommendedSMBCoverage: number;
     mealPatternAnalysis: string;
@@ -37,13 +69,13 @@ function roundToOmniPodBasal(value: number): number {
 }
 
 export const analyzeUltraSafeOpenAPS = async (
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any
+  readings: NightscoutEntry[], 
+  treatments: NightscoutTreatment[], 
+  currentProfile: unknown
 ): Promise<UltraSafeOpenAPSAnalysis> => {
   
   // Get AI analysis first
-  let aiAnalysis;
+  let aiAnalysis: AIAnalysisResult | undefined;
   try {
     aiAnalysis = await aiAnalysisService.analyzeGlucoseData(readings, treatments, currentProfile);
   } catch (error) {
@@ -105,7 +137,7 @@ export const analyzeUltraSafeOpenAPS = async (
   return result;
 };
 
-function calculateSafetyChecks(readings: any[], treatments: any[]) {
+function calculateSafetyChecks(readings: NightscoutEntry[], treatments: NightscoutTreatment[]) {
   const timeInRange = calculateTimeInRange(readings);
   const variability = calculateVariability(readings);
   
@@ -117,7 +149,7 @@ function calculateSafetyChecks(readings: any[], treatments: any[]) {
   };
 }
 
-function calculateHypoglycemiaRisk(readings: any[], treatments: any[]): number {
+function calculateHypoglycemiaRisk(readings: NightscoutEntry[], treatments: NightscoutTreatment[]): number {
   const timeInRange = calculateTimeInRange(readings);
   const variability = calculateVariability(readings);
   const severeHypos = readings.filter(r => toMmol(r.sgv) < 3.0).length;
@@ -159,7 +191,7 @@ function calculateHypoglycemiaRisk(readings: any[], treatments: any[]): number {
   return Math.min(100, riskScore);
 }
 
-function checkForPossibleNewSensor(readings: any[]): boolean {
+function checkForPossibleNewSensor(readings: NightscoutEntry[]): boolean {
   if (readings.length < 100) return false;
   
   // Check for patterns that might indicate a new sensor
@@ -197,7 +229,7 @@ function checkForPossibleNewSensor(readings: any[]): boolean {
   return false;
 }
 
-function countPostMealHypoglycemia(readings: any[], treatments: any[]): number {
+function countPostMealHypoglycemia(readings: NightscoutEntry[], treatments: NightscoutTreatment[]): number {
   let count = 0;
   
   // Find carb announcements
@@ -219,7 +251,7 @@ function countPostMealHypoglycemia(readings: any[], treatments: any[]): number {
   return count;
 }
 
-function determineSafetyLevel(riskScore: number, safetyChecks: any): 'ultra-conservative' | 'conservative' | 'standard' {
+function determineSafetyLevel(riskScore: number, _safetyChecks: SafetyChecks): 'ultra-conservative' | 'conservative' | 'standard' {
   // Adjust thresholds to be less conservative
   if (riskScore > 40) { // Reduced from 45 to 40
     return 'ultra-conservative';
@@ -229,7 +261,7 @@ function determineSafetyLevel(riskScore: number, safetyChecks: any): 'ultra-cons
   return 'standard'; // Allow standard mode for more aggressive settings
 }
 
-function determineRecommendedStartingLevel(riskScore: number, timeInRange: any): 'ultra-conservative' | 'conservative' | 'standard' {
+function determineRecommendedStartingLevel(riskScore: number, timeInRange: TimeInRangeStats): 'ultra-conservative' | 'conservative' | 'standard' {
   // BALANCED APPROACH: More reasonable progression while maintaining safety
   // Only recommend conservative settings in low-risk scenarios with good control
   if (riskScore < 8 && timeInRange.high > 35 && timeInRange.low < 1.5) {
@@ -242,9 +274,9 @@ function determineRecommendedStartingLevel(riskScore: number, timeInRange: any):
 }
 
 function calculateMoreAggressiveSettings(
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any, 
+  readings: NightscoutEntry[],
+  treatments: NightscoutTreatment[],
+  currentProfile: unknown,
   safetyLevel: string
 ) {
   // OPTIMIZED: Much more aggressive base values for real-world effectiveness
@@ -253,16 +285,10 @@ function calculateMoreAggressiveSettings(
   let baseDynamicISF = 85; // More aggressive (was 95)
   
   // Analyze current basal rates to set reasonable limits
-  if (currentProfile?.basal?.length > 0) {
-    try {
-      const maxCurrentBasal = Math.max(...currentProfile.basal.map((b: any) => parseFloat(b.rate) || 0));
-      if (!isNaN(maxCurrentBasal) && maxCurrentBasal > 0) {
-        // OPTIMIZED: Set max temp basal for much better effectiveness
-        baseMaxTempBasal = Math.min(7.0, Math.max(3.5, maxCurrentBasal * 5.0)); // Max 5.0x current basal, capped at 7.0 U/h
-      }
-    } catch (error) {
-      console.error('Error calculating max current basal:', error);
-    }
+  const maxCurrentBasal = extractMaxBasalRateUph(currentProfile);
+  if (maxCurrentBasal !== null && maxCurrentBasal > 0) {
+    // OPTIMIZED: Set max temp basal for much better effectiveness
+    baseMaxTempBasal = Math.min(7.0, Math.max(3.5, maxCurrentBasal * 5.0)); // Max 5.0x current basal, capped at 7.0 U/h
   }
   
   // Analyze total daily insulin to set reasonable IOB limits
@@ -346,7 +372,7 @@ function calculateMoreAggressiveSettings(
   };
 }
 
-function calculateTotalDailyInsulin(treatments: any[]): number {
+function calculateTotalDailyInsulin(treatments: NightscoutTreatment[]): number {
   // Get treatments from the last 24 hours
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
   const recentTreatments = treatments.filter(t => 
@@ -369,7 +395,7 @@ function getSafetyMultipliers(safetyLevel: string, riskScore: number) {
   }
 }
 
-function analyzeCarbCoverage(readings: any[], treatments: any[], currentProfile: any) {
+function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown) {
   // Find carb announcements
   const carbAnnouncements = treatments.filter(t => t.carbs && t.carbs > 0);
   
@@ -478,7 +504,7 @@ function analyzeCarbCoverage(readings: any[], treatments: any[], currentProfile:
   };
 }
 
-function generateCriticalWarnings(readings: any[], treatments: any[], safetyChecks: any): string[] {
+function generateCriticalWarnings(readings: NightscoutEntry[], treatments: NightscoutTreatment[], safetyChecks: SafetyChecks): string[] {
   const warnings = [];
   const timeInRange = calculateTimeInRange(readings);
   
@@ -535,7 +561,7 @@ function generateCriticalWarnings(readings: any[], treatments: any[], safetyChec
   return warnings;
 }
 
-function calculateTimeInRange(readings: any[]) {
+function calculateTimeInRange(readings: NightscoutEntry[]) {
   if (!readings.length) return { inRange: 0, high: 0, low: 0 };
   
   let inRange = 0, high = 0, low = 0;
@@ -560,11 +586,11 @@ function calculateTimeInRange(readings: any[]) {
 }
 
 // Helper function to get time in range for use in determining recommended starting level
-function timeInRange(readings: any[]) {
+function timeInRange(readings: NightscoutEntry[]) {
   return calculateTimeInRange(readings);
 }
 
-function calculateVariability(readings: any[]) {
+function calculateVariability(readings: NightscoutEntry[]) {
   if (!readings.length) return { cv: 0, stdDev: 0 };
   
   const values = readings.map(r => r.sgv);
@@ -578,7 +604,7 @@ function calculateVariability(readings: any[]) {
   };
 }
 
-function assessDataQuality(readings: any[], treatments: any[]): 'high' | 'medium' | 'low' {
+function assessDataQuality(readings: NightscoutEntry[], treatments: NightscoutTreatment[]): 'high' | 'medium' | 'low' {
   const readingDensity = readings.length / 14; // readings per day over 2 weeks
   const treatmentDensity = treatments.length / 14;
   

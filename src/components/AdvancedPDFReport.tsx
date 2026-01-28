@@ -10,11 +10,24 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearSca
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { aiService } from '../services/aiService';
+import type {
+  NightscoutDeviceStatus,
+  NightscoutEntry,
+  NightscoutProfile,
+  NightscoutTreatment,
+} from '../types/nightscout';
+
+type AdvancedPDFData = {
+  entries: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
+  profile: NightscoutProfile[];
+  deviceStatus: NightscoutDeviceStatus[];
+};
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement);
 
 interface AdvancedPDFReportProps {
-  data: any;
+  data: AdvancedPDFData | null;
 }
 
 const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
@@ -80,7 +93,7 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
       const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
       
-      return data.treatments.filter((treatment: any) => {
+      return data.treatments.filter((treatment: NightscoutTreatment) => {
         const treatmentTime = new Date(treatment.created_at).getTime();
         return treatmentTime >= startTime && treatmentTime <= endTime;
       });
@@ -89,7 +102,7 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
       const timeWindowMs = timeWindow * 60 * 60 * 1000;
       const cutoffTime = now - timeWindowMs;
       
-      return data.treatments.filter((treatment: any) => {
+      return data.treatments.filter((treatment: NightscoutTreatment) => {
         const treatmentTime = new Date(treatment.created_at).getTime();
         return treatmentTime >= cutoffTime;
       });
@@ -738,9 +751,9 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
         pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
         pdf.setFontSize(10);
         pdf.setFont('helvetica', 'normal');
-        pdf.text(`Dawn phenomenon (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(stats.timeMetrics.dawnPhenomenon || 0, unit as any, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
+        pdf.text(`Dawn phenomenon (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(stats.timeMetrics.dawnPhenomenon || 0, unit, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
         yPos += 8;
-        pdf.text(`Weekday vs weekend variation: ${formatGlucoseValue(stats.patternMetrics.weekdayWeekendVariation || 0, unit as any, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
+        pdf.text(`Weekday vs weekend variation: ${formatGlucoseValue(stats.patternMetrics.weekdayWeekendVariation || 0, unit, false)} ${getUnitLabel()} (avg delta)`, 15, yPos);
         yPos += 12;
 
         // Hourly averages chart (simple bars)
@@ -772,8 +785,8 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
           // Axis labels
           pdf.setTextColor(colors.textLight[0], colors.textLight[1], colors.textLight[2]);
           pdf.setFontSize(7);
-          pdf.text(`Min: ${formatGlucoseValue(minV, unit as any, false)} ${getUnitLabel()}`, chartX, chartY + chartH + 6);
-          pdf.text(`Max: ${formatGlucoseValue(maxV, unit as any, false)} ${getUnitLabel()}`, chartX + 60, chartY + chartH + 6);
+          pdf.text(`Min: ${formatGlucoseValue(minV, unit, false)} ${getUnitLabel()}`, chartX, chartY + chartH + 6);
+          pdf.text(`Max: ${formatGlucoseValue(maxV, unit, false)} ${getUnitLabel()}`, chartX + 60, chartY + chartH + 6);
           pdf.text('00', chartX, chartY + chartH + 14);
           pdf.text('06', chartX + chartW * 0.25, chartY + chartH + 14);
           pdf.text('12', chartX + chartW * 0.50, chartY + chartH + 14);
@@ -784,8 +797,8 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
         }
 
         // Meal-time treatment summary
-        const meal = stats.patternMetrics.mealTimePatterns as any;
-        if (meal && typeof meal === 'object') {
+        const meal = stats.patternMetrics.mealTimePatterns;
+        if (meal) {
           pdf.setTextColor(colors.primary[0], colors.primary[1], colors.primary[2]);
           pdf.setFontSize(14);
           pdf.setFont('helvetica', 'bold');
@@ -975,7 +988,12 @@ const AdvancedPDFReport: React.FC<AdvancedPDFReportProps> = ({ data }) => {
                     name="reportTheme"
                     value={theme.value}
                     checked={reportConfig.theme === theme.value}
-                    onChange={(e) => setReportConfig(prev => ({ ...prev, theme: e.target.value as any }))}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      if (next === 'premium' || next === 'clinical' || next === 'executive') {
+                        setReportConfig(prev => ({ ...prev, theme: next }));
+                      }
+                    }}
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 mt-0.5"
                   />
                   <div className="ml-2">

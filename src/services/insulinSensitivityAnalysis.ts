@@ -1,5 +1,12 @@
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
+import type { NightscoutTreatment } from '../types/nightscout';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+
+type GlucoseReadingForSensitivity = {
+  date: number;
+  sgv: number;
+};
 
 interface TimeSegment {
   start: number;
@@ -8,7 +15,10 @@ interface TimeSegment {
   confidence: number;
 }
 
-export const analyzeInsulinSensitivity = (readings: any[], treatments: any[]): TimeSegment[] => {
+export const analyzeInsulinSensitivity = (
+  readings: GlucoseReadingForSensitivity[],
+  treatments: NightscoutTreatment[]
+): TimeSegment[] => {
   const segments: TimeSegment[] = [];
   const hoursInDay = 24;
   const segmentLength = 3; // 3-hour segments
@@ -22,13 +32,13 @@ export const analyzeInsulinSensitivity = (readings: any[], treatments: any[]): T
 };
 
 const analyzeTimeSegment = (
-  readings: any[], 
-  treatments: any[], 
+  readings: GlucoseReadingForSensitivity[], 
+  treatments: NightscoutTreatment[], 
   startHour: number, 
   endHour: number
 ): TimeSegment => {
   const relevantTreatments = treatments.filter(t => {
-    const hour = new Date(t.created_at).getHours();
+    const hour = new Date(getTreatmentMs(t)).getHours();
     return hour >= startHour && hour < endHour && t.insulin && !t.carbs;
   });
   
@@ -59,8 +69,11 @@ const analyzeTimeSegment = (
   };
 };
 
-const calculateSensitivityForTreatment = (readings: any[], treatment: any): number | null => {
-  const treatmentTime = new Date(treatment.created_at).getTime();
+const calculateSensitivityForTreatment = (
+  readings: GlucoseReadingForSensitivity[],
+  treatment: NightscoutTreatment
+): number | null => {
+  const treatmentTime = getTreatmentMs(treatment);
   
   const beforeReadings = readings.filter(r => 
     r.date >= treatmentTime - 30 * 60 * 1000 && 
@@ -77,7 +90,7 @@ const calculateSensitivityForTreatment = (readings: any[], treatment: any): numb
   const beforeAvg = beforeReadings.reduce((a, b) => a + b.sgv, 0) / beforeReadings.length;
   const afterAvg = afterReadings.reduce((a, b) => a + b.sgv, 0) / afterReadings.length;
   
-  return (beforeAvg - afterAvg) / treatment.insulin;
+  return (beforeAvg - afterAvg) / (treatment.insulin ?? 0);
 };
 
 const calculateConfidence = (sampleSize: number, variance: number): number => {

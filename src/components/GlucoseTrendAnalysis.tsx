@@ -1,9 +1,11 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, ArrowRight, AlertTriangle, Target, Activity } from 'lucide-react';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import type { NightscoutEntry } from '../types/nightscout';
+import { getEntryMs } from '../utils/nightscoutTime';
 
 interface GlucoseTrendAnalysisProps {
-  readings: any[];
+  readings: NightscoutEntry[];
   windowMinutes?: number;
 }
 
@@ -17,12 +19,11 @@ const GlucoseTrendAnalysis: React.FC<GlucoseTrendAnalysisProps> = ({
   // Calculate trend metrics
   const getRecentReadings = () => {
     if (!readings || readings.length < 2) return [];
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - windowMinutes * 60 * 1000);
+    const cutoffMs = Date.now() - windowMinutes * 60 * 1000;
     
     return readings
-      .filter(reading => new Date(reading.date || reading.dateString) >= cutoff)
-      .sort((a, b) => new Date(a.date || a.dateString).getTime() - new Date(b.date || b.dateString).getTime());
+      .filter(reading => getEntryMs(reading) >= cutoffMs)
+      .sort((a, b) => getEntryMs(a) - getEntryMs(b));
   };
 
   const recentReadings = getRecentReadings();
@@ -35,8 +36,7 @@ const GlucoseTrendAnalysis: React.FC<GlucoseTrendAnalysisProps> = ({
     const latest = recentReadings[recentReadings.length - 1];
     const previous = recentReadings[recentReadings.length - 2];
     
-    const timeDiff = (new Date(latest.date || latest.dateString).getTime() - 
-                     new Date(previous.date || previous.dateString).getTime()) / (1000 * 60); // minutes
+    const timeDiff = (getEntryMs(latest) - getEntryMs(previous)) / (1000 * 60); // minutes
     
     if (timeDiff === 0) return 0;
     
@@ -54,8 +54,7 @@ const GlucoseTrendAnalysis: React.FC<GlucoseTrendAnalysisProps> = ({
     for (let i = 1; i < recentReadings.length; i++) {
       const current = recentReadings[i];
       const previous = recentReadings[i - 1];
-      const timeDiff = (new Date(current.date || current.dateString).getTime() - 
-                       new Date(previous.date || previous.dateString).getTime()) / (1000 * 60);
+      const timeDiff = (getEntryMs(current) - getEntryMs(previous)) / (1000 * 60);
       
       if (timeDiff > 0) {
         rates.push((current.sgv - previous.sgv) / timeDiff);

@@ -38,6 +38,8 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import DesignModeSelector from './DesignModeSelector';
+import Alert from './Alert';
+import { useAsyncErrors } from '../contexts/AsyncErrorContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -56,6 +58,7 @@ interface NavGroup {
 const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
+  const { lastError, clearLastError } = useAsyncErrors();
   const [expandedGroups, setExpandedGroups] = useState<string[]>(['Dashboard', 'Analysis']);
   const [showDesignSelector, setShowDesignSelector] = useState(false);
   
@@ -227,6 +230,18 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
         {/* Page content */}
         <main className="flex-grow p-4 sm:p-6 lg:p-8 overflow-y-auto">
+          {lastError && (
+            <div className="mb-4">
+              <Alert
+                variant="danger"
+                title={lastError.label ? `Error (${lastError.label})` : 'Error'}
+                dismissible
+                onDismiss={clearLastError}
+              >
+                {lastError.message}
+              </Alert>
+            </div>
+          )}
           {children}
         </main>
       </div>

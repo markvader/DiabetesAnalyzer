@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
+import { lowerBoundByMs, upperBoundByMs } from '../utils/sortedTimeSeries';
 import { 
   Activity, 
   Clock, 
@@ -25,6 +27,7 @@ import { format } from 'date-fns';
 
 interface LoopCycle {
   timestamp: string;
+  timestampMs: number;
   glucose: number;
   trend: 'rising' | 'falling' | 'stable';
   iob: number;
@@ -59,12 +62,43 @@ interface LoopStatus {
   loopVersion: string;
 }
 
+interface LoopStats {
+  totalCycles: number;
+  enactedCycles: number;
+  tempBasalCycles: number;
+  smbCycles: number;
+  enactmentRate: string;
+  tempBasalRate: string;
+  avgGlucose: number;
+  avgIOB: string;
+  avgCOB: string;
+  predictionAccuracy: string;
+  avgCycleTime: string | 0;
+}
+
 const LoopAnalysis = () => {
   const { data, loading, error } = useNightscout();
   const { formatGlucoseValue } = useGlucoseFormatting();
   const [loopCycles, setLoopCycles] = useState<LoopCycle[]>([]);
-  const [loopStats, setLoopStats] = useState<any>(null);
+  const [loopStats, setLoopStats] = useState<LoopStats | null>(null);
   const [loopStatus, setLoopStatus] = useState<LoopStatus | null>(null);
+
+  const entriesSortedAsc = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => getEntryMs(a) - getEntryMs(b));
+  }, [data?.entries]);
+
+  const treatmentsSortedDesc = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(b) - getTreatmentMs(a));
+  }, [data?.treatments]);
+
+  const deviceStatusSortedDesc = useMemo(() => {
+    const deviceStatus = data?.deviceStatus;
+    if (!deviceStatus?.length) return [];
+    const getDeviceMs = (d: (typeof deviceStatus)[number]) => d.mills ?? d.date ?? (d.created_at ? Date.parse(d.created_at) : 0);
+    return [...deviceStatus].sort((a, b) => getDeviceMs(b) - getDeviceMs(a));
+  }, [data?.deviceStatus]);
 
   useEffect(() => {
     if (data?.treatments && data?.entries) {
@@ -82,8 +116,9 @@ const LoopAnalysis = () => {
     console.log('🔍 Analyzing loop status with treatments:', data.treatments.length);
     
     const now = new Date();
+    const nowMs = now.getTime();
     const recentTreatments = data.treatments.filter(t => 
-      new Date(t.created_at || t.timestamp).getTime() > now.getTime() - 30 * 60 * 1000 // Last 30 minutes
+      getTreatmentMs(t) > nowMs - 30 * 60 * 1000 // Last 30 minutes
     );
 
     console.log('🔍 Recent treatments (last 30min):', recentTreatments.length);
@@ -94,8 +129,7 @@ const LoopAnalysis = () => {
     let lastLoop = null;
 
     // Method 1: Look for the most recent treatment with IOB/COB data
-    const sortedTreatments = data.treatments
-      .sort((a, b) => new Date(b.created_at || b.timestamp).getTime() - new Date(a.created_at || a.timestamp).getTime());
+    const sortedTreatments = treatmentsSortedDesc;
 
     console.log('🔍 Checking recent treatments for IOB/COB data...');
     
@@ -103,7 +137,7 @@ const LoopAnalysis = () => {
       // Check if treatment has IOB/COB fields directly
       if (treatment.iob !== undefined && treatment.iob !== null) {
         currentIOB = treatment.iob;
-        lastLoop = new Date(treatment.created_at || treatment.timestamp);
+        lastLoop = new Date(treatment.created_at);
         console.log('✅ Found IOB in treatment:', currentIOB, treatment);
         break;
       }
@@ -111,7 +145,7 @@ const LoopAnalysis = () => {
       // Check AndroidAPS specific fields
       if (treatment.AAPS && treatment.AAPS.iob !== undefined) {
         currentIOB = treatment.AAPS.iob;
-        lastLoop = new Date(treatment.created_at || treatment.timestamp);
+        lastLoop = new Date(treatment.created_at);
         console.log('✅ Found IOB in AAPS field:', currentIOB);
         break;
       }
@@ -121,7 +155,7 @@ const LoopAnalysis = () => {
         const iobMatch = treatment.notes.match(/iob[:\s]*([0-9.-]+)/i);
         if (iobMatch) {
           currentIOB = parseFloat(iobMatch[1]);
-          lastLoop = new Date(treatment.created_at || treatment.timestamp);
+          lastLoop = new Date(treatment.created_at);
           console.log('✅ Parsed IOB from notes:', currentIOB, 'from:', treatment.notes);
           break;
         }
@@ -155,8 +189,7 @@ const LoopAnalysis = () => {
     // Method 2: Check device status for IOB/COB
     if (data?.deviceStatus && data.deviceStatus.length > 0) {
       console.log('🔍 Checking device status for IOB/COB...');
-      const latestDeviceStatus = data.deviceStatus
-        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+      const latestDeviceStatus = deviceStatusSortedDesc[0];
 
       console.log('📱 Latest device status:', latestDeviceStatus);
 
@@ -192,13 +225,13 @@ const LoopAnalysis = () => {
     const activeTempBasal = data.treatments
       .filter(t => (t.eventType === 'Temp Basal' || t.eventType === 'Temporary basal') && t.duration)
       .find(t => {
-        const start = new Date(t.created_at || t.timestamp);
-        const end = new Date(start.getTime() + (t.duration! * 60 * 1000));
-        return now >= start && now <= end;
+        const startMs = getTreatmentMs(t);
+        const endMs = startMs + (t.duration! * 60 * 1000);
+        return nowMs >= startMs && nowMs <= endMs;
       });
 
     // Determine connection status
-    const isConnected = lastLoop ? (now.getTime() - lastLoop.getTime()) < 15 * 60 * 1000 : false; // Connected if data within 15 min
+    const isConnected = lastLoop ? (nowMs - lastLoop.getTime()) < 15 * 60 * 1000 : false; // Connected if data within 15 min
 
     console.log('📊 Final loop status:', {
       isConnected,
@@ -216,7 +249,7 @@ const LoopAnalysis = () => {
       activeTempBasal: activeTempBasal ? {
         rate: activeTempBasal.rate || activeTempBasal.absolute || 0,
         duration: activeTempBasal.duration || 0,
-        started: new Date(activeTempBasal.created_at || activeTempBasal.timestamp)
+        started: new Date(activeTempBasal.created_at)
       } : null,
       pumpBattery: 100, // Default since we can't reliably get this from AAPS
       cgmStatus: 'connected', // Default since we have glucose data
@@ -253,7 +286,7 @@ const LoopAnalysis = () => {
         t.rate !== undefined ||
         t.absolute !== undefined ||
         (t.insulin && t.insulin > 0)
-      ) && new Date(t.created_at || t.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000; // Last 24h
+      ) && getTreatmentMs(t) > Date.now() - 24 * 60 * 60 * 1000; // Last 24h
     });
 
     console.log('🔍 Found loop treatments:', loopTreatments.length);
@@ -265,19 +298,27 @@ const LoopAnalysis = () => {
     }
 
     const cycles: LoopCycle[] = loopTreatments.map(treatment => {
-      const timestamp = treatment.created_at || treatment.timestamp;
-      const treatmentTime = new Date(timestamp).getTime();
+      const timestamp = treatment.created_at;
+      const treatmentTime = getTreatmentMs(treatment);
       
       // Find closest glucose reading
-      const closestReading = data.entries.find(reading => {
-        const readingTime = new Date(reading.date || reading.dateString).getTime();
-        return Math.abs(readingTime - treatmentTime) <= 5 * 60 * 1000; // Within 5 minutes
-      }) || data.entries[data.entries.length - 1];
+      const idx = lowerBoundByMs(entriesSortedAsc, getEntryMs, treatmentTime);
+      const candidates = [
+        idx > 0 ? entriesSortedAsc[idx - 1] : null,
+        idx < entriesSortedAsc.length ? entriesSortedAsc[idx] : null,
+      ].filter(Boolean) as typeof entriesSortedAsc;
+
+      const closestReading = candidates.reduce((best, entry) => {
+        if (!best) return entry;
+        return Math.abs(getEntryMs(entry) - treatmentTime) < Math.abs(getEntryMs(best) - treatmentTime) ? entry : best;
+      }, null as (typeof entriesSortedAsc)[number] | null) || entriesSortedAsc[entriesSortedAsc.length - 1];
+
+      const closestOk = closestReading ? Math.abs(getEntryMs(closestReading) - treatmentTime) <= 5 * 60 * 1000 : false;
+      const readingForDisplay = closestOk ? closestReading : entriesSortedAsc[entriesSortedAsc.length - 1];
 
       // Determine trend
-      const glucoseHistory = data.entries
-        .filter(e => new Date(e.date || e.dateString).getTime() <= treatmentTime)
-        .slice(-3);
+      const histEnd = upperBoundByMs(entriesSortedAsc, getEntryMs, treatmentTime);
+      const glucoseHistory = entriesSortedAsc.slice(Math.max(0, histEnd - 3), histEnd);
       
       let trend: 'rising' | 'falling' | 'stable' = 'stable';
       if (glucoseHistory.length >= 2) {
@@ -311,7 +352,8 @@ const LoopAnalysis = () => {
 
       return {
         timestamp,
-        glucose: closestReading.sgv,
+        timestampMs: treatmentTime,
+        glucose: readingForDisplay.sgv,
         trend,
         iob,
         cob,
@@ -321,17 +363,17 @@ const LoopAnalysis = () => {
         enacted: treatment.enacted !== false,
         reason: treatment.reason || treatment.notes || treatment.eventType || 'AAPS adjustment',
         duration: treatment.duration || 30,
-        prediction: treatment.predBGs?.[0] || closestReading.sgv,
-        minPredBG: treatment.predBGs ? Math.min(...treatment.predBGs) : closestReading.sgv,
-        maxPredBG: treatment.predBGs ? Math.max(...treatment.predBGs) : closestReading.sgv,
-        eventualBG: treatment.eventualBG || closestReading.sgv,
+        prediction: treatment.predBGs?.[0] || readingForDisplay.sgv,
+        minPredBG: treatment.predBGs ? Math.min(...treatment.predBGs) : readingForDisplay.sgv,
+        maxPredBG: treatment.predBGs ? Math.max(...treatment.predBGs) : readingForDisplay.sgv,
+        eventualBG: treatment.eventualBG || readingForDisplay.sgv,
         sensitivity: treatment.sensitivity || 45,
         carbRatio: treatment.carbRatio || 12,
         target: treatment.target || 100
       };
     });
 
-    setLoopCycles(cycles.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    setLoopCycles(cycles.sort((a, b) => b.timestampMs - a.timestampMs));
 
     // Calculate enhanced statistics
     if (cycles.length > 0) {
@@ -360,7 +402,7 @@ const LoopAnalysis = () => {
         avgCOB: avgCOB.toFixed(1),
         predictionAccuracy: ((accuratePredictions / cycles.length) * 100).toFixed(1),
         avgCycleTime: cycles.length > 1 ? 
-          ((new Date(cycles[0].timestamp).getTime() - new Date(cycles[cycles.length - 1].timestamp).getTime()) / 
+          ((cycles[0].timestampMs - cycles[cycles.length - 1].timestampMs) / 
            (cycles.length - 1) / 60000).toFixed(1) : 0
       });
     } else {

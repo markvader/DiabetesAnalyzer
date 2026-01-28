@@ -2,6 +2,36 @@ import { aiService } from './aiService';
 import { safeJsonParseFromText } from '../utils/safeJson';
 import { asNumber, asStringArray } from './aiValidation';
 
+type JsonCapableProvider = {
+  name: string;
+  endpoint: string;
+  model: string;
+  apiKey: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asJsonCapableProvider(value: unknown): JsonCapableProvider | null {
+  if (!isRecord(value)) return null;
+
+  const name = value.name;
+  const endpoint = value.endpoint;
+  const model = value.model;
+  const apiKey = value.apiKey;
+
+  if (typeof name !== 'string') return null;
+  if (typeof endpoint !== 'string' || endpoint.length === 0) return null;
+  if (typeof model !== 'string' || model.length === 0) return null;
+  if (typeof apiKey !== 'string' || apiKey.length === 0) return null;
+
+  // Gemini uses a dedicated SDK/service in `aiService` and isn't directly callable from here.
+  if (endpoint === 'gemini') return null;
+
+  return { name, endpoint, model, apiKey };
+}
+
 export interface GlucoseReading {
   sgv: number;
   date: number;
@@ -63,19 +93,16 @@ export interface PredictionResult {
 
 class AdvancedPredictionService {
 
-  private getFirstJsonCapableProvider(): any | null {
-    const providers = (aiService as any)?.providers;
+  private getFirstJsonCapableProvider(): JsonCapableProvider | null {
+    const providers = (aiService as unknown as { providers?: unknown })?.providers;
     if (!Array.isArray(providers) || providers.length === 0) return null;
 
-    // Gemini uses a dedicated SDK/service in `aiService` and isn't directly callable from here.
-    // For advanced predictions we only use providers we can call with fetch.
-    const provider = providers.find((p: any) => {
-      const endpoint = p?.endpoint;
-      const apiKey = p?.apiKey;
-      return typeof endpoint === 'string' && endpoint !== 'gemini' && typeof apiKey === 'string' && apiKey.length > 0;
-    });
+    for (const candidate of providers) {
+      const provider = asJsonCapableProvider(candidate);
+      if (provider) return provider;
+    }
 
-    return provider ?? null;
+    return null;
   }
   
   async generateAdvancedPredictions(
@@ -217,7 +244,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     return prompt;
   }
 
-  private async callAIService(prompt: string, provider: any): Promise<string> {
+  private async callAIService(prompt: string, provider: JsonCapableProvider): Promise<string> {
     try {
       if (!provider?.endpoint || !provider?.name || !provider?.model || !provider?.apiKey) {
         return '';
@@ -286,7 +313,10 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
       return null;
     }
 
-    const parsed = (typeof parsedJson.value === 'object' && parsedJson.value !== null) ? (parsedJson.value as any) : {};
+      const parsed = isRecord(parsedJson.value) ? parsedJson.value : {};
+      const trendAnalysis = isRecord(parsed.trendAnalysis) ? parsed.trendAnalysis : {};
+      const timeInRangePrediction = isRecord(parsed.timeInRangePrediction) ? parsed.timeInRangePrediction : {};
+      const alertPredictions = isRecord(parsed.alertPredictions) ? parsed.alertPredictions : {};
       
     const result: PredictionResult = {
         predictions: this.validatePredictionArray(parsed.predictions, readings),
@@ -296,18 +326,18 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
         riskFactors: asStringArray(parsed.riskFactors, 12),
         recommendations: asStringArray(parsed.recommendations, 12),
         trendAnalysis: {
-          shortTerm: this.validateTrend(parsed.trendAnalysis?.shortTerm),
-          mediumTerm: this.validateTrend(parsed.trendAnalysis?.mediumTerm),
-          longTerm: this.validateTrend(parsed.trendAnalysis?.longTerm)
+          shortTerm: this.validateTrend(trendAnalysis.shortTerm),
+          mediumTerm: this.validateTrend(trendAnalysis.mediumTerm),
+          longTerm: this.validateTrend(trendAnalysis.longTerm)
         },
         timeInRangePrediction: {
-          next1Hour: asNumber(parsed.timeInRangePrediction?.next1Hour, 80, 0, 100),
-          next2Hours: asNumber(parsed.timeInRangePrediction?.next2Hours, 75, 0, 100),
-          next3Hours: asNumber(parsed.timeInRangePrediction?.next3Hours, 70, 0, 100)
+          next1Hour: asNumber(timeInRangePrediction.next1Hour, 80, 0, 100),
+          next2Hours: asNumber(timeInRangePrediction.next2Hours, 75, 0, 100),
+          next3Hours: asNumber(timeInRangePrediction.next3Hours, 70, 0, 100)
         },
         alertPredictions: {
-          lowAlerts: this.validateAlerts(parsed.alertPredictions?.lowAlerts),
-          highAlerts: this.validateAlerts(parsed.alertPredictions?.highAlerts)
+          lowAlerts: this.validateAlerts(alertPredictions.lowAlerts),
+          highAlerts: this.validateAlerts(alertPredictions.highAlerts)
         }
       };
 
@@ -319,7 +349,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     return result;
   }
 
-  private validatePredictionArray(arr: any, readings: GlucoseReading[]): number[] {
+  private validatePredictionArray(arr: unknown, readings: GlucoseReading[]): number[] {
     if (!Array.isArray(arr)) return [];
     
     const lastGlucose = readings[readings.length - 1]?.sgv || 100;
@@ -332,20 +362,27 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     }).slice(0, 36); // Ensure max 36 predictions
   }
 
-  private validateTrend(trend: any): 'rising' | 'falling' | 'stable' {
+  private validateTrend(trend: unknown): 'rising' | 'falling' | 'stable' {
     if (['rising', 'falling', 'stable'].includes(trend)) {
-      return trend;
+      return trend as 'rising' | 'falling' | 'stable';
     }
     return 'stable';
   }
 
-  private validateAlerts(alerts: any): { time: number; severity: 'mild' | 'moderate' | 'severe' }[] {
+  private validateAlerts(alerts: unknown): { time: number; severity: 'mild' | 'moderate' | 'severe' }[] {
     if (!Array.isArray(alerts)) return [];
     
-    return alerts.filter(alert => 
-      typeof alert.time === 'number' && 
-      ['mild', 'moderate', 'severe'].includes(alert.severity)
-    ).slice(0, 10); // Max 10 alerts
+    return alerts
+      .map((alert) => {
+        if (!isRecord(alert)) return null;
+        const time = alert.time;
+        const severity = alert.severity;
+        if (typeof time !== 'number') return null;
+        if (severity !== 'mild' && severity !== 'moderate' && severity !== 'severe') return null;
+        return { time, severity };
+      })
+      .filter((a): a is { time: number; severity: 'mild' | 'moderate' | 'severe' } => a !== null)
+      .slice(0, 10); // Max 10 alerts
   }
 
   private getAdvancedMathematicalPredictions(

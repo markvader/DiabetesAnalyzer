@@ -19,6 +19,14 @@ interface ProxyRequest {
   body?: unknown;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -95,7 +103,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           error: 'Invalid URL', 
-          message: `Invalid Nightscout URL: ${error.message}` 
+          message: `Invalid Nightscout URL: ${getErrorMessage(error)}` 
         }),
         { 
           status: 400, 
@@ -427,7 +435,7 @@ This is a server-side configuration issue, not an authentication problem.`,
     }
 
     // Get the response data
-    let responseData: any;
+    let responseData: unknown;
     try {
       const responseText = await response.text();
       
@@ -442,7 +450,7 @@ This is a server-side configuration issue, not an authentication problem.`,
       return new Response(
         JSON.stringify({ 
           error: 'Response parsing failed', 
-          message: `Failed to read response from Nightscout: ${error.message}` 
+          message: `Failed to read response from Nightscout: ${getErrorMessage(error)}` 
         }),
         { 
           status: 502, 
@@ -458,16 +466,17 @@ This is a server-side configuration issue, not an authentication problem.`,
     // API v1 returns arrays directly, API v3 returns { status: 200, result: [...] }
     let normalizedData = responseData;
     
-    if (detectedApiVersion === 'v3' && responseData && typeof responseData === 'object' && !Array.isArray(responseData)) {
+    if (detectedApiVersion === 'v3' && isRecord(responseData) && !Array.isArray(responseData)) {
+      const responseObj = responseData;
       // API v3 response format: { status: 200, result: [...] }
-      if (responseData.result !== undefined) {
+      if (responseObj['result'] !== undefined) {
         console.log(`API v3 response detected with result wrapper. Extracting result array.`);
-        normalizedData = responseData.result;
+        normalizedData = responseObj['result'];
 
         // Some deployments wrap further: { result: { data: [...] } } or { result: { result: [...] } }
-        if (normalizedData && typeof normalizedData === 'object' && !Array.isArray(normalizedData)) {
-          const maybeData = (normalizedData as any).data;
-          const maybeResult = (normalizedData as any).result;
+        if (isRecord(normalizedData) && !Array.isArray(normalizedData)) {
+          const maybeData = normalizedData['data'];
+          const maybeResult = normalizedData['result'];
           if (maybeData !== undefined) {
             console.log(`API v3 nested wrapper detected: result.data`);
             normalizedData = maybeData;
@@ -483,17 +492,17 @@ This is a server-side configuration issue, not an authentication problem.`,
           // But only if it's not already an array
           console.log(`API v3 result is single object, keeping as-is for profile-like endpoints`);
         }
-      } else if (responseData.status && responseData.message) {
+      } else if (responseObj['status'] && responseObj['message']) {
         // Error response from API v3
-        console.log(`API v3 error response: ${responseData.message}`);
+        console.log(`API v3 error response: ${String(responseObj['message'])}`);
         return new Response(
           JSON.stringify({ 
             error: 'API v3 error', 
-            message: responseData.message || 'Unknown API v3 error',
-            status: responseData.status
+            message: String(responseObj['message'] ?? 'Unknown API v3 error'),
+            status: responseObj['status']
           }),
           { 
-            status: responseData.status || 500, 
+            status: (typeof responseObj['status'] === 'number' ? responseObj['status'] : 500), 
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           }
         )
@@ -527,7 +536,7 @@ This is a server-side configuration issue, not an authentication problem.`,
     return new Response(
       JSON.stringify({ 
         error: 'Internal server error', 
-        message: `Proxy server error: ${error.message}` 
+        message: `Proxy server error: ${getErrorMessage(error)}` 
       }),
       { 
         status: 500, 

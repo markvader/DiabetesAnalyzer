@@ -10,7 +10,7 @@ interface GeminiResponse {
     };
     finishReason: string;
     index: number;
-    safetyRatings: any[];
+    safetyRatings: unknown[];
   }[];
   usageMetadata: {
     promptTokenCount: number;
@@ -160,7 +160,7 @@ class GeminiService {
   public async generateJson(
     modelId: string,
     prompt: string
-  ): Promise<{ json: any; tokenUsage: { prompt: number; completion: number; total: number } }> {
+  ): Promise<{ json: unknown; tokenUsage: { prompt: number; completion: number; total: number } }> {
     const response = await this.generateContent(modelId, prompt);
     const responseText = response.text;
 
@@ -288,21 +288,24 @@ Respond only with the JSON object, no additional text.`;
         };
       }
 
-      const resultObj = (typeof analysisResult === 'object' && analysisResult !== null) ? (analysisResult as any) : {};
+      const resultObj: Record<string, unknown> =
+        typeof analysisResult === 'object' && analysisResult !== null
+          ? (analysisResult as Record<string, unknown>)
+          : {};
 
       // Validate and ensure required fields
       const result: GeminiAnalysisResult = {
-        insights: asStringArray(resultObj.insights, 8).length ? asStringArray(resultObj.insights, 8) : undefined,
-        recommendations: asStringArray(resultObj.recommendations, 8).length
-          ? asStringArray(resultObj.recommendations, 8)
+        insights: asStringArray(resultObj['insights'], 8).length ? asStringArray(resultObj['insights'], 8) : undefined,
+        recommendations: asStringArray(resultObj['recommendations'], 8).length
+          ? asStringArray(resultObj['recommendations'], 8)
           : ['Monitor glucose levels closely'],
-        riskAssessment: asRiskAssessment(resultObj.riskAssessment, 'medium'),
-        confidence: asNumber(resultObj.confidence, 0.7, 0, 1),
-        reasoning: asStringArray(resultObj.reasoning, 8).length
-          ? asStringArray(resultObj.reasoning, 8)
+        riskAssessment: asRiskAssessment(resultObj['riskAssessment'], 'medium'),
+        confidence: asNumber(resultObj['confidence'], 0.7, 0, 1),
+        reasoning: asStringArray(resultObj['reasoning'], 8).length
+          ? asStringArray(resultObj['reasoning'], 8)
           : ['Based on glucose data analysis'],
-        safetyWarnings: asStringArray(resultObj.safetyWarnings, 8),
-        details: normalizeDetails(resultObj.details),
+        safetyWarnings: asStringArray(resultObj['safetyWarnings'], 8),
+        details: normalizeDetails(resultObj['details']),
         tokenUsage: {
           prompt: response.usageMetadata?.promptTokenCount ?? 0,
           completion: response.usageMetadata?.candidatesTokenCount ?? 0,

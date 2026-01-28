@@ -19,7 +19,10 @@ import {
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  ScriptableContext,
+  TooltipItem,
+  Plugin
 } from 'chart.js';
 
 ChartJS.register(
@@ -241,13 +244,16 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
             continue;
           }
 
-          const value = parsed.value as any;
+          const value: unknown = parsed.value;
+          const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+          const predictionsValue = isRecord(value) ? value['predictions'] : undefined;
+          const predictionValue = isRecord(value) ? value['prediction'] : undefined;
           const candidateArray: unknown[] = Array.isArray(value)
             ? value
-            : Array.isArray(value?.predictions)
-              ? value.predictions
-              : Array.isArray(value?.prediction)
-                ? value.prediction
+            : Array.isArray(predictionsValue)
+              ? predictionsValue
+              : Array.isArray(predictionValue)
+                ? predictionValue
                 : [];
           
           console.log(`${provider.name} prediction successful`);
@@ -339,7 +345,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
         label: 'Predicted',
         data: predictionData,
         borderColor: isDark ? 'rgba(96, 165, 250, 1)' : 'rgba(75, 192, 192, 1)',
-        backgroundColor: function(context: any) {
+        backgroundColor: function(context: ScriptableContext<'line'>) {
           const chart = context.chart;
           const {ctx, chartArea} = chart;
           if (!chartArea) {
@@ -406,7 +412,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
         cornerRadius: 6,
         displayColors: true,
         callbacks: {
-          label: function(context: any) {
+          label: function(context: TooltipItem<'line'>) {
             const label = context.dataset.label || '';
             const value = context.parsed.y;
             return `${label}: ${formatGlucoseValue(value, unit, true)}`;
@@ -423,8 +429,8 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
         },
         ticks: {
           color: isDark ? '#e5e7eb' : '#111827',
-          callback: function(value: any) {
-            return `${value} ${getUnitLabel()}`;
+          callback: function(value: string | number) {
+            return `${Number(value)} ${getUnitLabel()}`;
           }
         },
         title: {
@@ -485,7 +491,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
   // Target range plugin
   const targetRangePlugin = {
     id: 'targetRange',
-    beforeDraw(chart: any) {
+    beforeDraw(chart: ChartJS<'line'>) {
       const { ctx, chartArea, scales } = chart;
       if (!chartArea) return;
       
@@ -504,7 +510,7 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
       ctx.fillStyle = isDark ? 'rgba(239, 68, 68, 0.05)' : 'rgba(220, 53, 69, 0.05)';
       ctx.fillRect(chartArea.left, lowY, chartArea.width, chartArea.bottom - lowY);
     }
-  };
+  } satisfies Plugin<'line'>;
 
   if (loading) {
     return (

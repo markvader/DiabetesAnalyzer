@@ -7,9 +7,34 @@ import AIOpenAPSOptimizer from '../components/AIOpenAPSOptimizer';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { analyzeUltraSafeOpenAPS } from '../services/ultraSafeOpenAPSAnalysis';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { runSafeAsync } from '../utils/safeAsync';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+import { lowerBoundByMs, upperBoundByMs, sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+
+type UltraSafeOpenAPSResult = Awaited<ReturnType<typeof analyzeUltraSafeOpenAPS>>;
+
+type AiOptimizationResult = NonNullable<React.ComponentProps<typeof AIOpenAPSOptimizer>['onOptimizationComplete']> extends (
+  result: infer R
+) => void
+  ? R
+  : never;
+
+interface SMBStats {
+  totalEvents: number;
+  totalInsulin: string;
+  avgSMB: string;
+  maxSMB: string;
+  avgGlucose: number;
+  effectiveness: string;
+  last24h: number;
+  carbRelatedSMBs: number;
+  avgCarbSMB: string;
+}
 
 interface SMBEvent {
   timestamp: string;
+  timestampMs: number;
   glucose: number;
   iob: number;
   cob: number;
@@ -24,9 +49,9 @@ const OpenAPSSMB = () => {
   const { selectedPump } = useInsulinPump();
   const { formatGlucoseValue, convertToCurrentUnit } = useGlucoseFormatting();
   const [smbEvents, setSmbEvents] = useState<SMBEvent[]>([]);
-  const [smbStats, setSmbStats] = useState<any>(null);
-  const [openapsAnalysis, setOpenapsAnalysis] = useState<any>(null);
-  const [aiOptimization, setAiOptimization] = useState<any>(null);
+  const [smbStats, setSmbStats] = useState<SMBStats | null>(null);
+  const [openapsAnalysis, setOpenapsAnalysis] = useState<UltraSafeOpenAPSResult | null>(null);
+  const [aiOptimization, setAiOptimization] = useState<AiOptimizationResult | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
@@ -43,47 +68,49 @@ const OpenAPSSMB = () => {
   });
   const [isCustomRange, setIsCustomRange] = useState(false);
 
+  const selectedRange = React.useMemo(() => {
+    const now = Date.now();
+    if (isCustomRange) {
+      const startMs = startOfDay(new Date(customDateRange.startDate)).getTime();
+      const endMs = endOfDay(new Date(customDateRange.endDate)).getTime();
+      return { startMs, endMs };
+    }
+    const timeWindowMs = timeWindow * 60 * 60 * 1000;
+    return { startMs: now - timeWindowMs, endMs: now };
+  }, [customDateRange.endDate, customDateRange.startDate, isCustomRange, timeWindow]);
+
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [] as NightscoutEntry[];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [] as NightscoutTreatment[];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
   // Get filtered data based on time selection
   const filteredData = React.useMemo(() => {
     if (!data?.entries?.length || !data?.treatments?.length) {
       return null;
     }
 
-    const now = Date.now();
-    let startTime: number;
-    let endTime: number;
-
-    if (isCustomRange) {
-      startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-    } else {
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      startTime = now - timeWindowMs;
-      endTime = now;
-    }
-
-    const filteredEntries = data.entries.filter(entry => {
-      return entry.date >= startTime && entry.date <= endTime;
-    });
-
-    const filteredTreatments = data.treatments.filter(treatment => {
-      const treatmentTime = new Date(treatment.created_at).getTime();
-      return treatmentTime >= startTime && treatmentTime <= endTime;
-    });
+    const filteredEntries = sliceSortedByTimeRange(entriesSortedAsc, (e) => e.date, selectedRange.startMs, selectedRange.endMs);
+    const filteredTreatments = sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
 
     return {
       ...data,
       entries: filteredEntries,
       treatments: filteredTreatments
     };
-  }, [data, timeWindow, isCustomRange, customDateRange]);
+  }, [data, entriesSortedAsc, selectedRange.endMs, selectedRange.startMs, treatmentsSortedAsc]);
 
    
   useEffect(() => {
     // Run automatically on initial load (default 2 weeks) or when manual refresh is triggered
     if (filteredData && (!hasInitialLoad || manualRefresh)) {
       analyzeSMBEvents();
-      analyzeOpenAPSSettings();
+      runSafeAsync(() => analyzeOpenAPSSettings(), { label: 'OpenAPSSMB: analyzeOpenAPSSettings' });
       
       // Mark initial load as complete and reset manual refresh flag
       if (!hasInitialLoad) {
@@ -102,6 +129,31 @@ const OpenAPSSMB = () => {
       return;
     }
 
+    const readingsAsc = filteredData.entries;
+
+    const getReadingMs = (e: NightscoutEntry) => e.date;
+
+    const findClosestReading = (targetMs: number): NightscoutEntry => {
+      if (readingsAsc.length === 0) return { date: targetMs, mills: targetMs, sgv: 0 } as NightscoutEntry;
+      const idx = lowerBoundByMs(readingsAsc, getReadingMs, targetMs);
+      if (idx <= 0) return readingsAsc[0];
+      if (idx >= readingsAsc.length) return readingsAsc[readingsAsc.length - 1];
+      const after = readingsAsc[idx];
+      const before = readingsAsc[idx - 1];
+      return (targetMs - before.date) <= (after.date - targetMs) ? before : after;
+    };
+
+    const findPreviousReading = (targetMs: number): NightscoutEntry | null => {
+      // Previous reading in (targetMs-15m, targetMs-5m)
+      const latestAllowedMs = targetMs - 5 * 60 * 1000;
+      const earliestAllowedMs = targetMs - 15 * 60 * 1000;
+      const endIndex = upperBoundByMs(readingsAsc, getReadingMs, latestAllowedMs);
+      const candidateIndex = endIndex - 1;
+      if (candidateIndex < 0) return null;
+      const candidate = readingsAsc[candidateIndex];
+      return candidate.date >= earliestAllowedMs ? candidate : null;
+    };
+
     // Filter SMB treatments
     const smbTreatments = filteredData.treatments.filter(t => 
       t.eventType === 'Correction Bolus' && 
@@ -118,26 +170,19 @@ const OpenAPSSMB = () => {
 
     const events: SMBEvent[] = smbTreatments.map(treatment => {
       const timestamp = treatment.created_at;
-      const treatmentTime = new Date(timestamp).getTime();
+      const treatmentTime = getTreatmentMs(treatment);
       
       // Find closest glucose reading
-      const closestReading = filteredData.entries.reduce((closest, reading) => {
-        const readingTime = new Date(reading.date).getTime();
-        const currentDiff = Math.abs(readingTime - treatmentTime);
-        const closestDiff = Math.abs(new Date(closest.date).getTime() - treatmentTime);
-        return currentDiff < closestDiff ? reading : closest;
-      });
+      const closestReading = findClosestReading(treatmentTime);
 
       // Calculate delta from previous reading
-      const previousReading = filteredData.entries.find(r => 
-        new Date(r.date).getTime() < treatmentTime - 5 * 60 * 1000 &&
-        new Date(r.date).getTime() > treatmentTime - 15 * 60 * 1000
-      );
+      const previousReading = findPreviousReading(treatmentTime);
 
       const delta = previousReading ? closestReading.sgv - previousReading.sgv : 0;
 
       return {
         timestamp,
+        timestampMs: treatmentTime,
         glucose: closestReading.sgv,
         iob: treatment.iob || 0,
         cob: treatment.cob || 0,
@@ -148,7 +193,7 @@ const OpenAPSSMB = () => {
       };
     });
 
-    setSmbEvents(events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    setSmbEvents(events.sort((a, b) => b.timestampMs - a.timestampMs));
 
     // Calculate statistics
     if (events.length > 0) {
@@ -159,14 +204,21 @@ const OpenAPSSMB = () => {
       
       // Effectiveness analysis
       const effectiveEvents = events.filter(e => {
-        const futureReadings = filteredData.entries.filter(r => {
-          const readingTime = new Date(r.date).getTime();
-          const eventTime = new Date(e.timestamp).getTime();
-          return readingTime > eventTime && readingTime <= eventTime + 2 * 60 * 60 * 1000; // 2 hours post-meal
-        });
-        
-        if (futureReadings.length === 0) return false;
-        const avgFutureGlucose = futureReadings.reduce((sum, r) => sum + r.sgv, 0) / futureReadings.length;
+
+        const startMs = e.timestampMs;
+        const endMs = e.timestampMs + 2 * 60 * 60 * 1000;
+        const startIndex = upperBoundByMs(readingsAsc, getReadingMs, startMs);
+        const endIndex = upperBoundByMs(readingsAsc, getReadingMs, endMs);
+        if (endIndex <= startIndex) return false;
+
+        let sum = 0;
+        let count = 0;
+        for (let i = startIndex; i < endIndex; i++) {
+          sum += readingsAsc[i].sgv;
+          count++;
+        }
+        if (count === 0) return false;
+        const avgFutureGlucose = sum / count;
         return avgFutureGlucose < e.glucose; // SMB was effective if glucose decreased
       });
 
@@ -184,7 +236,7 @@ const OpenAPSSMB = () => {
         avgGlucose: avgGlucose, // Keep in mg/dL, format on display
         effectiveness: ((effectiveEvents.length / events.length) * 100).toFixed(1),
         last24h: events.filter(e => 
-          new Date(e.timestamp).getTime() > Date.now() - 24 * 60 * 60 * 1000
+          e.timestampMs > Date.now() - 24 * 60 * 60 * 1000
         ).length,
         carbRelatedSMBs: carbRelatedSMBs.length,
         avgCarbSMB: avgCarbSMB.toFixed(3)
@@ -451,7 +503,7 @@ const OpenAPSSMB = () => {
           readings={filteredData.entries} 
           treatments={filteredData.treatments}
           analysisDays={isCustomRange ? 
-            Math.ceil((new Date(customDateRange.endDate).getTime() - new Date(customDateRange.startDate).getTime()) / (1000 * 60 * 60 * 24)) :
+            Math.max(1, Math.ceil((selectedRange.endMs - selectedRange.startMs) / (1000 * 60 * 60 * 24))) :
             Math.ceil(timeWindow / 24)
           }
           onOptimizationComplete={setAiOptimization}

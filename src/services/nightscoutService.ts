@@ -1,9 +1,41 @@
 // deno-lint-ignore-file no-explicit-any
 import { subDays } from 'date-fns';
+import { debugError, debugLog, debugWarn } from '../utils/logger';
+import { toEpochMs } from '../utils/time';
+import {
+  normalizeNightscoutV3DeviceStatusArray,
+  normalizeNightscoutV3ProfileArray,
+  unwrapNightscoutV3Entries,
+  unwrapNightscoutV3Treatments
+} from '../utils/nightscoutUnwrap';
+import { createPagedFetchV3 } from '../utils/nightscoutPaging';
+import { normalizeNightscoutV1Data } from '../utils/nightscoutNormalizeV1';
+import { fetchNightscoutV1EntriesPaged, fetchNightscoutV1TreatmentsPaged } from '../utils/nightscoutV1Paging';
+import type { NightscoutFetchResult } from '../types/nightscout';
+import { createAsyncRequestCache } from '../utils/asyncRequestCache';
+import {
+  parseNightscoutDeviceStatus,
+  parseNightscoutEntries,
+  parseNightscoutProfiles,
+  parseNightscoutTreatments
+} from '../utils/nightscoutParse';
+import {
+  AuthError,
+  BadResponseError,
+  RateLimitedError,
+  TimeoutError,
+  isNightscoutError
+} from '../utils/nightscoutErrors';
 
 const MAX_RETRIES = 5;
 const INITIAL_RETRY_DELAY = 2000; // Initial delay in milliseconds
 const MAX_RETRY_DELAY = 32000; // Maximum delay in milliseconds
+
+const NIGHTSCOUT_REQUEST_CACHE_TTL_MS = 10_000;
+const nightscoutRequestCache = createAsyncRequestCache<unknown>({
+  defaultTtlMs: NIGHTSCOUT_REQUEST_CACHE_TTL_MS,
+  maxEntries: 250
+});
 
 // Detect if running in WebContainer environment
 const isWebContainer = (): boolean => {
@@ -22,7 +54,7 @@ const formatUrl = (url: string): string => {
 
   let formattedUrl = url.trim();
   
-  console.log(`🔧 formatUrl input: "${formattedUrl}"`);
+  debugLog(`🔧 formatUrl input: "${formattedUrl}"`);
   
   try {
     // Handle URLs with or without protocol
@@ -33,7 +65,7 @@ const formatUrl = (url: string): string => {
     // Remove any query parameters or hash fragments before validation
     formattedUrl = formattedUrl.split(/[?#]/)[0];
 
-    console.log(`🔧 formatUrl after protocol/cleanup: "${formattedUrl}"`);
+    debugLog(`🔧 formatUrl after protocol/cleanup: "${formattedUrl}"`);
 
     const urlObj = new URL(formattedUrl);
     
@@ -45,11 +77,11 @@ const formatUrl = (url: string): string => {
     // Remove trailing slashes and normalize path
     const finalUrl = urlObj.origin + (urlObj.pathname === '/' ? '' : urlObj.pathname.replace(/\/+$/, ''));
     
-    console.log(`🔧 formatUrl final output: "${finalUrl}"`);
+    debugLog(`🔧 formatUrl final output: "${finalUrl}"`);
     
     return finalUrl;
   } catch (error) {
-    console.error('🔧 URL validation error:', error);
+    debugError('🔧 URL validation error:', error);
     throw new Error(`Invalid Nightscout URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
@@ -59,7 +91,7 @@ const getProxyUrl = (): string => {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-  console.log('Environment check:', {
+  debugLog('Environment check:', {
     supabaseUrl: supabaseUrl ? `${supabaseUrl.substring(0, 20)}...` : 'undefined',
     supabaseAnonKey: supabaseAnonKey ? `${supabaseAnonKey.substring(0, 20)}...` : 'undefined',
     allEnvVars: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')),
@@ -77,10 +109,10 @@ const getProxyUrl = (): string => {
   try {
     // Validate that the Supabase URL is properly formatted
     const url = new URL('/functions/v1/nightscout-proxy', supabaseUrl.trim());
-    console.log('Proxy URL constructed:', url.toString());
+    debugLog('Proxy URL constructed:', url.toString());
     return url.toString();
   } catch (error) {
-    console.error('Supabase URL validation error:', error);
+    debugError('Supabase URL validation error:', error);
     throw new Error(`Invalid Supabase URL configuration: ${error instanceof Error ? error.message : 'Unknown error'}. Please check your VITE_SUPABASE_URL environment variable.`);
   }
 };
@@ -121,8 +153,10 @@ const getErrorMessage = (error: unknown): string => {
   }
   
   if (typeof error === 'object') {
-    const errorObj = error as any;
-    return errorObj.message || errorObj.error || errorObj.toString() || 'Unknown error object';
+    const errorObj = error as { message?: unknown; error?: unknown };
+    if (typeof errorObj.message === 'string' && errorObj.message) return errorObj.message;
+    if (typeof errorObj.error === 'string' && errorObj.error) return errorObj.error;
+    return String(error);
   }
   
   return String(error) || 'Failed to convert error to string';
@@ -164,7 +198,7 @@ const makeProxyRequestWithFallback = async (
   requestMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   requestBody?: unknown
 ) => {
-  console.log(`🔍 makeProxyRequestWithFallback called with:`, {
+  debugLog(`🔍 makeProxyRequestWithFallback called with:`, {
     nightscoutUrl: nightscoutUrl?.substring(0, 50) + '...',
     path,
     hasToken: !!token,
@@ -181,12 +215,12 @@ const makeProxyRequestWithFallback = async (
   // For API v1, use the correct authentication method directly
   // The proxy now handles API v1 with API-SECRET header, so use 'auto' to let it decide
   try {
-    console.log(`🔄 Using standard API v1 authentication with API-SECRET header`);
+    debugLog(`🔄 Using standard API v1 authentication with API-SECRET header`);
     const result = await makeProxyRequest(nightscoutUrl, path, token, signal, apiVersion, 'auto', requestMethod, requestBody);
-    console.log(`✅ API v1 authentication succeeded`);
+    debugLog(`✅ API v1 authentication succeeded`);
     return result;
   } catch (error) {
-    console.log(`❌ API v1 authentication failed:`, error instanceof Error ? error.message : String(error));
+    debugWarn(`❌ API v1 authentication failed:`, error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
@@ -214,112 +248,122 @@ const makeProxyRequest = async (
 ) => {
   // Check if signal is already aborted
   if (signal?.aborted) {
-    console.log('Request aborted before starting:', signal.reason);
+    debugLog('Request aborted before starting:', signal.reason);
     return null;
   }
 
   try {
     const proxyUrl = getProxyUrl();
-    
-    let lastError: Error | null = null;
-    let lastResponse: string | null = null;
-    
-    // Try the request up to MAX_RETRIES times
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        // Check if signal is aborted before each attempt
-        if (signal?.aborted) {
-          console.log('Request aborted before attempt:', signal.reason);
-          return null;
-        }
 
-        // If this isn't the first attempt, wait with exponential backoff + jitter
-        if (attempt > 0) {
-          const baseDelay = Math.min(
-            INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1),
-            MAX_RETRY_DELAY
-          );
+    // Validate URL once per request (not once per retry attempt)
+    const validatedUrl = formatUrl(nightscoutUrl);
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+    const trimmedToken = token?.trim();
 
-          // Equal-jitter: base/2 .. base
-          const jitteredDelay = Math.floor(baseDelay / 2 + Math.random() * (baseDelay / 2));
-          await sleep(jitteredDelay, signal);
-        }
-
-        // Format and validate URL before making request
-        const validatedUrl = formatUrl(nightscoutUrl);
-        console.log(`📡 Making proxy request:`, {
-          url: validatedUrl?.substring(0, 50) + '...',
-          path,
-          hasToken: !!token,
-          tokenPreview: token ? token.substring(0, 8) + '...' : 'none',
+    // Small in-memory TTL cache + inflight dedupe.
+    // Enabled for GET requests (no body). If a caller provides an AbortSignal, we only cancel *waiting*;
+    // the underlying shared request is not aborted to avoid cross-cancelling other callers.
+    const isCacheable = requestMethod === 'GET' && (requestBody === undefined || requestBody === null);
+    const cacheKey = isCacheable
+      ? JSON.stringify({
+          url: validatedUrl,
+          path: normalizedPath,
+          token: trimmedToken ?? '',
           apiVersion,
           authMethod,
-          requestMethod,
-          attempt: attempt + 1
-        });
+          method: requestMethod
+        })
+      : null;
 
-        const response = await fetch(proxyUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            url: validatedUrl,
-            path: path.startsWith('/') ? path : `/${path}`,
-            token: token?.trim(),
+    const executeWithRetries = async (effectiveSignal?: AbortSignal): Promise<unknown> => {
+      let lastError: Error | null = null;
+      let lastResponse: string | null = null;
+    
+      // Try the request up to MAX_RETRIES times
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          // Check if signal is aborted before each attempt
+          if (effectiveSignal?.aborted) {
+            debugLog('Request aborted before attempt:', effectiveSignal.reason);
+            return null;
+          }
+
+          // If this isn't the first attempt, wait with exponential backoff + jitter
+          if (attempt > 0) {
+            const baseDelay = Math.min(
+              INITIAL_RETRY_DELAY * Math.pow(2, attempt - 1),
+              MAX_RETRY_DELAY
+            );
+
+            // Equal-jitter: base/2 .. base
+            const jitteredDelay = Math.floor(baseDelay / 2 + Math.random() * (baseDelay / 2));
+            await sleep(jitteredDelay, effectiveSignal);
+          }
+
+          debugLog(`📡 Making proxy request:`, {
+            url: validatedUrl?.substring(0, 50) + '...',
+            path: normalizedPath,
+            hasToken: !!trimmedToken,
+            tokenPreview: trimmedToken ? trimmedToken.substring(0, 8) + '...' : 'none',
             apiVersion,
             authMethod,
-            method: requestMethod,
-            body: requestBody
-          }),
-          signal,
-          credentials: 'omit'
-        });
+            requestMethod,
+            attempt: attempt + 1
+          });
+
+          const response = await fetch(proxyUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              url: validatedUrl,
+              path: normalizedPath,
+              token: trimmedToken,
+              apiVersion,
+              authMethod,
+              method: requestMethod,
+              body: requestBody
+            }),
+            signal: effectiveSignal,
+            credentials: 'omit'
+          });
 
         if (!response.ok) {
           const errorData = await response.text();
           lastResponse = errorData;
           const errorMessage = parseErrorResponse(errorData);
-          
-          // Provide more specific error messages based on status code
-          if (response.status === 502) {
-            throw new Error(`Proxy server error: ${errorMessage}. This usually means your Nightscout server is unreachable from the internet.`);
-          } else if (response.status === 504) {
-            throw new Error(`Request timeout: ${errorMessage}. Your Nightscout server may be slow to respond.`);
-          } else if (response.status === 503) {
-            throw new Error(`Nightscout server unavailable: ${errorMessage}. Your Nightscout server is temporarily unable to handle requests. This could be due to server maintenance, high load, or technical issues. Please try again later.`);
-          } else if (response.status === 401) {
-            const authError = new Error(`Authentication failed: ${errorMessage}. Please check your API token.`);
-            authError.name = 'AuthenticationError';
-            throw authError;
-          } else if (response.status === 403) {
-            const forbiddenError = new Error(`Access forbidden: ${errorMessage}. Your API token may not have sufficient permissions.`);
-            forbiddenError.name = 'ForbiddenError';
-            throw forbiddenError;
-          } else if (response.status === 400) {
-            const badRequestError = new Error(`Bad request: ${errorMessage}. The request parameters may be invalid.`);
-            badRequestError.name = 'BadRequestError';
-            throw badRequestError;
-          } else if (response.status === 404) {
-            const notFoundError = new Error(`Not found: ${errorMessage}. The requested endpoint may not exist.`);
-            notFoundError.name = 'NotFoundError';
-            throw notFoundError;
-          } else {
-            throw new Error(`HTTP ${response.status}: ${errorMessage}`);
+
+          const status = response.status;
+
+          if (status === 401 || status === 403) {
+            throw new AuthError(`Authentication failed: ${errorMessage}`, { status, cause: errorData });
           }
+
+          if (status === 429) {
+            throw new RateLimitedError(`Rate limited: ${errorMessage}`, { status, cause: errorData });
+          }
+
+          if (status === 504) {
+            throw new TimeoutError(`Request timeout: ${errorMessage}`, { status, cause: errorData });
+          }
+
+          // 4xx is typically non-retryable; 5xx/502/503 are often transient.
+          const retryable = status >= 500 || status === 502 || status === 503;
+          throw new BadResponseError(`HTTP ${status}: ${errorMessage}`, { status, retryable, cause: errorData });
         }
 
-        const responseText = await response.text();
-        lastResponse = responseText;
+          const responseText = await response.text();
+          lastResponse = responseText;
 
-        try {
-          const responseData = JSON.parse(responseText);
+          try {
+            const responseData = JSON.parse(responseText);
 
           // Check if signal was aborted during the request
-          if (signal?.aborted) {
-            console.log('Request aborted during fetch:', signal.reason);
+          if (effectiveSignal?.aborted) {
+            debugLog('Request aborted during fetch:', effectiveSignal.reason);
             return null;
           }
 
@@ -330,8 +374,8 @@ const makeProxyRequest = async (
           
           // Return empty array if no data
           if (!responseData.data) {
-            console.log('⚠️ No data received from Nightscout server, returning empty array');
-            console.log('⚠️ Full response:', responseData);
+            debugWarn('⚠️ No data received from Nightscout server, returning empty array');
+            debugLog('⚠️ Full response:', responseData);
             return [];
           }
 
@@ -340,102 +384,127 @@ const makeProxyRequest = async (
             throw new Error(`Invalid response type from proxy: expected object or array, got ${typeof responseData.data}`);
           }
 
-          console.log(`✅ Received data from Nightscout: ${Array.isArray(responseData.data) ? responseData.data.length + ' items' : 'object'}`);
-          return responseData.data;
-        } catch (parseError) {
-          const parseErrorMessage = getErrorMessage(parseError);
-          console.error('Failed to parse proxy response:', {
-            error: parseErrorMessage,
-            responsePreview: responseText.substring(0, 200)
+            debugLog(
+              `✅ Received data from Nightscout: ${Array.isArray(responseData.data) ? responseData.data.length + ' items' : 'object'}`
+            );
+            return responseData.data;
+          } catch (parseError) {
+            const parseErrorMessage = getErrorMessage(parseError);
+            debugError('Failed to parse proxy response:', {
+              error: parseErrorMessage,
+              responsePreview: responseText.substring(0, 200)
+            });
+            throw new BadResponseError(
+              `Failed to parse proxy response: ${parseErrorMessage}`,
+              { retryable: true, cause: responseText.substring(0, 200) }
+            );
+          }
+        } catch (error) {
+          // Check if signal was aborted during error handling
+          if (effectiveSignal?.aborted) {
+            debugLog('Request aborted during error handling:', effectiveSignal.reason);
+            return null;
+          }
+
+          if (error instanceof Error && error.name === 'AbortError') {
+            debugLog('Request aborted:', error.message);
+            return null;
+          }
+
+          // Check if this is a WebContainer network restriction
+          if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+            if (isWebContainer()) {
+              const webContainerError = createWebContainerError();
+              throw webContainerError;
+            }
+          }
+
+          const errorMessage = getErrorMessage(error);
+          lastError = new Error(errorMessage);
+
+          // Don't retry on known non-retryable Nightscout/proxy errors.
+          if (isNightscoutError(error) && !error.retryable) {
+            console.error('Non-retryable Nightscout/proxy error, not retrying:', errorMessage);
+            throw error;
+          }
+
+          // Enhanced error handling for network issues
+          if (error instanceof TypeError && errorMessage.includes('Failed to fetch')) {
+            lastError = new Error(
+              `Network connection failed. This could be due to:\n` +
+                '• Your internet connection is down or unstable\n' +
+                '• Supabase Edge Functions are not properly configured or deployed\n' +
+                '• Your browser is blocking the connection (check for ad blockers)\n' +
+                '• CORS or firewall blocking the connection\n' +
+                '• Invalid Supabase project URL or API key\n' +
+                '• Environment variables not properly loaded (check .env file)\n' +
+                '• Your Nightscout server is offline or unreachable\n' +
+                '• WebContainer environment restrictions on outbound requests\n\n' +
+                'Please verify your network connection and Supabase configuration.\n' +
+                `Original error: ${errorMessage || 'No error message provided'}`
+            );
+          } else if (!errorMessage || errorMessage === 'undefined' || errorMessage.trim() === '') {
+            lastError = new Error(
+              'Request failed with no error message. This typically indicates:\n' +
+                '• Network connectivity issues\n' +
+                '• DNS resolution problems\n' +
+                '• Firewall or proxy blocking the request\n' +
+                '• Invalid Supabase configuration\n' +
+                '• WebContainer environment restrictions\n' +
+                '• Edge function timeout or internal error'
+            );
+          }
+
+          debugWarn('Proxy request error:', {
+            attempt: attempt + 1,
+            error: lastError.message,
+            stack: lastError.stack,
+            lastResponse: lastResponse?.substring(0, 200),
+            nightscoutError: isNightscoutError(error)
+              ? { kind: error.kind, status: error.status, retryable: error.retryable }
+              : null
           });
-          throw new Error(
-            `Failed to parse proxy response: ${parseErrorMessage}. Response preview: ${responseText.substring(0, 200)}`
-          );
-        }
-      } catch (error) {
-        // Check if signal was aborted during error handling
-        if (signal?.aborted) {
-          console.log('Request aborted during error handling:', signal.reason);
-          return null;
-        }
 
-        if (error instanceof Error && error.name === 'AbortError') {
-          console.log('Request aborted:', error.message);
-          return null;
-        }
+          // Don't retry WebContainer network errors
+          if (lastError.name === 'WebContainerNetworkError') {
+            throw lastError;
+          }
 
-        // Check if this is a WebContainer network restriction
-        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-          if (isWebContainer()) {
-            const webContainerError = createWebContainerError();
-            throw webContainerError;
+          if (attempt === MAX_RETRIES - 1) {
+            if (isNightscoutError(error)) throw error;
+            throw new Error(`Failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
           }
         }
-        
-        const errorMessage = getErrorMessage(error);
-        lastError = new Error(errorMessage);
-        
-        // Don't retry on non-transient HTTP errors (authentication, authorization, bad request, not found)
-        if (error instanceof Error && 
-            ['ForbiddenError', 'BadRequestError', 'NotFoundError'].includes(error.name)) {
-          console.error('Non-transient error, not retrying:', errorMessage);
-          throw error;
-        }
-        
-        // For authentication errors, throw immediately but allow fallback logic to handle them
-        if (error instanceof Error && error.name === 'AuthenticationError') {
-          console.error('Authentication error, throwing for fallback handling:', errorMessage);
-          throw error;
-        }
-        
-        // Enhanced error handling for network issues
-        if (error instanceof TypeError && errorMessage.includes('Failed to fetch')) {
-          lastError = new Error(
-            `Network connection failed. This could be due to:\n` +
-            '• Your internet connection is down or unstable\n' +
-            '• Supabase Edge Functions are not properly configured or deployed\n' +
-            '• Your browser is blocking the connection (check for ad blockers)\n' +
-            '• CORS or firewall blocking the connection\n' +
-            '• Invalid Supabase project URL or API key\n' +
-            '• Environment variables not properly loaded (check .env file)\n' +
-            '• Your Nightscout server is offline or unreachable\n' +
-            '• WebContainer environment restrictions on outbound requests\n\n' +
-            'Please verify your network connection and Supabase configuration.\n' +
-            `Original error: ${errorMessage || 'No error message provided'}`
-          );
-        } else if (!errorMessage || errorMessage === 'undefined' || errorMessage.trim() === '') {
-          lastError = new Error(
-            'Request failed with no error message. This typically indicates:\n' +
-            '• Network connectivity issues\n' +
-            '• DNS resolution problems\n' +
-            '• Firewall or proxy blocking the request\n' +
-            '• Invalid Supabase configuration\n' +
-            '• WebContainer environment restrictions\n' +
-            '• Edge function timeout or internal error'
-          );
-        }
-        
-        console.error('Proxy request error:', {
-          attempt: attempt + 1,
-          error: lastError.message,
-          stack: lastError.stack,
-          lastResponse: lastResponse?.substring(0, 200)
-        });
-        
-        // Don't retry WebContainer network errors
-        if (lastError.name === 'WebContainerNetworkError') {
-          throw lastError;
-        }
-        
-        if (attempt === MAX_RETRIES - 1) {
-          throw new Error(`Failed after ${MAX_RETRIES} attempts: ${lastError.message}`);
-        }
       }
+
+      throw lastError || new Error('Failed to make request after all retries');
+    };
+
+    const waitUnlessAborted = async (promise: Promise<unknown>): Promise<unknown> => {
+      if (!signal) return promise;
+      if (signal.aborted) return null;
+
+      return await Promise.race<unknown>([
+        promise,
+        new Promise<unknown>((resolve) => {
+          signal.addEventListener('abort', () => resolve(null), { once: true });
+        })
+      ]);
+    };
+
+    if (cacheKey) {
+      const shared = nightscoutRequestCache.getOrCreate(cacheKey, () => executeWithRetries(undefined));
+      return await waitUnlessAborted(shared);
     }
 
-    throw lastError || new Error('Failed to make request after all retries');
+    return await executeWithRetries(signal);
   } catch (error) {
     const errorMessage = getErrorMessage(error);
+
+    // Preserve typed Nightscout/proxy errors for higher-level formatting.
+    if (isNightscoutError(error)) {
+      throw error;
+    }
     
     // Don't wrap WebContainer network errors
     if (error instanceof Error && error.name === 'WebContainerNetworkError') {
@@ -622,12 +691,12 @@ export const fetchData = async (
   token?: string,
   signal?: AbortSignal,
   preferredApiVersion?: 'v1' | 'v3' | null
-) => {
+): Promise<NightscoutFetchResult | null> => {
   try {
     const startDate = subDays(new Date(), days).toISOString();
     const endDate = new Date().toISOString();
 
-    console.log(`📥 Fetching ${days} days of data from ${startDate} to ${endDate}`);
+    debugLog(`📥 Fetching ${days} days of data from ${startDate} to ${endDate}`);
 
     // Enhanced count limits for larger datasets - UP TO 30,000 READINGS
     const getCountLimit = (days: number) => {
@@ -640,15 +709,21 @@ export const fetchData = async (
     };
 
     const countLimit = getCountLimit(days);
-    console.log(`📊 Using count limit: ${countLimit} for ${days} days`);
+    debugLog(`📊 Using count limit: ${countLimit} for ${days} days`);
+
+    const isRecord = (value: unknown): value is Record<string, unknown> => {
+      return !!value && typeof value === 'object' && !Array.isArray(value);
+    };
 
     // Use the specified API version - no fallback logic
-    let entries, treatments, profiles;
+    let entries: unknown[] | null = null;
+    let treatments: unknown[] | null = null;
+    let profiles: unknown = null;
     const apiVersion = preferredApiVersion || 'v1'; // Default to v1 if not specified
-    let result;
+    let result: NightscoutFetchResult;
     
     if (apiVersion === 'v1') {
-      console.log('🔧 Using API v1 (optimized for cost)...');
+      debugLog('🔧 Using API v1 (optimized for cost)...');
       
       // OPTIMIZATION: Use date timestamp instead of dateString for better performance
       // Most Nightscout instances index by date (timestamp) which is more reliable
@@ -660,190 +735,30 @@ export const fetchData = async (
         const maxV1PageSize = 10000;
         const optimizedLimit = countLimit;
       
-      // Build endpoints
-        const getV1EntryDateMs = (entry: any): number | null => {
-          const candidate = entry?.date ?? entry?.mills ?? entry?.srvCreated ?? entry?.dateString ?? entry?.created_at;
-          if (candidate == null) return null;
-          if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
-          if (typeof candidate === 'string') {
-            const asNumber = Number(candidate);
-            if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
-            const asDate = Date.parse(candidate);
-            if (Number.isFinite(asDate)) return asDate;
-          }
-          return null;
-        };
-
         const safeProxyFetch = async (
           path: string
-        ): Promise<any[]> => {
+        ): Promise<unknown[]> => {
           try {
             const res = await makeProxyRequestWithFallback(url, path, token, signal, 'v1');
             return Array.isArray(res) ? res : [];
           } catch (e) {
-            console.warn('⚠️ Non-fatal Nightscout fetch failed:', { path, error: getErrorMessage(e) });
+            debugWarn('⚠️ Non-fatal Nightscout fetch failed:', { path, error: getErrorMessage(e) });
             return [];
           }
         };
 
-        const normalizeEpochMs = (value: number): number => {
-          // Heuristic: epoch seconds are ~1e9, epoch ms are ~1e12.
-          // Treat anything < 1e11 as seconds.
-          if (value > 0 && value < 1e11) return value * 1000;
-          return value;
+        const pagingConfig = {
+          startTimestamp,
+          endTimestamp,
+          startDateIso: startDate,
+          endDateIso: endDate,
+          entriesTarget: optimizedLimit,
+          maxV1EntryPageSize: maxV1PageSize,
+          debugLog
         };
 
-        const getV1TreatmentTimeMs = (treatment: any): number | null => {
-          const candidate = treatment?.created_at ?? treatment?.timestamp ?? treatment?.mills;
-          if (candidate == null) return null;
-          if (typeof candidate === 'number' && Number.isFinite(candidate)) return normalizeEpochMs(candidate);
-          if (typeof candidate === 'string') {
-            const asNumber = Number(candidate);
-            if (Number.isFinite(asNumber) && asNumber > 0) return normalizeEpochMs(asNumber);
-            const asDate = Date.parse(candidate);
-            if (Number.isFinite(asDate)) return asDate;
-          }
-          return null;
-        };
-
-        const fetchV1TreatmentsPaged = async () => {
-          // Nightscout v1 treatments often cap at count=5000.
-          // For long ranges (e.g. 90 days) we need pagination, otherwise older sensor events disappear.
-          const pageSize = 5000;
-          const maxPages = 25; // safety cap to avoid unbounded loads
-
-          console.log(`📄 API v1 treatments pagination enabled (max ${maxPages} pages × ${pageSize})`);
-
-          const fetchCreatedAtPages = async () => {
-            const collected: any[] = [];
-            let cursorIso: string | null = endDate;
-
-            for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-              const params = new URLSearchParams();
-              params.set('count', String(pageSize));
-              params.set('sort$desc', 'created_at');
-              // Do NOT rely on server-side $gte filters here; some instances ignore/handle them inconsistently.
-              // We page backwards by cursor and stop once we've reached the requested start.
-              params.set(pageIndex === 0 ? 'find[created_at][$lte]' : 'find[created_at][$lt]', cursorIso ?? endDate);
-              const path = `/api/v1/treatments?${params.toString()}`;
-
-              console.log(`📄 API v1 treatments(created_at) page ${pageIndex + 1}/${maxPages}: ${path}`);
-              const page = await safeProxyFetch(path);
-              if (!page.length) break;
-              collected.push(...page);
-
-              const oldest = page[page.length - 1];
-              const oldestMs = getV1TreatmentTimeMs(oldest);
-              if (!oldestMs || oldestMs <= startTimestamp) break;
-              cursorIso = new Date(oldestMs).toISOString();
-
-              if (page.length < pageSize) break;
-            }
-
-            return collected;
-          };
-
-          const fetchTimestampPages = async () => {
-            const collected: any[] = [];
-            let cursorMs: number | null = endTimestamp;
-
-            for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-              const params = new URLSearchParams();
-              params.set('count', String(pageSize));
-              params.set('sort$desc', 'timestamp');
-              // Same approach as created_at: page by cursor only, then filter client-side.
-              params.set(pageIndex === 0 ? 'find[timestamp][$lte]' : 'find[timestamp][$lt]', String(cursorMs ?? endTimestamp));
-              const path = `/api/v1/treatments?${params.toString()}`;
-
-              console.log(`📄 API v1 treatments(timestamp) page ${pageIndex + 1}/${maxPages}: ${path}`);
-              const page = await safeProxyFetch(path);
-              if (!page.length) break;
-              collected.push(...page);
-
-              const oldest = page[page.length - 1];
-              const oldestMs = getV1TreatmentTimeMs(oldest);
-              if (!oldestMs || oldestMs <= startTimestamp) break;
-              cursorMs = oldestMs;
-
-              if (page.length < pageSize) break;
-            }
-
-            return collected;
-          };
-
-          const byCreatedAt = await fetchCreatedAtPages();
-          // Most Nightscout instances include `created_at`. Only fall back to timestamp paging
-          // when `created_at` is missing/unusable for the requested range.
-          const byTimestamp = byCreatedAt.length > 0 ? [] : await fetchTimestampPages();
-
-          const combined = [...byCreatedAt, ...byTimestamp];
-          const seen = new Set<string>();
-
-          const deduped = combined.filter((t: any) => {
-            const id = t?._id ?? t?.id;
-            const key = id ? String(id) : `${t?.eventType ?? ''}:${t?.created_at ?? ''}:${t?.timestamp ?? ''}:${t?.enteredBy ?? ''}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-
-          const inRange = deduped.filter((t: any) => {
-            const tMs = getV1TreatmentTimeMs(t);
-            if (!tMs) return false;
-            return tMs >= startTimestamp && tMs <= endTimestamp;
-          });
-
-          console.log(`📄 API v1 treatments collected: ${combined.length}, deduped: ${deduped.length}, in-range: ${inRange.length}`);
-          return inRange;
-        };
-
-        const buildV1EntriesPath = (cursor: number | null, isFirstPage: boolean, pageCount: number) => {
-          const params = new URLSearchParams();
-          params.set('count', String(pageCount));
-          params.set('sort$desc', 'date');
-          params.set('find[date][$gte]', String(startTimestamp));
-          params.set(isFirstPage ? 'find[date][$lte]' : 'find[date][$lt]', String(cursor ?? endTimestamp));
-          return `/api/v1/entries?${params.toString()}`;
-        };
-
-        const fetchV1EntriesPaged = async () => {
-          const collected: any[] = [];
-          const seen = new Set<string>();
-          const target = Math.min(optimizedLimit, 30000);
-
-          let cursor: number | null = endTimestamp;
-          const maxPages = Math.max(1, Math.ceil(target / maxV1PageSize));
-
-          for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-            const remaining = target - collected.length;
-            if (remaining <= 0) break;
-
-            const pageSize = Math.min(maxV1PageSize, remaining);
-            const path = buildV1EntriesPath(cursor, pageIndex === 0, pageSize);
-            console.log(`📄 API v1 entries page ${pageIndex + 1}/${maxPages}: ${path}`);
-
-            const page = await safeProxyFetch(path);
-            if (!page.length) break;
-
-            for (const item of page) {
-              const id = item?._id ?? item?.id ?? getV1EntryDateMs(item);
-              const key = `${id ?? ''}:${item?.type ?? ''}:${item?.sgv ?? ''}`;
-              if (!seen.has(key)) {
-                seen.add(key);
-                collected.push(item);
-              }
-            }
-
-            const oldest = page[page.length - 1];
-            const oldestDate = getV1EntryDateMs(oldest);
-            if (!oldestDate || oldestDate <= startTimestamp) break;
-            cursor = oldestDate;
-
-            if (page.length < pageSize) break;
-          }
-
-          return collected;
-        };
+        const fetchV1EntriesPaged = () => fetchNightscoutV1EntriesPaged(safeProxyFetch, pagingConfig);
+        const fetchV1TreatmentsPaged = () => fetchNightscoutV1TreatmentsPaged(safeProxyFetch, pagingConfig);
 
       const v1ProfilePath = '/api/v1/profile';
       const v1DeviceStatusPath = '/api/v1/devicestatus?count=1';
@@ -861,23 +776,31 @@ export const fetchData = async (
       profiles = profilesRes;
       const deviceStatus = deviceStatusRes;
 
-      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
-      console.log(`👤 Profile result: ${Array.isArray(profiles) ? profiles.length + ' items' : typeof profiles}`);
-      console.log(`📱 Device status result: ${Array.isArray(deviceStatus) ? deviceStatus.length + ' items' : typeof deviceStatus}`);
+      const normalizedV1 = normalizeNightscoutV1Data({
+        entries,
+        treatments,
+        deviceStatus
+      });
+
+      debugLog(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      debugLog(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
+      debugLog(`👤 Profile result: ${Array.isArray(profiles) ? profiles.length + ' items' : typeof profiles}`);
+      debugLog(`📱 Device status result: ${normalizedV1.deviceStatus.length} items`);
       
-      console.log('✅ Successfully fetched data using API v1 (4 optimized requests)');
+      debugLog('✅ Successfully fetched data using API v1 (4 optimized requests)');
+
+      const parsedProfiles = parseNightscoutProfiles(profiles);
       
       // Return the detected API version along with the data
       result = {
-        entries: Array.isArray(entries) ? entries : [],
-        treatments: Array.isArray(treatments) ? treatments : [],
-        profile: Array.isArray(profiles) ? profiles : [],
-        deviceStatus: Array.isArray(deviceStatus) ? deviceStatus : [],
+        entries: normalizedV1.entries,
+        treatments: normalizedV1.treatments,
+        profile: parsedProfiles,
+        deviceStatus: normalizedV1.deviceStatus,
         detectedApiVersion: apiVersion as 'v1' | 'v3'
       };
     } else if (apiVersion === 'v3') {
-      console.log('Using detected API v3...');
+      debugLog('Using detected API v3...');
       // API v3 uses different query parameter syntax and endpoints
       // Convert ISO date to timestamp for API v3 compatibility
       const startTimestamp = new Date(startDate).getTime();
@@ -888,25 +811,18 @@ export const fetchData = async (
       // The API v3 limit can be up to 1000 per request
       const maxV3Limit = 1000;
       
-      console.log(`📅 API v3 date range: ${startTimestamp} to ${endTimestamp}`);
-      console.log(`📊 Requesting data for ${days} days`);
+      debugLog(`📅 API v3 date range: ${startTimestamp} to ${endTimestamp}`);
+      debugLog(`📊 Requesting data for ${days} days`);
 
       // For API v3, we'll make a single optimized request for each data type
       // Using date$gte and date$lte query parameters (API v3 uses $ instead of [] for filters)
       
       type V3ParamStyle = 'filter' | 'dollar';
 
-      const getEntryDate = (entry: any): number | null => {
-        const candidate = entry?.date ?? entry?.srvCreated ?? entry?.mills ?? entry?.dateString ?? entry?.created_at;
-        if (candidate == null) return null;
-        if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
-        if (typeof candidate === 'string') {
-          const asNumber = Number(candidate);
-          if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
-          const asDate = Date.parse(candidate);
-          if (Number.isFinite(asDate)) return asDate;
-        }
-        return null;
+      const getEntryDate = (entry: unknown): number | null => {
+        if (!isRecord(entry)) return null;
+        const candidate = entry.date ?? entry.srvCreated ?? entry.mills ?? entry.dateString ?? entry.created_at;
+        return toEpochMs(candidate);
       };
 
       const estimateMaxPagesForDays = (days: number) => {
@@ -915,64 +831,32 @@ export const fetchData = async (
         return Math.min(50, Math.max(3, Math.ceil(estimatedPoints / maxV3Limit) + 1));
       };
 
-      const buildV3EntriesPath = (style: V3ParamStyle, cursor: number | null, isFirstPage: boolean) => {
-        const params = new URLSearchParams();
-        params.set('limit', String(maxV3Limit));
-
-        if (style === 'filter') {
-          // Nightscout v3 canonical filtering
-          params.set('filter[date][$gte]', String(startTimestamp));
-          params.set(isFirstPage ? 'filter[date][$lte]' : 'filter[date][$lt]', String(cursor ?? endTimestamp));
-          params.set('sort', '-date');
-        } else {
-          // Older/alternate syntax seen on some deployments
-          params.set('date$gte', String(startTimestamp));
-          params.set(isFirstPage ? 'date$lte' : 'date$lt', String(cursor ?? endTimestamp));
-          params.set('sort$desc', 'date');
-        }
-
-        return `/api/v3/entries?${params.toString()}`;
-      };
-
       const fetchV3EntriesPaged = async (style: V3ParamStyle) => {
         const maxPages = estimateMaxPagesForDays(days);
-        const collected: any[] = [];
-        const seen = new Set<string>();
 
-        let cursor: number | null = endTimestamp;
-        for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-          const path = buildV3EntriesPath(style, cursor, pageIndex === 0);
-          console.log(`📄 API v3 entries page ${pageIndex + 1}/${maxPages} (${style}): ${path}`);
-
-          const page = await makeProxyRequestWithFallback(url, path, token, signal, 'v3');
-          if (!Array.isArray(page) || page.length === 0) {
-            break;
+        const pagedFetchV3 = createPagedFetchV3(
+          (path) => makeProxyRequestWithFallback(url, path, token, signal, 'v3'),
+          {
+            cursorField: 'date',
+            cursorType: 'number',
+            startCursor: startTimestamp,
+            endCursor: endTimestamp,
+            limit: maxV3Limit,
+            maxPages,
+            unwrapPage: unwrapNightscoutV3Entries,
+            getCursorFromItem: (item) => getEntryDate(item),
+            stopWhen: (nextCursor) => typeof nextCursor === 'number' && nextCursor <= startTimestamp,
+            dedupeKey: (item) => {
+              const record = isRecord(item) ? item : null;
+              const id = record?._id ?? record?.id ?? getEntryDate(item);
+              return `${id ?? ''}:${record?.type ?? ''}:${record?.sgv ?? ''}`;
+            },
+            debugLabel: 'API v3 entries',
+            debugLog
           }
+        );
 
-          for (const item of page) {
-            const id = item?._id ?? item?.id ?? getEntryDate(item);
-            const key = `${id ?? ''}:${item?.type ?? ''}:${item?.sgv ?? ''}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              collected.push(item);
-            }
-          }
-
-          const oldest = page[page.length - 1];
-          const oldestDate = getEntryDate(oldest);
-          if (!oldestDate || oldestDate <= startTimestamp) {
-            break;
-          }
-          // Move cursor earlier for the next page.
-          cursor = oldestDate;
-
-          // If we got less than the limit, no more pages.
-          if (page.length < maxV3Limit) {
-            break;
-          }
-        }
-
-        return collected;
+        return await pagedFetchV3({ endpoint: '/api/v3/entries', filterStyle: style });
       };
 
       const fetchV3EntriesWithFallbacks = async () => {
@@ -981,9 +865,10 @@ export const fetchData = async (
         if (filtered.length > 0) return filtered;
 
         // 2) Sanity check: do we get *any* data unfiltered? If yes, it's likely query-param incompatibility.
-        const unfiltered = await makeProxyRequestWithFallback(url, '/api/v3/entries?limit=5&sort=-date', token, signal, 'v3');
-        if (Array.isArray(unfiltered) && unfiltered.length > 0) {
-          console.log('⚠️ API v3 entries filter returned empty, but unfiltered returned data. Trying alternate param style...');
+        const unfilteredRaw = await makeProxyRequestWithFallback(url, '/api/v3/entries?limit=5&sort=-date', token, signal, 'v3');
+        const unfiltered = unwrapNightscoutV3Entries(unfilteredRaw);
+        if (unfiltered.length > 0) {
+          debugWarn('⚠️ API v3 entries filter returned empty, but unfiltered returned data. Trying alternate param style...');
           const dollar = await fetchV3EntriesPaged('dollar');
           if (dollar.length > 0) return dollar;
 
@@ -992,65 +877,50 @@ export const fetchData = async (
         }
 
         // 4) Nothing returned even unfiltered.
-        return Array.isArray(unfiltered) ? unfiltered : [];
+        return unfiltered;
       };
 
-      const getV3TreatmentTimeMs = (treatment: any): number | null => {
-        const candidate = treatment?.created_at ?? treatment?.srvCreated ?? treatment?.timestamp ?? treatment?.mills;
-        if (candidate == null) return null;
-        if (typeof candidate === 'number' && Number.isFinite(candidate)) return candidate;
-        if (typeof candidate === 'string') {
-          const asNumber = Number(candidate);
-          if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
-          const asDate = Date.parse(candidate);
-          if (Number.isFinite(asDate)) return asDate;
-        }
-        return null;
+      const getV3TreatmentTimeMs = (treatment: unknown): number | null => {
+        if (!isRecord(treatment)) return null;
+        const candidate = treatment.created_at ?? treatment.srvCreated ?? treatment.timestamp ?? treatment.mills;
+        return toEpochMs(candidate);
       };
 
       const fetchV3TreatmentsPaged = async (style: V3ParamStyle) => {
         const maxPages = 25;
-        const collected: any[] = [];
-        const seen = new Set<string>();
 
-        let cursorIso: string | null = endDate;
-        for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-          const params = new URLSearchParams();
-          params.set('limit', String(maxV3Limit));
-
-          if (style === 'filter') {
-            params.set('sort', '-created_at');
-            params.set('filter[created_at][$gte]', startDate);
-            params.set(pageIndex === 0 ? 'filter[created_at][$lte]' : 'filter[created_at][$lt]', cursorIso ?? endDate);
-          } else {
-            params.set('sort$desc', 'created_at');
-            params.set('created_at$gte', encodeURIComponent(startDate));
-            params.set(pageIndex === 0 ? 'created_at$lte' : 'created_at$lt', encodeURIComponent(cursorIso ?? endDate));
+        const pagedFetchV3 = createPagedFetchV3(
+          (path) => makeProxyRequestWithFallback(url, path, token, signal, 'v3'),
+          {
+            cursorField: 'created_at',
+            cursorType: 'iso',
+            startCursor: startDate,
+            endCursor: endDate,
+            limit: maxV3Limit,
+            maxPages,
+            unwrapPage: unwrapNightscoutV3Treatments,
+            getCursorFromItem: (item) => {
+              const oldestMs = getV3TreatmentTimeMs(item);
+              return oldestMs ? new Date(oldestMs).toISOString() : null;
+            },
+            stopWhen: (nextCursor) => {
+              const ms = Date.parse(String(nextCursor ?? ''));
+              return Number.isFinite(ms) && ms <= startTimestamp;
+            },
+            dedupeKey: (item) => {
+              const record = isRecord(item) ? item : null;
+              const id = record?._id ?? record?.id;
+              return id
+                ? String(id)
+                : `${record?.eventType ?? ''}:${record?.created_at ?? ''}:${record?.timestamp ?? ''}:${record?.enteredBy ?? ''}`;
+            },
+            encodeDollarStyleValues: true,
+            debugLabel: 'API v3 treatments',
+            debugLog
           }
+        );
 
-          const path = `/api/v3/treatments?${params.toString()}`;
-          console.log(`📄 API v3 treatments page ${pageIndex + 1}/${maxPages} (${style}): ${path}`);
-
-          const page = await makeProxyRequestWithFallback(url, path, token, signal, 'v3');
-          if (!Array.isArray(page) || page.length === 0) break;
-
-          for (const item of page) {
-            const id = item?._id ?? item?.id;
-            const key = id ? String(id) : `${item?.eventType ?? ''}:${item?.created_at ?? ''}:${item?.timestamp ?? ''}:${item?.enteredBy ?? ''}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            collected.push(item);
-          }
-
-          const oldest = page[page.length - 1];
-          const oldestMs = getV3TreatmentTimeMs(oldest);
-          if (!oldestMs || oldestMs <= startTimestamp) break;
-          cursorIso = new Date(oldestMs).toISOString();
-
-          if (page.length < maxV3Limit) break;
-        }
-
-        return collected;
+        return await pagedFetchV3({ endpoint: '/api/v3/treatments', filterStyle: style });
       };
 
       const fetchV3TreatmentsWithFallbacks = async () => {
@@ -1058,23 +928,24 @@ export const fetchData = async (
         const filtered = await fetchV3TreatmentsPaged('filter');
         if (filtered.length > 0) return filtered;
 
-        // 2) Sanity check: any data at all?
-        const unfiltered = await makeProxyRequestWithFallback(url, '/api/v3/treatments?limit=5&sort=-created_at', token, signal, 'v3');
-        if (Array.isArray(unfiltered) && unfiltered.length > 0) {
-          console.log('⚠️ API v3 treatments filter returned empty, but unfiltered returned data. Trying alternate param style...');
+        // 2) Sanity check: is there data at all?
+        const unfilteredRaw = await makeProxyRequestWithFallback(url, '/api/v3/treatments?limit=5&sort=-created_at', token, signal, 'v3');
+        const unfiltered = unwrapNightscoutV3Treatments(unfilteredRaw);
+        if (unfiltered.length > 0) {
+          debugWarn('⚠️ API v3 treatments filter returned empty, but unfiltered returned data. Trying alternate param style...');
           const alt = await fetchV3TreatmentsPaged('dollar');
           if (alt.length > 0) return alt;
           return unfiltered;
         }
 
-        return Array.isArray(unfiltered) ? unfiltered : [];
+        return unfiltered;
       };
 
       const fetchV3Profile = async () => {
         try {
           return await makeProxyRequestWithFallback(url, '/api/v3/profile/current', token, signal, 'v3');
         } catch (err) {
-          if (err instanceof Error && err.name === 'NotFoundError') {
+          if (err instanceof BadResponseError && err.status === 404) {
             return await makeProxyRequestWithFallback(url, '/api/v3/profile', token, signal, 'v3');
           }
           throw err;
@@ -1085,7 +956,7 @@ export const fetchData = async (
         try {
           return await makeProxyRequestWithFallback(url, '/api/v3/devicestatus?limit=1&sort$desc=created_at', token, signal, 'v3');
         } catch (err) {
-          if (err instanceof Error && (err.name === 'NotFoundError' || err.name === 'BadRequestError')) {
+          if (err instanceof BadResponseError && (err.status === 404 || err.status === 400)) {
             return await makeProxyRequestWithFallback(url, '/api/v3/devicestatus?limit=1&sort$desc=date', token, signal, 'v3');
           }
           throw err;
@@ -1110,41 +981,29 @@ export const fetchData = async (
       entries = entriesSettled.value;
       treatments = treatmentsSettled.value;
       profiles = profilesSettled.status === 'fulfilled' ? profilesSettled.value : [];
-      const deviceStatus = deviceStatusSettled.status === 'fulfilled' ? deviceStatusSettled.value : [];
+      const deviceStatusRaw = deviceStatusSettled.status === 'fulfilled' ? deviceStatusSettled.value : [];
 
-      console.log(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
-      console.log(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
+      const profileArray = normalizeNightscoutV3ProfileArray(profiles);
+      const deviceStatusArray = normalizeNightscoutV3DeviceStatusArray(deviceStatusRaw);
+
+      debugLog(`📋 Entries result: ${Array.isArray(entries) ? entries.length + ' items' : typeof entries}`);
+      debugLog(`💊 Treatments result: ${Array.isArray(treatments) ? treatments.length + ' items' : typeof treatments}`);
       
       // `fetchV3EntriesWithFallbacks()` already paginates as needed.
       
-      console.log('✅ Successfully fetched data using API v3 with optimized requests');
+      debugLog('✅ Successfully fetched data using API v3 with optimized requests');
       
-      // Normalize the data to ensure consistent format with v1
-      // API v3 might have slightly different field names
-      const normalizedEntries = Array.isArray(entries) ? entries.map((entry: any) => ({
-        ...entry,
-        // Ensure date field exists (v3 might use 'date' or 'srvCreated')
-        date: entry.date || entry.srvCreated,
-        // Ensure sgv is a number (v3 might return as string)
-        sgv: typeof entry.sgv === 'string' ? parseInt(entry.sgv, 10) : entry.sgv,
-        // Ensure mills exists for compatibility
-        mills: entry.date || entry.srvCreated
-      })) : [];
-
-      const normalizedTreatments = Array.isArray(treatments) ? treatments.map((treatment: any) => ({
-        ...treatment,
-        // Ensure created_at exists
-        created_at: treatment.created_at || treatment.srvCreated,
-        // Ensure mills exists for compatibility
-        mills: treatment.created_at || treatment.srvCreated
-      })) : [];
+      const normalizedEntries = parseNightscoutEntries(entries);
+      const normalizedTreatments = parseNightscoutTreatments(treatments);
+      const normalizedDeviceStatus = parseNightscoutDeviceStatus(deviceStatusArray);
+      const parsedProfiles = parseNightscoutProfiles(profileArray);
 
       // Return the detected API version along with the data
       result = {
         entries: normalizedEntries,
         treatments: normalizedTreatments,
-        profile: Array.isArray(profiles) ? profiles : (profiles ? [profiles] : []), // Normalize v3 profile response
-        deviceStatus: Array.isArray(deviceStatus) ? deviceStatus : [],
+        profile: parsedProfiles,
+        deviceStatus: normalizedDeviceStatus,
         detectedApiVersion: apiVersion as 'v1' | 'v3'
       };
     } else {
@@ -1158,11 +1017,11 @@ export const fetchData = async (
     }
 
 
-    console.log(`📊 Processed data summary (${apiVersion.toUpperCase()}):`);
-    console.log(`  - Entries: ${result.entries.length}`);
-    console.log(`  - Treatments: ${result.treatments.length}`);
-    console.log(`  - Profiles: ${result.profile.length}`);
-    console.log(`  - Device Status: ${result.deviceStatus.length}`);
+    debugLog(`📊 Processed data summary (${apiVersion.toUpperCase()}):`);
+    debugLog(`  - Entries: ${result.entries.length}`);
+    debugLog(`  - Treatments: ${result.treatments.length}`);
+    debugLog(`  - Profiles: ${result.profile.length}`);
+    debugLog(`  - Device Status: ${result.deviceStatus.length}`);
 
     return result;
   } catch (error) {
@@ -1178,7 +1037,7 @@ export const fetchData = async (
     }
 
     const errorMessage = getErrorMessage(error);
-    console.error('Data fetch failed:', error);
+    debugError('Data fetch failed:', error);
     
     // Provide specific guidance for API v3 issues
     if (preferredApiVersion === 'v3') {

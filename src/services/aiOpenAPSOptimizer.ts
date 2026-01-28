@@ -4,6 +4,7 @@
 
 import { subDays } from 'date-fns';
 import { roundToDecimal } from '../utils/mathUtils';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 
 interface OptimizationPeriod {
   days: number;
@@ -107,11 +108,11 @@ class AIOpenAPSOptimizer {
     };
   }
 
-  private analyzeGlucosePatterns(readings: any[]): GlucosePattern[] {
+  private analyzeGlucosePatterns(readings: NightscoutEntry[]): GlucosePattern[] {
     const hourlyPatterns: { [hour: number]: number[] } = {};
     
     // Group readings by hour of day
-    readings.forEach(reading => {
+    readings.forEach((reading: NightscoutEntry) => {
       const hour = new Date(reading.date).getHours();
       if (!hourlyPatterns[hour]) hourlyPatterns[hour] = [];
       hourlyPatterns[hour].push(reading.sgv);
@@ -147,9 +148,9 @@ class AIOpenAPSOptimizer {
     });
   }
 
-  private analyzeTreatmentEffectiveness(readings: any[], treatments: any[]): TreatmentEffectiveness {
+  private analyzeTreatmentEffectiveness(readings: NightscoutEntry[], treatments: NightscoutTreatment[]): TreatmentEffectiveness {
     // Analyze insulin sensitivity
-    const insulinBoluses = treatments.filter(t => t.insulin && t.insulin > 0);
+    const insulinBoluses = treatments.filter((t: NightscoutTreatment) => t.insulin && t.insulin > 0);
     let insulinSensitivity = 50; // Default ISF
     
     if (insulinBoluses.length > 5) {
@@ -193,9 +194,9 @@ class AIOpenAPSOptimizer {
   private calculateOptimizedSettings(
     _patterns: GlucosePattern[],
     effectiveness: TreatmentEffectiveness,
-    currentPerformance: any,
+    currentPerformance: AIOpenAPSRecommendations['currentPerformance'],
     analysisPeriod: OptimizationPeriod
-  ) {
+  ): AIOpenAPSRecommendations['optimizedSettings'] {
     // More realistic base settings that match real-world usage
     const baseMaxTempBasal = 4.5; // Increased from 3.0
     const baseMaxIOB = 8.0; // Increased from 4.0
@@ -251,10 +252,10 @@ class AIOpenAPSOptimizer {
   }
 
   private assessRisk(
-    currentPerformance: any,
-    optimizedSettings: any,
+    currentPerformance: AIOpenAPSRecommendations['currentPerformance'],
+    optimizedSettings: AIOpenAPSRecommendations['optimizedSettings'],
     patterns: GlucosePattern[]
-  ) {
+  ): AIOpenAPSRecommendations['riskAssessment'] {
     // Calculate hypoglycemia risk
     const hypoglycemiaRisk = Math.min(100, 
       (currentPerformance.timeBelow70 * 10) + 
@@ -296,11 +297,11 @@ class AIOpenAPSOptimizer {
   }
 
   private generateRecommendations(
-    currentPerformance: any,
-    _optimizedSettings: any,
-    riskAssessment: any,
+    currentPerformance: AIOpenAPSRecommendations['currentPerformance'],
+    _optimizedSettings: AIOpenAPSRecommendations['optimizedSettings'],
+    riskAssessment: AIOpenAPSRecommendations['riskAssessment'],
     patterns: GlucosePattern[]
-  ) {
+  ): AIOpenAPSRecommendations['recommendations'] {
     const immediate: string[] = [];
     const shortTerm: string[] = [];
     const longTerm: string[] = [];
@@ -351,8 +352,8 @@ class AIOpenAPSOptimizer {
   }
 
   public async optimizeOpenAPSSettings(
-    readings: any[],
-    treatments: any[],
+    readings: NightscoutEntry[],
+    treatments: NightscoutTreatment[],
     analysisDays: number = 14
   ): Promise<AIOpenAPSRecommendations> {
     

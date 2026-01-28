@@ -33,7 +33,10 @@ import {
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  LegendItem,
+  TooltipItem,
+  ScriptableContext
 } from 'chart.js';
 
 ChartJS.register(
@@ -179,7 +182,7 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
         label: 'Confidence Band',
         data: upperBandData,
         borderColor: 'transparent',
-        backgroundColor: function(context: any) {
+        backgroundColor: function(context: ScriptableContext<'line'>) {
           const chart = context.chart;
           const {ctx, chartArea} = chart;
           if (!chartArea) return 'transparent';
@@ -210,7 +213,7 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
         borderColor: selectedScenario === 'optimistic' ? 'rgba(34, 197, 94, 1)' 
           : selectedScenario === 'pessimistic' ? 'rgba(239, 68, 68, 1)'
           : isDark ? 'rgba(96, 165, 250, 1)' : 'rgba(75, 192, 192, 1)',
-        backgroundColor: function(context: any) {
+        backgroundColor: function(context: ScriptableContext<'line'>) {
           const chart = context.chart;
           const {ctx, chartArea} = chart;
           if (!chartArea) return 'transparent';
@@ -237,7 +240,7 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
           pointStyle: 'circle',
           padding: 15,
           font: { size: 12 },
-          filter: (legendItem: any) => legendItem.text !== ''
+          filter: (legendItem: LegendItem) => legendItem.text !== ''
         }
       },
       tooltip: {
@@ -252,7 +255,7 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
         cornerRadius: 8,
         displayColors: true,
         callbacks: {
-          label: function(context: any) {
+          label: function(context: TooltipItem<'line'>) {
             const label = context.dataset.label || '';
             if (label === '' || label === 'Confidence Band') return;
             const value = context.parsed.y;
@@ -281,8 +284,8 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
         },
         ticks: {
           color: isDark ? '#9ca3af' : '#6b7280',
-          callback: function(value: any) {
-            return formatGlucoseValue(value, unit, true);
+          callback: function(value: string | number) {
+            return formatGlucoseValue(Number(value), unit, true);
           }
         }
       }
@@ -308,6 +311,10 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
     }
   };
 
+  const isScenario = (value: string): value is 'predicted' | 'optimistic' | 'pessimistic' => {
+    return value === 'predicted' || value === 'optimistic' || value === 'pessimistic';
+  };
+
   return (
     <div className="space-y-6">
       {/* Prediction Chart */}
@@ -329,7 +336,10 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
             {/* Scenario Selector */}
             <select
               value={selectedScenario}
-              onChange={(e) => setSelectedScenario(e.target.value as any)}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (isScenario(next)) setSelectedScenario(next);
+              }}
               className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             >
               <option value="predicted">Predicted</option>

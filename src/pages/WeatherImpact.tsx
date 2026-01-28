@@ -4,11 +4,14 @@ import { Cloud, Thermometer, Droplets, ArrowDown } from 'lucide-react';
 import { analyzeWeatherImpact } from '../services/weatherAnalysis';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { runSafeAsync } from '../utils/safeAsync';
+
+type WeatherImpactResult = Awaited<ReturnType<typeof analyzeWeatherImpact>>;
 
 const WeatherImpact = () => {
   const { data, loading, error } = useNightscout();
   const { formatGlucoseValue } = useGlucoseFormatting();
-  const [weatherData, setWeatherData] = useState<any>(null);
+  const [weatherData, setWeatherData] = useState<WeatherImpactResult>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
@@ -41,7 +44,7 @@ const WeatherImpact = () => {
       }
     };
 
-    fetchWeatherImpact();
+    runSafeAsync(() => fetchWeatherImpact(), { label: 'WeatherImpact: fetchWeatherImpact' });
   }, [data, location]);
 
   if (loading) return <LoadingSpinner />;
@@ -168,7 +171,10 @@ const WeatherImpact = () => {
           <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
             <h3 className="text-xl font-medium text-gray-900 dark:text-gray-100 mb-4">Time of Day Analysis</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {Object.entries(weatherData.circadianAnalysis).map(([period, stats]: [string, any]) => (
+              {(Object.entries(weatherData.circadianAnalysis) as Array<[
+                string,
+                { mean: number; standardDeviation: number; count: number } | null
+              ]>).map(([period, stats]) => (
                 <div key={period} className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
                   <h4 className="font-medium text-purple-900 dark:text-purple-100 capitalize mb-2">
                     {period}

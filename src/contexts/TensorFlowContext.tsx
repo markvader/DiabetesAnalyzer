@@ -1,13 +1,31 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import type { NightscoutEntry } from '../types/nightscout';
+import { runSafeAsync } from '../utils/safeAsync';
 
-let tensorFlowService: any | null = null;
-let tensorFlowServicePromise: Promise<any> | null = null;
+interface TensorFlowServiceLike {
+  initialize: () => Promise<void>;
+  isReady: () => boolean;
+  getModelInfo: () => unknown;
+  analyzeGlucosePatterns: (readings: NightscoutEntry[]) => Promise<unknown>;
+}
+
+const getErrorMessage = (err: unknown): string => {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  return 'Unknown error';
+};
+
+let tensorFlowService: TensorFlowServiceLike | null = null;
+let tensorFlowServicePromise: Promise<TensorFlowServiceLike> | null = null;
 
 const getTensorFlowService = async () => {
   if (tensorFlowService) return tensorFlowService;
   if (!tensorFlowServicePromise) {
     tensorFlowServicePromise = import('../services/tensorFlowAIService').then(mod => {
-      tensorFlowService = new mod.default();
+      const ServiceCtor = (mod as unknown as { default: new () => TensorFlowServiceLike }).default;
+      tensorFlowService = new ServiceCtor();
       return tensorFlowService;
     });
   }
@@ -19,10 +37,10 @@ interface TensorFlowContextType {
   isEnabled: boolean;
   isInitializing: boolean;
   error: string | null;
-  modelInfo: any;
+  modelInfo: unknown | null;
   toggleEnabled: (enabled: boolean) => Promise<void>;
   reinitialize: () => Promise<void>;
-  getAnalysis: (readings: any[]) => Promise<any>;
+  getAnalysis: (readings: NightscoutEntry[]) => Promise<unknown>;
 }
 
 const TensorFlowContext = createContext<TensorFlowContextType | undefined>(undefined);
@@ -39,12 +57,12 @@ export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children
   });
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modelInfo, setModelInfo] = useState(null);
+  const [modelInfo, setModelInfo] = useState<unknown | null>(null);
 
   // Initialize TensorFlow on mount
   useEffect(() => {
     if (isEnabled) {
-      initializeTensorFlow();
+      runSafeAsync(() => initializeTensorFlow(), { label: 'TensorFlow initialize' });
     }
   }, [isEnabled]);
 
@@ -73,9 +91,9 @@ export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children
         console.log('⚠️ TensorFlow Context: Not ready after initialization');
         setError('TensorFlow model failed to initialize properly');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('❌ TensorFlow Context: Initialization failed', err);
-      setError(err.message || 'Failed to initialize TensorFlow');
+      setError(getErrorMessage(err) || 'Failed to initialize TensorFlow');
       setIsReady(false);
     } finally {
       setIsInitializing(false);
@@ -101,7 +119,7 @@ export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children
     }
   };
 
-  const getAnalysis = async (readings: any[]) => {
+  const getAnalysis = async (readings: NightscoutEntry[]) => {
     if (!isReady || !isEnabled || readings.length === 0) {
       throw new Error('TensorFlow not ready or no data available');
     }

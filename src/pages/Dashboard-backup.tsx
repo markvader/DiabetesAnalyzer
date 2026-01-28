@@ -29,10 +29,18 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
 import { formatCageValue, formatSageValue, formatBasalRate, getCageColorClass, getSageColorClass } from '../utils/nightscoutFormatting';
+import { runSafeAsync, safeAsync } from '../utils/safeAsync';
 import { 
   nightscoutTreatmentParser, 
   type ParsedNightscoutData 
 } from '../services/nightscoutTreatmentParser';
+import type { NightscoutDeviceStatus, NightscoutTreatment } from '../types/nightscout';
+
+type COBCandidate = { path: string; value: unknown; key: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -242,7 +250,7 @@ const Dashboard = () => {
   const lastKnownSageRef = useRef<number | null>(null);
   
   // Helper functions to extract values from your specific Nightscout data structure
-  const extractCageValue = (deviceStatus: any): number | null => {
+  const extractCageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
     if (!deviceStatus) {
       console.log('⚠️ No device status available, using cached CAGE value');
@@ -261,7 +269,7 @@ const Dashboard = () => {
       // CAGE (Cannula Age) is typically tracked via "Site Change" or "Pump Site Change" treatments
       const now = new Date();
       const siteChanges = data.treatments
-        .filter((t: any) => {
+        .filter((t: NightscoutTreatment) => {
           if (!t) return false;
           const eventType = t.eventType?.toLowerCase() || '';
           const notes = t.notes?.toLowerCase() || '';
@@ -273,7 +281,7 @@ const Dashboard = () => {
                  notes.includes('cannula') ||
                  notes.includes('pump site');
         })
-        .sort((a: any, b: any) => {
+        .sort((a: NightscoutTreatment, b: NightscoutTreatment) => {
           const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
           const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
           return timeB - timeA;
@@ -303,7 +311,7 @@ const Dashboard = () => {
       }
       
       console.log('❌ CAGE not found in treatments. Available treatment types:', 
-        [...new Set(data.treatments.map((t: any) => t.eventType).filter(Boolean))]);
+        [...new Set(data.treatments.map((t: NightscoutTreatment) => t.eventType).filter(Boolean))]);
       return lastKnownCageRef.current; // Return cached value instead of null
       
     } catch (error) {
@@ -312,7 +320,7 @@ const Dashboard = () => {
     }
   };
 
-  const extractSageValue = (deviceStatus: any): number | null => {
+  const extractSageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
     if (!deviceStatus) {
       console.log('⚠️ No device status available, using cached SAGE value');
@@ -331,7 +339,7 @@ const Dashboard = () => {
       // SAGE (Sensor Age) is typically tracked via "Sensor Change" or "CGM Sensor Start" treatments
       const now = new Date();
       const sensorChanges = data.treatments
-        .filter((t: any) => {
+        .filter((t: NightscoutTreatment) => {
           if (!t) return false;
           const eventType = t.eventType?.toLowerCase() || '';
           const notes = t.notes?.toLowerCase() || '';
@@ -345,7 +353,7 @@ const Dashboard = () => {
                  notes.includes('sensor change') ||
                  notes.includes('sensor start');
         })
-        .sort((a: any, b: any) => {
+        .sort((a: NightscoutTreatment, b: NightscoutTreatment) => {
           const timeA = new Date(a.created_at || a.timestamp || 0).getTime();
           const timeB = new Date(b.created_at || b.timestamp || 0).getTime();
           return timeB - timeA;
@@ -375,7 +383,7 @@ const Dashboard = () => {
       }
       
       console.log('❌ SAGE not found in treatments. Available treatment types:', 
-        [...new Set(data.treatments.map((t: any) => t.eventType).filter(Boolean))]);
+        [...new Set(data.treatments.map((t: NightscoutTreatment) => t.eventType).filter(Boolean))]);
       return lastKnownSageRef.current; // Return cached value instead of null
       
     } catch (error) {
@@ -384,7 +392,7 @@ const Dashboard = () => {
     }
   };
 
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [timeWindow, setTimeWindow] = useState(24);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showRefreshSettings, setShowRefreshSettings] = useState(false);
@@ -403,15 +411,21 @@ const Dashboard = () => {
   // Simple initial data fetch
   useEffect(() => {
     if (url && !data && !loading) {
-      fetchDataForDays(14);
+      runSafeAsync(() => fetchDataForDays(14), { label: 'Dashboard-backup initial fetch' });
     }
   }, [url, data, loading, fetchDataForDays]);
   
   // Simple analysis results calculation
   useEffect(() => {
     if (data && !loading) {
-      const results = analyzeData(data);
-      setAnalysisResults(results);
+      let cancelled = false;
+      safeAsync(async () => {
+        const results = await analyzeData(data);
+        if (!cancelled) setAnalysisResults(results);
+      }, { label: 'Dashboard-backup analyzeData' })();
+      return () => {
+        cancelled = true;
+      };
     }
   }, [data, loading]);
   
@@ -467,17 +481,17 @@ const Dashboard = () => {
       console.log('💊 Treatments data found:');
       console.log('  - Total treatments:', data.treatments.length);
       console.log('  - Recent treatments (last 10):', data.treatments.slice(0, 10));
-      console.log('  - Treatment types available:', [...new Set(data.treatments.map((t: any) => t.eventType))]);
+      console.log('  - Treatment types available:', [...new Set(data.treatments.map((t: NightscoutTreatment) => t.eventType))]);
       
       // Look specifically for site changes and sensor changes
-      const siteChanges = data.treatments.filter((t: any) => 
+      const siteChanges = data.treatments.filter((t: NightscoutTreatment) => 
         t.eventType?.toLowerCase().includes('site') || 
         t.eventType?.toLowerCase().includes('cannula') ||
         t.notes?.toLowerCase().includes('site') ||
         t.notes?.toLowerCase().includes('cannula')
       );
       
-      const sensorChanges = data.treatments.filter((t: any) => 
+      const sensorChanges = data.treatments.filter((t: NightscoutTreatment) => 
         t.eventType?.toLowerCase().includes('sensor') || 
         t.eventType?.toLowerCase().includes('cgm') ||
         t.notes?.toLowerCase().includes('sensor') ||
@@ -706,7 +720,7 @@ const Dashboard = () => {
     return result;
   }, [filteredReadings]);
 
-  const handleAlertSettingsSave = (settings: any) => {
+  const handleAlertSettingsSave = (settings: unknown) => {
     console.log('Alert settings saved:', settings);
   };
 
@@ -763,7 +777,7 @@ const Dashboard = () => {
       const daysNeeded = Math.ceil(newTimeWindow / 24);
       if (daysNeeded > 14 && !hasEnoughData(daysNeeded)) {
         console.log(`📥 Need to fetch ${Math.min(daysNeeded, 90)} days - current data insufficient`);
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'Dashboard-backup fetch more data for time window' });
       } else {
         console.log(`✅ Using existing data for ${getTimeWindowLabel(newTimeWindow)} - no fetch needed`);
         // Force a refresh to ensure UI updates
@@ -799,7 +813,7 @@ const Dashboard = () => {
     if (!hasEnoughData(diffDays)) {
       const daysToFetch = Math.max(diffDays + 7, 14);
       console.log(`📥 Custom range needs ${Math.min(daysToFetch, 90)} days - fetching data`);
-      fetchDataForDays(Math.min(daysToFetch, 90));
+      runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'Dashboard-backup fetch data for custom range' });
     } else {
       console.log(`✅ Using existing data for custom range - no fetch needed`);
       // Force a refresh to ensure UI updates
@@ -884,7 +898,7 @@ const Dashboard = () => {
   };
   
   // Ultra-safe render function to prevent any object rendering errors
-  const ultraSafeRender = (value: any, fallback: string = 'N/A'): string => {
+  const ultraSafeRender = (value: unknown, fallback: string = 'N/A'): string => {
     if (value === null || value === undefined) return fallback;
     if (typeof value === 'string') return value;
     if (typeof value === 'number') return String(value);
@@ -898,7 +912,7 @@ const Dashboard = () => {
   };
 
   // Safe percentage render
-  const safePercentage = (value: any) => {
+  const safePercentage = (value: unknown) => {
     if (typeof value === 'number') return `${value.toFixed(1)}%`;
     if (value === null || value === undefined) return 'N/A';
     if (typeof value === 'object') {
@@ -976,7 +990,7 @@ const Dashboard = () => {
                 Check Settings
               </button>
               <button
-                onClick={() => fetchDataForDays(7)}
+                onClick={() => runSafeAsync(() => fetchDataForDays(7), { label: 'Dashboard-backup retry fetch' })}
                 className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
               >
                 Retry Fetch
@@ -1309,9 +1323,9 @@ const Dashboard = () => {
                     console.log('🍎 Full devicestatus object:', JSON.stringify(recentDeviceStatus, null, 2));
                     
                     // Recursive function to find any COB values
-                    const findCOBInObject = (obj: any, path = ''): Array<{path: string, value: any, key: string}> => {
-                      const results: Array<{path: string, value: any, key: string}> = [];
-                      if (obj && typeof obj === 'object') {
+                    const findCOBInObject = (obj: unknown, path = ''): COBCandidate[] => {
+                      const results: COBCandidate[] = [];
+                      if (isRecord(obj)) {
                         for (const [key, value] of Object.entries(obj)) {
                           const currentPath = path ? `${path}.${key}` : key;
                           
@@ -1358,7 +1372,7 @@ const Dashboard = () => {
                     
                     // If still no COB found, try the first reasonable candidate
                     if (cobValue === null && allCOBCandidates.length > 0) {
-                      const firstCandidate = allCOBCandidates.find((c: any) => 
+                      const firstCandidate = allCOBCandidates.find((c) => 
                         typeof c.value === 'number' && c.value >= 0 && c.value <= 100
                       );
                       if (firstCandidate) {
@@ -1415,9 +1429,10 @@ const Dashboard = () => {
                     console.log('🍎 Available data keys:', Object.keys(data));
                     
                     // Check if there's a separate COB endpoint or field
-                    if ((data as any).cob !== undefined) {
-                      console.log('🍎 Found data.cob:', (data as any).cob);
-                      cobValue = (data as any).cob;
+                    const cobFromData = isRecord(data) ? data.cob : undefined;
+                    if (typeof cobFromData === 'number') {
+                      console.log('🍎 Found data.cob:', cobFromData);
+                      cobValue = cobFromData;
                     }
                     
                     // Check profile for COB settings

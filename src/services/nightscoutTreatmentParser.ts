@@ -4,44 +4,7 @@ import {
   ExerciseEvent, 
   PredictionContext 
 } from './advancedPredictionService';
-
-export interface NightscoutTreatment {
-  _id?: string;
-  created_at?: string;
-  date?: number;
-  timestamp?: string;
-  eventType?: string;
-  enteredBy?: string;
-  
-  // Insulin related
-  insulin?: number;
-  units?: number;
-  type?: string;
-  
-  // Carbs related
-  carbs?: number;
-  
-  // Exercise related
-  duration?: number;
-  
-  // Notes and other info
-  notes?: string;
-  reason?: string;
-  
-  // OpenAPS/Loop related
-  absolute?: number;
-  rate?: number;
-  temp?: string;
-  
-  // Meal related
-  protein?: number;
-  fat?: number;
-  
-  // Additional fields
-  glucose?: number;
-  glucoseType?: string;
-  bg?: number;
-}
+import type { NightscoutTreatment } from '../types/nightscout';
 
 export interface ParsedNightscoutData {
   meals: MealEvent[];

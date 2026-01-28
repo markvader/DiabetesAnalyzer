@@ -2,7 +2,29 @@
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
 import { aiAnalysisService } from './aiAnalysisService';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 import { InsulinPumpProfile, getPumpById } from '../constants/insulinPumps';
+
+type SafetyChecks = {
+  hypoglycemiaHistory: boolean;
+  pediatricPatient: boolean;
+  dataQuality: 'high' | 'medium' | 'low';
+  variabilityRisk: 'low' | 'medium' | 'high';
+};
+
+type TimeInRangeStats = {
+  low: number;
+  high: number;
+  inRange: number;
+};
+
+type AIAnalysisResult = Awaited<ReturnType<typeof aiAnalysisService.analyzeGlucoseData>>;
+
+type PumpSettingsSnapshot = {
+  maxTempBasal: number;
+  maximumIOB: number;
+  dynamicISFFactor: number;
+};
 
 interface PumpAwareOpenAPSAnalysis {
   maxTempBasal: number;
@@ -17,15 +39,10 @@ interface PumpAwareOpenAPSAnalysis {
   safetyLevel: 'ultra-conservative' | 'conservative' | 'standard';
   hypoglycemiaRiskScore: number;
   recommendedStartingLevel: 'ultra-conservative' | 'conservative' | 'standard';
-  aiAnalysis?: any;
+  aiAnalysis?: AIAnalysisResult;
   criticalWarnings: string[];
   pumpSpecificWarnings: string[];
-  safetyChecks: {
-    hypoglycemiaHistory: boolean;
-    pediatricPatient: boolean;
-    dataQuality: 'high' | 'medium' | 'low';
-    variabilityRisk: 'low' | 'medium' | 'high';
-  };
+  safetyChecks: SafetyChecks;
   carbCoverage?: {
     recommendedSMBCoverage: number;
     mealPatternAnalysis: string;
@@ -84,7 +101,7 @@ function calculatePumpSafeMaximums(pump: InsulinPumpProfile | null): {
 }
 
 // Generate pump-specific warnings and recommendations
-function generatePumpSpecificWarnings(pump: InsulinPumpProfile | null, settings: any): string[] {
+function generatePumpSpecificWarnings(pump: InsulinPumpProfile | null, settings: PumpSettingsSnapshot): string[] {
   const warnings: string[] = [];
   
   if (!pump) {
@@ -183,9 +200,9 @@ function calculatePumpOptimizedBasal(
 }
 
 export const analyzePumpAwareOpenAPS = async (
-  readings: any[], 
-  treatments: any[], 
-  currentProfile: any,
+  readings: NightscoutEntry[], 
+  treatments: NightscoutTreatment[], 
+  currentProfile: unknown,
   pumpId: string
 ): Promise<PumpAwareOpenAPSAnalysis> => {
   
@@ -193,7 +210,7 @@ export const analyzePumpAwareOpenAPS = async (
   const pumpSafeMaximums = calculatePumpSafeMaximums(pump);
   
   // Get AI analysis first
-  let aiAnalysis;
+  let aiAnalysis: AIAnalysisResult | undefined;
   try {
     aiAnalysis = await aiAnalysisService.analyzeGlucoseData(readings, treatments, currentProfile);
   } catch (error) {
@@ -301,7 +318,7 @@ export const analyzePumpAwareOpenAPS = async (
 };
 
 // Helper functions (reusing from existing analysis)
-function calculateSafetyChecks(readings: any[], _treatments: any[]) {
+function calculateSafetyChecks(readings: NightscoutEntry[], _treatments: NightscoutTreatment[]) {
   // Implementation from existing service
   const hypoglycemiaCount = readings.filter(r => toMmol(r.sgv) < 3.9).length;
   const totalReadings = readings.length;
@@ -315,7 +332,7 @@ function calculateSafetyChecks(readings: any[], _treatments: any[]) {
   };
 }
 
-function calculateVariabilityRisk(readings: any[]): 'low' | 'medium' | 'high' {
+function calculateVariabilityRisk(readings: NightscoutEntry[]): 'low' | 'medium' | 'high' {
   if (readings.length < 100) return 'high';
   
   const values = readings.map(r => r.sgv);
@@ -328,7 +345,7 @@ function calculateVariabilityRisk(readings: any[]): 'low' | 'medium' | 'high' {
   return 'high';
 }
 
-function calculateHypoglycemiaRisk(readings: any[], _treatments: any[]): number {
+function calculateHypoglycemiaRisk(readings: NightscoutEntry[], _treatments: NightscoutTreatment[]): number {
   // Implementation from existing service
   const hypoglycemiaCount = readings.filter(r => toMmol(r.sgv) < 3.9).length;
   const totalReadings = readings.length;
@@ -342,7 +359,7 @@ function calculateHypoglycemiaRisk(readings: any[], _treatments: any[]): number 
   return Math.min(100, riskScore);
 }
 
-function generateCriticalWarnings(_readings: any[], _treatments: any[], safetyChecks: any): string[] {
+function generateCriticalWarnings(_readings: NightscoutEntry[], _treatments: NightscoutTreatment[], safetyChecks: SafetyChecks): string[] {
   const warnings: string[] = [];
   
   if (safetyChecks.hypoglycemiaHistory) {
@@ -360,19 +377,19 @@ function generateCriticalWarnings(_readings: any[], _treatments: any[], safetyCh
   return warnings;
 }
 
-function determineSafetyLevel(riskScore: number, safetyChecks: any): 'ultra-conservative' | 'conservative' | 'standard' {
+function determineSafetyLevel(riskScore: number, safetyChecks: SafetyChecks): 'ultra-conservative' | 'conservative' | 'standard' {
   if (riskScore > 15 || safetyChecks.hypoglycemiaHistory) return 'ultra-conservative';
   if (riskScore > 5 || safetyChecks.variabilityRisk === 'high') return 'conservative';
   return 'standard';
 }
 
-function determineRecommendedStartingLevel(riskScore: number, timeInRange: any): 'ultra-conservative' | 'conservative' | 'standard' {
+function determineRecommendedStartingLevel(riskScore: number, timeInRange: TimeInRangeStats): 'ultra-conservative' | 'conservative' | 'standard' {
   if (riskScore > 10 || timeInRange.low > 4) return 'ultra-conservative';
   if (riskScore > 5 || timeInRange.low > 2) return 'conservative';
   return 'standard';
 }
 
-function calculateMoreAggressiveSettings(_readings: any[], _treatments: any[], _currentProfile: any, _safetyLevel: string) {
+function calculateMoreAggressiveSettings(_readings: NightscoutEntry[], _treatments: NightscoutTreatment[], _currentProfile: unknown, _safetyLevel: string) {
   // Implementation from existing service - simplified for now
   return {
     maxTempBasal: 3.0,
@@ -381,7 +398,7 @@ function calculateMoreAggressiveSettings(_readings: any[], _treatments: any[], _
   };
 }
 
-function analyzeCarbCoverage(_readings: any[], _treatments: any[], _currentProfile: any) {
+function analyzeCarbCoverage(_readings: NightscoutEntry[], _treatments: NightscoutTreatment[], _currentProfile: unknown) {
   // Implementation from existing service
   return {
     recommendedSMBCoverage: 2.0,
@@ -390,7 +407,7 @@ function analyzeCarbCoverage(_readings: any[], _treatments: any[], _currentProfi
   };
 }
 
-function timeInRange(readings: any[]) {
+function timeInRange(readings: NightscoutEntry[]) {
   const total = readings.length;
   if (total === 0) return { low: 0, high: 0, inRange: 0 };
   

@@ -1,9 +1,10 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Brain, Target, Clock, Activity } from 'lucide-react';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import type { NightscoutEntry } from '../types/nightscout';
 
 interface PredictionInsightsPanelProps {
-  readings: any[];
+  readings: NightscoutEntry[];
   riskLevel?: 'low' | 'medium' | 'moderate' | 'high' | 'critical';
   confidence?: number;
   timeInRange?: number;

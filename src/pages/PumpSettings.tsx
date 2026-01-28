@@ -20,13 +20,33 @@ interface PumpStatus {
   };
 }
 
+interface PumpHistoryEvent {
+  timestamp: string;
+  eventType?: string;
+  notes?: string;
+  battery?: number;
+  reservoir?: number;
+  suspended?: boolean;
+}
+
+interface ProfileScheduleEntry {
+  time: string;
+  value: number;
+}
+
+interface ActiveProfile {
+  basal?: ProfileScheduleEntry[];
+  sens?: ProfileScheduleEntry[];
+  carbratio?: ProfileScheduleEntry[];
+}
+
 const PumpSettings = () => {
   const { data, loading, error } = useNightscout();
   const { unit, getUnitLabel } = useGlucoseFormatting();
   const { formatTimeString, formatTime } = useTimeFormat();
   const [pumpStatus, setPumpStatus] = useState<PumpStatus | null>(null);
-  const [pumpHistory, setPumpHistory] = useState<any[]>([]);
-  const [activeProfile, setActiveProfile] = useState<any>(null);
+  const [pumpHistory, setPumpHistory] = useState<PumpHistoryEvent[]>([]);
+  const [activeProfile, setActiveProfile] = useState<ActiveProfile | null>(null);
 
   useEffect(() => {
     if (data) {
@@ -42,7 +62,8 @@ const PumpSettings = () => {
     if (profiles.length > 0) {
       const currentProfile = profiles[0];
       const defaultProfile = currentProfile.defaultProfile || 'Default';
-      setActiveProfile(currentProfile.store?.[defaultProfile]);
+      const storeProfile = currentProfile.store?.[defaultProfile];
+      setActiveProfile(storeProfile && typeof storeProfile === 'object' ? (storeProfile as ActiveProfile) : null);
     }
 
     // Find pump status from treatments
@@ -69,7 +90,7 @@ const PumpSettings = () => {
     }
 
     // Get pump history
-    const history = pumpTreatments.slice(0, 10).map(treatment => ({
+    const history: PumpHistoryEvent[] = pumpTreatments.slice(0, 10).map(treatment => ({
       timestamp: treatment.created_at,
       eventType: treatment.eventType,
       notes: treatment.notes,
@@ -193,7 +214,7 @@ const PumpSettings = () => {
             <div>
               <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Basal Rates</h4>
               <div className="space-y-2">
-                {activeProfile.basal?.slice(0, 6).map((basal: any, index: number) => (
+                {activeProfile.basal?.slice(0, 6).map((basal: ProfileScheduleEntry, index: number) => (
                   <div key={index} className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
                     <span className="text-sm text-gray-600 dark:text-gray-400">{formatTimeString(basal.time)}</span>
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{basal.value} U/h</span>
@@ -211,7 +232,7 @@ const PumpSettings = () => {
             <div>
               <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Insulin Sensitivity</h4>
               <div className="space-y-2">
-                {activeProfile.sens?.slice(0, 6).map((sens: any, index: number) => {
+                {activeProfile.sens?.slice(0, 6).map((sens: ProfileScheduleEntry, index: number) => {
                   // Convert ISF value to current unit (mmol/L/U to mg/dL/U if needed)
                   const isfValue = unit === 'mgdl' ? Math.round(sens.value * 18) : sens.value;
                   
@@ -234,7 +255,7 @@ const PumpSettings = () => {
             <div>
               <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-3">Carb Ratios</h4>
               <div className="space-y-2">
-                {activeProfile.carbratio?.slice(0, 6).map((ratio: any, index: number) => (
+                {activeProfile.carbratio?.slice(0, 6).map((ratio: ProfileScheduleEntry, index: number) => (
                   <div key={index} className="flex justify-between items-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
                     <span className="text-sm text-gray-600 dark:text-gray-400">{ratio.time}</span>
                     <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{ratio.value} g/U</span>

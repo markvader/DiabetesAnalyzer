@@ -1,6 +1,45 @@
 import * as tf from '@tensorflow/tfjs';
 import { toMmol, formatGlucoseWithUnit } from '../utils/glucoseUtils';
 
+type TimeInRangeStats = {
+  low: number;
+  inRange: number;
+  high: number;
+};
+
+type PatternSummary = {
+  timeInRange: TimeInRangeStats;
+  variability: number;
+  avgGlucose: number;
+};
+
+type PatternPredictions = {
+  trend: 'rising' | 'stable' | 'falling' | 'high' | 'low' | 'unknown';
+  nextHour?: number;
+  probability?: number;
+};
+
+export type TensorFlowPatternAnalysis = {
+  patterns: PatternSummary;
+  predictions: PatternPredictions;
+  insights: string[];
+};
+
+type MealPatternAnalysis = {
+  mealFrequency: number;
+  averageCarbs: number;
+  insights: string[];
+};
+
+type TensorFlowModelInfo = {
+  name: string;
+  version: string;
+  inputShape: number[];
+  outputShape: number[];
+  layers: number;
+  parameters: number;
+};
+
 interface GlucoseReading {
   date: string;
   value: number;
@@ -28,7 +67,7 @@ interface TensorFlowAnalysisResult {
     probability: number;
   };
   patterns?: {
-    timeInRange: { low: number; inRange: number; high: number };
+    timeInRange: TimeInRangeStats;
     variability: number;
     avgGlucose: number;
   };
@@ -206,7 +245,7 @@ class TensorFlowAIService {
     return Math.sqrt(variance);
   }
 
-  private assessRiskLevel(timeInRange: any, variability: number, avgGlucose: number): {
+  private assessRiskLevel(timeInRange: TimeInRangeStats, variability: number, avgGlucose: number): {
     risk: 'low' | 'medium' | 'high' | 'critical';
     confidence: number;
   } {
@@ -252,7 +291,7 @@ class TensorFlowAIService {
   }
 
   private generateRecommendations(
-    timeInRange: any,
+    timeInRange: TimeInRangeStats,
     variability: number,
     avgGlucose: number,
     treatments: Treatment[]
@@ -299,7 +338,7 @@ class TensorFlowAIService {
   }
 
   private generateSafetyWarnings(
-    timeInRange: any,
+    timeInRange: TimeInRangeStats,
     variability: number,
     avgGlucose: number,
     readings: GlucoseReading[]
@@ -502,7 +541,7 @@ class TensorFlowAIService {
   }
 
   // Additional analysis methods for specific use cases
-  async analyzeGlucosePatterns(readings: GlucoseReading[]): Promise<any> {
+  async analyzeGlucosePatterns(readings: GlucoseReading[]): Promise<TensorFlowPatternAnalysis> {
     try {
       if (!this.isModelInitialized) {
         console.log('TensorFlow model not initialized for pattern analysis, using basic analysis');
@@ -533,10 +572,10 @@ class TensorFlowAIService {
   }
 
   // Basic pattern analysis fallback
-  private getBasicPatternAnalysis(readings: GlucoseReading[]): any {
+  private getBasicPatternAnalysis(readings: GlucoseReading[]): TensorFlowPatternAnalysis {
     if (readings.length === 0) {
       return {
-        patterns: { timeInRange: { inRange: 0 }, variability: 0, avgGlucose: 0 },
+        patterns: { timeInRange: { low: 0, inRange: 0, high: 0 }, variability: 0, avgGlucose: 0 },
         predictions: { trend: 'unknown' },
         insights: ['No glucose data available for pattern analysis']
       };
@@ -563,7 +602,7 @@ class TensorFlowAIService {
     };
   }
 
-  async analyzeMealPatterns(_readings: GlucoseReading[], treatments: Treatment[]): Promise<any> {
+  async analyzeMealPatterns(_readings: GlucoseReading[], treatments: Treatment[]): Promise<MealPatternAnalysis> {
     const mealTreatments = treatments.filter(t => t.carbs && t.carbs > 0);
     const insights = [];
 
@@ -599,7 +638,7 @@ class TensorFlowAIService {
   }
 
   // Get model information
-  getModelInfo(): any {
+  getModelInfo(): TensorFlowModelInfo | null {
     if (!this.glucoseModel) return null;
 
     return {

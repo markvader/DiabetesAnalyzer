@@ -11,6 +11,7 @@ import { TensorFlowProvider } from './contexts/TensorFlowContext';
 import { DashboardDisplayProvider } from './contexts/DashboardDisplayContext';
 import { TimeInRangeProvider } from './contexts/TimeInRangeContext';
 import { DesignModeProvider } from './contexts/DesignModeContext';
+import { AsyncErrorProvider } from './contexts/AsyncErrorContext';
 import AdaptiveLayout from './components/AdaptiveLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -64,11 +65,12 @@ function App() {
                     <DashboardDisplayProvider>
                       <NightscoutProvider>
                         <SubscriptionProvider>
-                          <Router>
-                            <AdaptiveLayout>
-                              <ErrorBoundary>
-                                <Suspense fallback={null}>
-                                  <Routes>
+                          <AsyncErrorProvider>
+                            <Router>
+                              <AdaptiveLayout>
+                                <ErrorBoundary>
+                                  <Suspense fallback={null}>
+                                    <Routes>
                                     <Route path="/" element={<AdaptiveDashboard />} />
                                     <Route path="/classic" element={<Dashboard />} />
                                     <Route path="/modern" element={<ModernDashboard />} />
@@ -105,11 +107,12 @@ function App() {
                                     <Route path="/stress-impact" element={<StressImpact />} />
                                     <Route path="/isf-optimization" element={<ISFOptimization />} />
                                     <Route path="/tensorflow-test" element={<TensorFlowTest />} />
-                                  </Routes>
-                                </Suspense>
-                              </ErrorBoundary>
-                            </AdaptiveLayout>
-                          </Router>
+                                    </Routes>
+                                  </Suspense>
+                                </ErrorBoundary>
+                              </AdaptiveLayout>
+                            </Router>
+                          </AsyncErrorProvider>
                         </SubscriptionProvider>
                       </NightscoutProvider>
                     </DashboardDisplayProvider>

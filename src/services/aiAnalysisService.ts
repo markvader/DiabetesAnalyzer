@@ -5,6 +5,12 @@ import type TensorFlowAIService from './tensorFlowAIService';
 import { DEFAULT_OPENAI_MODEL, getModelById } from '../constants/openaiModels';
 import { safeJsonParseFromText } from '../utils/safeJson';
 import { asNumber, asRiskAssessment, asStringArray } from './aiValidation';
+import { debugLog, debugWarn } from '../utils/logger';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
 
 interface AIProvider {
   name: string;
@@ -25,6 +31,13 @@ interface RetryOptions {
   maxRetries: number;
   baseDelay: number;
   maxDelay: number;
+}
+
+interface TensorFlowInfo {
+  isReady: boolean;
+  isEnabled: boolean;
+  shouldUse: boolean;
+  modelInfo: unknown | null;
 }
 
 class AIAnalysisService {
@@ -101,7 +114,7 @@ class AIAnalysisService {
       });
     }
 
-    console.log(`Initialized ${this.providers.length} AI providers`);
+    debugLog(`Initialized ${this.providers.length} AI providers`);
   }
 
   // Reinitialize providers (called after API keys are updated)
@@ -140,7 +153,7 @@ class AIAnalysisService {
           retryOptions.maxDelay
         );
         
-        console.log(`AI API request failed (status: ${response.status}), retrying in ${delay}ms (attempt ${attempt + 1}/${retryOptions.maxRetries + 1})`);
+        debugLog(`AI API request failed (status: ${response.status}), retrying in ${delay}ms (attempt ${attempt + 1}/${retryOptions.maxRetries + 1})`);
         
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -159,7 +172,7 @@ class AIAnalysisService {
           retryOptions.maxDelay
         );
         
-        console.log(`AI API request failed with error: ${lastError.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${retryOptions.maxRetries + 1})`);
+        debugLog(`AI API request failed with error: ${lastError.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${retryOptions.maxRetries + 1})`);
         
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -170,47 +183,47 @@ class AIAnalysisService {
     throw lastError!;
   }
 
-  async analyzeGlucoseData(readings: any[], treatments: any[], currentProfile: any): Promise<AIAnalysisResult> {
-    console.log('Starting AI analysis');
+  async analyzeGlucoseData(readings: NightscoutEntry[], treatments: NightscoutTreatment[], currentProfile: unknown): Promise<AIAnalysisResult> {
+    debugLog('Starting AI analysis');
     
     // Reinitialize providers to get the latest API keys
     this.reinitializeProviders();
     
     // PRIORITY 1: API providers (when API keys are present)
     if (this.providers.length > 0) {
-      console.log('API keys detected - using API providers as primary analysis method');
+      debugLog('API keys detected - using API providers as primary analysis method');
       
       // Try each provider in order until one succeeds
       for (const provider of this.providers) {
         try {
-          console.log(`Attempting analysis with ${provider.name} API`);
+          debugLog(`Attempting analysis with ${provider.name} API`);
           
           if (provider.name === 'OpenAI') {
             const result = await this.analyzeWithOpenAI(provider, readings, treatments, currentProfile);
-            console.log('OpenAI analysis successful');
+            debugLog('OpenAI analysis successful');
             return result;
           } else if (provider.name === 'DeepSeek') {
             const result = await this.analyzeWithDeepSeek(provider, readings, treatments, currentProfile);
-            console.log('DeepSeek analysis successful');
+            debugLog('DeepSeek analysis successful');
             return result;
           } else if (provider.name === 'Anthropic') {
             const result = await this.analyzeWithAnthropic(provider, readings, treatments, currentProfile);
-            console.log('Anthropic analysis successful');
+            debugLog('Anthropic analysis successful');
             return result;
           }
         } catch (error) {
-          console.error(`${provider.name} analysis failed:`, error);
+          debugWarn(`${provider.name} analysis failed:`, error);
         }
       }
       
-      console.log('All API providers failed, falling back to TensorFlow');
+      debugLog('All API providers failed, falling back to TensorFlow');
     }
     
     // PRIORITY 2: TensorFlow AI Service (fallback when no API keys, or API keys failed)
     try {
       const tfService = await this.getTensorFlowServiceAsync();
       if (tfService?.isReady?.()) {
-        console.log('Using TensorFlow AI Service');
+        debugLog('Using TensorFlow AI Service');
         const tensorFlowResult = await tfService.analyzeGlucoseData(readings, treatments);
         
         // Convert TensorFlow result to our expected format
@@ -222,22 +235,22 @@ class AIAnalysisService {
           safetyWarnings: tensorFlowResult.safetyWarnings
         };
         
-        console.log('TensorFlow AI analysis completed successfully');
+        debugLog('TensorFlow AI analysis completed successfully');
         return result;
       } else {
         const tfStatus = this.isTensorFlowEnabledByUserPref() ? 'initializing...' : 'disabled by user';
-        console.log(`TensorFlow not ready (${tfStatus})`);
+        debugLog(`TensorFlow not ready (${tfStatus})`);
       }
     } catch (error) {
-      console.error('TensorFlow AI analysis failed:', error);
+      debugWarn('TensorFlow AI analysis failed:', error);
     }
 
     // PRIORITY 3: Basic fallback if all else fails
-    console.log('Using basic fallback analysis');
+    debugLog('Using basic fallback analysis');
     return this.getFallbackAnalysis(readings, treatments, currentProfile);
   }
 
-  private async analyzeWithOpenAI(provider: AIProvider, readings: any[], treatments: any[], currentProfile: any): Promise<AIAnalysisResult> {
+  private async analyzeWithOpenAI(provider: AIProvider, readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown): Promise<AIAnalysisResult> {
     // Prepare data for analysis
     const timeInRange = this.calculateTimeInRange(readings);
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
@@ -264,7 +277,7 @@ class AIAnalysisService {
       2. riskAssessment: low/medium/high/critical
       3. confidence: 0-100%
       4. reasoning: 2-3 key points
-      5. safetyWarnings: any critical warnings
+      5. safetyWarnings: include critical warnings (if present)
     `;
     
     try {
@@ -298,7 +311,7 @@ class AIAnalysisService {
         throw new Error('Invalid response format from OpenAI');
       }
 
-      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+      const result = isRecord(parsed.value) ? parsed.value : {};
 
       return {
         recommendations: asStringArray(result.recommendations, 8),
@@ -313,7 +326,7 @@ class AIAnalysisService {
     }
   }
 
-  private async analyzeWithDeepSeek(provider: AIProvider, readings: any[], treatments: any[], currentProfile: any): Promise<AIAnalysisResult> {
+  private async analyzeWithDeepSeek(provider: AIProvider, readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown): Promise<AIAnalysisResult> {
     // Prepare data for analysis
     const timeInRange = this.calculateTimeInRange(readings);
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
@@ -340,7 +353,7 @@ class AIAnalysisService {
       2. riskAssessment: low/medium/high/critical
       3. confidence: 0-100%
       4. reasoning: 2-3 key points
-      5. safetyWarnings: any critical warnings
+      5. safetyWarnings: include critical warnings (if present)
     `;
     
     try {
@@ -374,7 +387,7 @@ class AIAnalysisService {
         throw new Error('Invalid response format from DeepSeek');
       }
 
-      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+      const result = isRecord(parsed.value) ? parsed.value : {};
 
       return {
         recommendations: asStringArray(result.recommendations, 8),
@@ -389,7 +402,7 @@ class AIAnalysisService {
     }
   }
 
-  private async analyzeWithAnthropic(provider: AIProvider, readings: any[], treatments: any[], currentProfile: any): Promise<AIAnalysisResult> {
+  private async analyzeWithAnthropic(provider: AIProvider, readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown): Promise<AIAnalysisResult> {
     // Prepare data for analysis
     const timeInRange = this.calculateTimeInRange(readings);
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
@@ -416,7 +429,7 @@ class AIAnalysisService {
       2. riskAssessment: low/medium/high/critical
       3. confidence: 0-100%
       4. reasoning: 2-3 key points
-      5. safetyWarnings: any critical warnings
+      5. safetyWarnings: include critical warnings (if present)
     `;
     
     try {
@@ -449,7 +462,7 @@ class AIAnalysisService {
         throw new Error('Invalid response format from Anthropic');
       }
 
-      const result = (typeof parsed.value === 'object' && parsed.value !== null) ? (parsed.value as any) : {};
+      const result = isRecord(parsed.value) ? parsed.value : {};
 
       return {
         recommendations: asStringArray(result.recommendations, 8),
@@ -464,7 +477,7 @@ class AIAnalysisService {
     }
   }
 
-  private getFallbackAnalysis(readings: any[], treatments: any[], currentProfile: any): AIAnalysisResult {
+  private getFallbackAnalysis(readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown): AIAnalysisResult {
     const timeInRange = this.calculateTimeInRange(readings);
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
     
@@ -497,7 +510,7 @@ class AIAnalysisService {
     };
   }
 
-  private calculateTimeInRange(readings: any[]) {
+  private calculateTimeInRange(readings: NightscoutEntry[]) {
     if (!readings.length) return { inRange: 0, high: 0, low: 0 };
     
     let inRange = 0, high = 0, low = 0;
@@ -521,7 +534,7 @@ class AIAnalysisService {
     };
   }
 
-  private assessHypoglycemiaRisk(readings: any[], treatments: any[]) {
+  private assessHypoglycemiaRisk(readings: NightscoutEntry[], treatments: NightscoutTreatment[]) {
     const lowReadings = readings.filter(r => toMmol(r.sgv) < 3.9);
     const severelyLowReadings = readings.filter(r => toMmol(r.sgv) < 3.0);
     
@@ -533,16 +546,16 @@ class AIAnalysisService {
     };
   }
 
-  private sampleData(data: any[], maxSamples: number) {
+  private sampleData<T>(data: T[], maxSamples: number): T[] {
     if (!data || data.length <= maxSamples) return data;
-    
+
     const step = Math.ceil(data.length / maxSamples);
-    const sampled = [];
-    
+    const sampled: T[] = [];
+
     for (let i = 0; i < data.length; i += step) {
       sampled.push(data[i]);
     }
-    
+
     return sampled;
   }
 
@@ -625,7 +638,7 @@ class AIAnalysisService {
   }
 
   // Get TensorFlow model info
-  getTensorFlowInfo(): any {
+  getTensorFlowInfo(): TensorFlowInfo {
     const svc = this.tensorFlowService;
     return {
       isReady: svc?.isReady?.() ?? false,

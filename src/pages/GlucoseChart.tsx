@@ -1,12 +1,40 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import GlucoseChart from '../components/GlucoseChart';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 const GlucoseChartPage = () => {
   const { data, loading, error } = useNightscout();
   const [timeRange, setTimeRange] = useState(24);
   const [showInsulinDelivery, setShowInsulinDelivery] = useState(true);
+
+  const entriesSortedAsc = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const selectedRange = useMemo(() => {
+    const endMs = Date.now();
+    const startMs = endMs - timeRange * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [timeRange]);
+
+  const readingsInRange = useMemo(() => {
+    if (!entriesSortedAsc.length) return [];
+    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+
+  const treatmentsInRange = useMemo(() => {
+    if (!treatmentsSortedAsc.length) return [];
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
   // Helper function to get time window label
   const getTimeWindowLabel = (hours: number) => {
@@ -101,13 +129,8 @@ const GlucoseChartPage = () => {
 
       {data?.entries && (
         <GlucoseChart
-          readings={data.entries.filter(reading => 
-            (Date.now() - reading.date) <= timeRange * 60 * 60 * 1000
-          )}
-          treatments={data.treatments?.filter(treatment => {
-            const treatmentTime = new Date(treatment.created_at).getTime();
-            return (Date.now() - treatmentTime) <= timeRange * 60 * 60 * 1000;
-          }) || []}
+          readings={readingsInRange}
+          treatments={treatmentsInRange}
           title={`Blood Glucose - Last ${getTimeWindowLabel(timeRange)}`}
           showInsulinDelivery={showInsulinDelivery}
         />

@@ -3,16 +3,19 @@ import jsPDF from 'jspdf';
 import { format } from 'date-fns';
 import { FileText, Download, Settings, Loader2 } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js';
+import type { ChartConfiguration, TooltipItem } from 'chart.js';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend);
 
 interface ComprehensivePDFReportProps {
-  data: any;
-  basicStats: any;
-  filteredReadings: any[];
-  formatGlucoseValue: (value: number, unit: string, includeUnit?: boolean) => string;
+  data: { treatments?: NightscoutTreatment[] } | null;
+  basicStats: unknown;
+  filteredReadings: NightscoutEntry[];
+  formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', includeUnit?: boolean) => string;
   getUnitLabel: () => string;
-  unit: string;
+  unit: 'mmol' | 'mgdl';
   convertToCurrentUnit?: (value: number, fromUnit?: 'mmol' | 'mgdl') => number;
   getCurrentGlucoseRanges?: () => { TARGET_MIN: number; TARGET_MAX: number };
 }
@@ -184,9 +187,9 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
               : `${format(new Date(firstTs), 'dd.MM.yyyy')} – ${format(new Date(lastTs), 'dd.MM.yyyy')}`)
           : 'Selected Period';
 
-      const treatments: any[] = Array.isArray(data?.treatments) ? data.treatments : [];
+      const treatments: NightscoutTreatment[] = Array.isArray(data?.treatments) ? (data.treatments as NightscoutTreatment[]) : [];
       const sortedTreatments = [...treatments]
-        .map(t => ({ ...t, _ts: new Date(t?.created_at).getTime() }))
+        .map(t => ({ ...t, _ts: getTreatmentMs(t) }))
         .filter(t => Number.isFinite(t._ts))
         .sort((a, b) => a._ts - b._ts);
 
@@ -221,7 +224,11 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         .map(r => ({ ts: r.date as number, v: convert(r.sgv as number, 'mgdl') }))
         .filter(p => Number.isFinite(p.v));
 
-      const renderChartImage = async (config: any, width = 1400, height = 650): Promise<string | null> => {
+      const renderChartImage = async (
+        config: ChartConfiguration<'line' | 'bar'>,
+        width = 1400,
+        height = 650
+      ): Promise<string | null> => {
         try {
           if (typeof document === 'undefined') return null;
           const canvas = document.createElement('canvas');
@@ -548,7 +555,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         const binLabels = bins.map((_, i) => {
           const a = vMin + (i / binCount) * span;
           const b = vMin + ((i + 1) / binCount) * span;
-          return `${formatGlucoseValue(a, unit as any, false)}–${formatGlucoseValue(b, unit as any, false)}`;
+          return `${formatGlucoseValue(a, unit, false)}–${formatGlucoseValue(b, unit, false)}`;
         });
 
         const chartsTopY = yPos + detailedStats.length * 10 + 10;
@@ -576,7 +583,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                   legend: { display: false },
                   tooltip: {
                     callbacks: {
-                      label: (ctx: any) => `${ctx.parsed?.y ?? 0} readings`
+                      label: (ctx: TooltipItem<'line' | 'bar'>) => `${ctx.parsed?.y ?? 0} readings`
                     }
                   }
                 },
@@ -754,7 +761,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                 },
                 tooltip: {
                   callbacks: {
-                    label: (ctx: any) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%`
+                    label: (ctx: TooltipItem<'line' | 'bar'>) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%`
                   }
                 }
               },
@@ -766,7 +773,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                     color: '#334155',
                     maxRotation: 0,
                     autoSkip: false,
-                    callback: (_val: any, idx: number) => (idx % labelStep === 0 ? labels[idx] : '')
+                    callback: (_val: string | number, idx: number) => (idx % labelStep === 0 ? labels[idx] : '')
                   }
                 },
                 y: {
@@ -776,7 +783,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                   grid: { color: '#E5E7EB' },
                   ticks: {
                     color: '#334155',
-                    callback: (v: any) => `${v}%`
+                    callback: (v: string | number) => `${v}%`
                   },
                   title: {
                     display: true,
@@ -1072,7 +1079,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
       pdf.setFontSize(9);
       const hyperNotes = [
-        peakMax !== null ? `Peak observed during high events: ${formatGlucoseValue(peakMax, unit as any, true)}` : 'Peak observed during high events: —',
+        peakMax !== null ? `Peak observed during high events: ${formatGlucoseValue(peakMax, unit, true)}` : 'Peak observed during high events: —',
         insulinEvents.length ? `Insulin logs available: ${insulinEvents.length} doses (use to correlate post-meal peaks/corrections).` : 'No insulin doses logged (correlation limited).'
       ];
       pdf.text(pdf.splitTextToSize(hyperNotes.join('\n'), 180), 15, hyperNotesY);
@@ -1177,7 +1184,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.setFontSize(8);
         pdf.text(dayNames[d.dow], 20, rowY + 6);
         pdf.text(String(d.n), 45, rowY + 6);
-        pdf.text(formatGlucoseValue(d.mean, unit as any, false), 75, rowY + 6);
+        pdf.text(formatGlucoseValue(d.mean, unit, false), 75, rowY + 6);
         pdf.text(d.tir.toFixed(1), 115, rowY + 6);
         pdf.text(d.low.toFixed(1), 140, rowY + 6);
         pdf.text(d.high.toFixed(1), 165, rowY + 6);
@@ -1200,7 +1207,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
           const weN = weekend.reduce((a, d) => a + d.n, 0);
           const wMean = wN ? weekday.reduce((a, d) => a + byDowSum[d.dow], 0) / wN : 0;
           const weMean = weN ? weekend.reduce((a, d) => a + byDowSum[d.dow], 0) / weN : 0;
-          return formatGlucoseValue(Math.abs(wMean - weMean), unit as any, false);
+          return formatGlucoseValue(Math.abs(wMean - weMean), unit, false);
         })()} ${getUnitLabel()}`
       ];
       const highlightLines = pdf.splitTextToSize(highlights.join('\n'), 180);
@@ -1396,7 +1403,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.text(r.label, 20, rowY + 6);
         pdf.text(String(r.n), 75, rowY + 6);
         pdf.text(r.n ? r.avgCarbs.toFixed(0) : '—', 105, rowY + 6, { align: 'right' });
-        pdf.text(r.n ? formatGlucoseValue(r.avgDelta, unit as any, false) : '—', 145, rowY + 6, { align: 'right' });
+        pdf.text(r.n ? formatGlucoseValue(r.avgDelta, unit, false) : '—', 145, rowY + 6, { align: 'right' });
         pdf.text(r.n ? `${r.preBolusPct.toFixed(0)}%` : '—', 190, rowY + 6, { align: 'right' });
       });
 
@@ -1442,7 +1449,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
                 legend: { display: false },
                 tooltip: {
                   callbacks: {
-                    afterLabel: (ctx: any) => {
+                    afterLabel: (ctx: TooltipItem<'line' | 'bar'>) => {
                       const i = ctx.dataIndex;
                       return `Avg carbs: ${carbs[i] ? carbs[i].toFixed(0) : '—'} g`;
                     }
@@ -1522,9 +1529,9 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
           pdf.setFontSize(8);
           pdf.text(r.when, 20, rowY + 6);
           pdf.text(r.note, 55, rowY + 6);
-          pdf.text(r.pre !== null ? formatGlucoseValue(r.pre, unit as any, false) : '—', 130, rowY + 6, { align: 'right' });
-          pdf.text(r.post !== null ? formatGlucoseValue(r.post, unit as any, false) : '—', 170, rowY + 6, { align: 'right' });
-          pdf.text(r.delta !== null ? formatGlucoseValue(r.delta, unit as any, false) : '—', 190, rowY + 6, { align: 'right' });
+          pdf.text(r.pre !== null ? formatGlucoseValue(r.pre, unit, false) : '—', 130, rowY + 6, { align: 'right' });
+          pdf.text(r.post !== null ? formatGlucoseValue(r.post, unit, false) : '—', 170, rowY + 6, { align: 'right' });
+          pdf.text(r.delta !== null ? formatGlucoseValue(r.delta, unit, false) : '—', 190, rowY + 6, { align: 'right' });
         });
         yPos += rows.length * 9 + 12;
       }
@@ -1625,11 +1632,11 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
             options: {
               plugins: {
                 legend: { position: 'bottom', labels: { color: '#111827', boxWidth: 12 } },
-                tooltip: { callbacks: { label: (ctx: any) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%` } }
+                tooltip: { callbacks: { label: (ctx: TooltipItem<'line' | 'bar'>) => `${ctx.dataset.label}: ${Number(ctx.parsed?.y ?? 0).toFixed(1)}%` } }
               },
               scales: {
                 x: { stacked: true, grid: { display: false }, ticks: { color: '#334155', autoSkip: true, maxTicksLimit: 8 } },
-                y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: any) => `${v}%` } }
+                y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: string | number) => `${v}%` } }
               }
             }
           }, 1400, 520);
@@ -1712,8 +1719,8 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         pdf.setFontSize(8);
         pdf.text(n.date, 20, rowY + 6);
         pdf.text(String(n.n), 55, rowY + 6);
-        pdf.text(formatGlucoseValue(n.mean, unit as any, false), 95, rowY + 6, { align: 'right' });
-        pdf.text(formatGlucoseValue(n.sd, unit as any, false), 130, rowY + 6, { align: 'right' });
+        pdf.text(formatGlucoseValue(n.mean, unit, false), 95, rowY + 6, { align: 'right' });
+        pdf.text(formatGlucoseValue(n.sd, unit, false), 130, rowY + 6, { align: 'right' });
         pdf.text(n.tirPct.toFixed(1), 155, rowY + 6);
         pdf.text(n.lowPct.toFixed(1), 190, rowY + 6, { align: 'right' });
       });
@@ -1734,7 +1741,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
       pdf.setTextColor(colors.text[0], colors.text[1], colors.text[2]);
       pdf.setFontSize(9);
       const sleepNotes = [
-        dawnDelta !== null ? `Dawn phenomenon proxy (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(dawnDelta, unit as any, false)} ${getUnitLabel()}` : 'Dawn phenomenon proxy: —',
+        dawnDelta !== null ? `Dawn phenomenon proxy (05:00–08:00 vs 02:00–05:00): ${formatGlucoseValue(dawnDelta, unit, false)} ${getUnitLabel()}` : 'Dawn phenomenon proxy: —',
         'Overnight stats use CGM readings during 23:00–07:00 and summarize per night.'
       ];
       const sleepLines = pdf.splitTextToSize(sleepNotes.join('\n'), 180);
@@ -1850,7 +1857,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
             },
             scales: {
               x: { stacked: true, grid: { display: false }, ticks: { color: '#334155', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
-              y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: any) => `${v}%` } }
+              y: { stacked: true, min: 0, max: 100, grid: { color: '#E5E7EB' }, ticks: { color: '#334155', callback: (v: string | number) => `${v}%` } }
             }
           }
         }, 1400, 520);
@@ -1920,7 +1927,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         },
         {
           title: 'Weekend vs weekday',
-          value: weekendDelta !== null ? `${formatGlucoseValue(weekendDelta, unit as any, false)} ${getUnitLabel()}` : '—',
+          value: weekendDelta !== null ? `${formatGlucoseValue(weekendDelta, unit, false)} ${getUnitLabel()}` : '—',
           detail: 'Mean glucose difference (weekend − weekday)',
           tone: weekendDelta !== null && Math.abs(weekendDelta) > convert(18, 'mgdl') ? 'warn' : 'info'
         },
@@ -2048,7 +2055,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
               },
               y: {
                 grid: { color: '#E5E7EB' },
-                ticks: { color: '#334155', callback: (v: any) => `${v}%` }
+                ticks: { color: '#334155', callback: (v: string | number) => `${v}%` }
               }
             }
           }
@@ -2796,7 +2803,12 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
             </label>
             <select 
               value={reportConfig.theme}
-              onChange={(e) => setReportConfig({...reportConfig, theme: e.target.value as any})}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === 'premium' || next === 'clinical' || next === 'executive') {
+                  setReportConfig({ ...reportConfig, theme: next });
+                }
+              }}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
             >
               <option value="premium">Premium</option>
@@ -2811,7 +2823,12 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
             </label>
             <select 
               value={reportConfig.detailLevel}
-              onChange={(e) => setReportConfig({...reportConfig, detailLevel: e.target.value as any})}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === 'summary' || next === 'detailed' || next === 'comprehensive') {
+                  setReportConfig({ ...reportConfig, detailLevel: next });
+                }
+              }}
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
             >
               <option value="summary">Summary (8 pages)</option>

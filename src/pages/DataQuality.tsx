@@ -18,10 +18,16 @@ interface DataQualityMetrics {
   reliability: number;
 }
 
+interface DataGap {
+  start: Date;
+  end: Date;
+  duration: number;
+}
+
 const DataQuality = () => {
   const { data, loading, error } = useNightscout();
   const [qualityMetrics, setQualityMetrics] = useState<DataQualityMetrics | null>(null);
-  const [dataGaps, setDataGaps] = useState<any[]>([]);
+  const [dataGaps, setDataGaps] = useState<DataGap[]>([]);
 
   useEffect(() => {
     if (data?.entries) {
@@ -36,7 +42,7 @@ const DataQuality = () => {
     const totalReadings = entries.length;
     
     // Analyze data gaps
-    const gaps = [];
+    const gaps: DataGap[] = [];
     const expectedInterval = 5 * 60 * 1000; // 5 minutes in milliseconds
     let missingCount = 0;
     

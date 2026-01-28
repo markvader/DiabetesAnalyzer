@@ -380,13 +380,13 @@ const TimeInRangeStats: React.FC<TimeInRangeStatsProps> = ({
                           cy="50%"
                           outerRadius={80}
                           dataKey="value"
-                          label={({ name, value }: any) => `${name}: ${value.toFixed(1)}%`}
+                          label={({ name, value }: { name: string; value: number }) => `${name}: ${value.toFixed(1)}%`}
                         >
                           {pieData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value: any) => [`${Number(value).toFixed(1)}%`, 'Percentage']} />
+                        <Tooltip formatter={(value: string | number) => [`${Number(value).toFixed(1)}%`, 'Percentage']} />
                       </PieChart>
                     </ResponsiveContainer>
                   </Box>
@@ -402,7 +402,7 @@ const TimeInRangeStats: React.FC<TimeInRangeStatsProps> = ({
                       <BarChart data={barData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                         <XAxis dataKey="name" />
                         <YAxis />
-                        <Tooltip formatter={(value: any) => [`${Number(value).toFixed(1)}%`, 'Percentage']} />
+                        <Tooltip formatter={(value: string | number) => [`${Number(value).toFixed(1)}%`, 'Percentage']} />
                         <Bar dataKey="current" fill={theme.palette.primary.main} name="Current" />
                         <Bar dataKey="target" fill={alpha(theme.palette.secondary.main, 0.7)} name="Target" />
                       </BarChart>

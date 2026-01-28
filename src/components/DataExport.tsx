@@ -1,9 +1,10 @@
 import React from 'react';
 import { Download } from 'lucide-react';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 
 interface ExportData {
-  entries: any[];
-  treatments: any[];
+  entries: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
 }
 
 interface DataExportProps {

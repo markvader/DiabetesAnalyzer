@@ -4,6 +4,7 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { Download, Upload, Cloud, HardDrive, CheckCircle, AlertCircle } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { format } from 'date-fns';
+import { safeAsync } from '../utils/safeAsync';
 
 const BackupSync = () => {
   const { data, loading, error } = useNightscout();
@@ -121,7 +122,7 @@ const BackupSync = () => {
               treatments, and profile settings in JSON format.
             </p>
             <button
-              onClick={createBackup}
+              onClick={safeAsync(createBackup, { label: 'BackupSync: createBackup' })}
               disabled={!data || backupStatus === 'creating'}
               className="w-full flex items-center justify-center px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
             >
@@ -255,7 +256,7 @@ const BackupSync = () => {
               Manually sync your data with cloud storage to ensure all devices have the latest information.
             </p>
             <button
-              onClick={simulateSync}
+              onClick={safeAsync(simulateSync, { label: 'BackupSync: simulateSync' })}
               disabled={syncStatus === 'syncing'}
               className="w-full flex items-center justify-center px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded-md hover:bg-purple-700 dark:hover:bg-purple-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors duration-200"
             >

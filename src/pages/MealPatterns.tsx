@@ -7,14 +7,15 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import AIMealAnalysis from '../components/AIMealAnalysis';
 import { useSubscription } from '../contexts/SubscriptionContext';
+import { runSafeAsync } from '../utils/safeAsync';
 
 const MealPatterns = () => {
   const { data, loading, error } = useNightscout();
   const { isSubscribed } = useSubscription();
   const { formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
-  const [mealPatterns, setMealPatterns] = useState<any>(null);
-  const [mealClusters, setMealClusters] = useState<any>(null);
+  const [mealPatterns, setMealPatterns] = useState<ReturnType<typeof analyzeMealPatterns> | null>(null);
+  const [mealClusters, setMealClusters] = useState<ReturnType<typeof identifyMealClusters> | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
 
   useEffect(() => {
@@ -39,7 +40,7 @@ const MealPatterns = () => {
       }
     };
 
-    processData();
+    runSafeAsync(() => processData(), { label: 'MealPatterns: processData' });
   }, [data]);
 
   const handleRefreshAI = () => {
@@ -188,14 +189,15 @@ const MealPatterns = () => {
         </div>
         
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[0, 1, 2].map(cluster => {
-            const clusterMeals = mealClusters?.filter((m: any) => m.cluster === cluster) || [];
-            const avgCarbs = average(clusterMeals.map((m: any) => m.carbs));
-            const avgInsulin = average(clusterMeals.map((m: any) => m.insulin));
-            
+          {([0, 1, 2] as const).map((cluster) => {
+            const clusterMeals = mealClusters?.filter((m) => m.cluster === cluster) || [];
+            const avgCarbs = average(clusterMeals.map((m) => m.carbs));
+            const avgInsulin = average(clusterMeals.map((m) => m.insulin));
+
             // Count meal types in this cluster
-            const mealTypeCount = clusterMeals.reduce((acc: any, meal: any) => {
-              acc[meal.type] = (acc[meal.type] || 0) + 1;
+            const mealTypeCount = clusterMeals.reduce<Record<string, number>>((acc, meal) => {
+              const key = String(meal.type);
+              acc[key] = (acc[key] || 0) + 1;
               return acc;
             }, {});
             

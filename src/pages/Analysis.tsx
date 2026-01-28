@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { runSafeAsync } from '../utils/safeAsync';
 import { getDateRangeString } from '../utils/dateUtils';
 import { analyzeData } from '../services/analysisService';
 import { Activity, Droplet, Cookie, Brain, TrendingUp, Sun, Cloud, Calendar, Clock, Sparkles } from 'lucide-react';
@@ -17,6 +18,8 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import AIInsightsPanel from '../components/AIInsightsPanel';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
 
 const Analysis = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
@@ -24,14 +27,14 @@ const Analysis = () => {
   const { isSubscribed } = useSubscription();
   const { formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
-  const [patterns, setPatterns] = useState<any>(null);
-  const [mealPatterns, setMealPatterns] = useState<any>(null);
-  const [mealClusters, setMealClusters] = useState<any>(null);
-  const [weatherImpact, setWeatherImpact] = useState<any>(null);
+  const [patterns, setPatterns] = useState<ReturnType<typeof detectGlucosePatterns> | null>(null);
+  const [mealPatterns, setMealPatterns] = useState<ReturnType<typeof analyzeMealPatterns> | null>(null);
+  const [mealClusters, setMealClusters] = useState<ReturnType<typeof identifyMealClusters> | null>(null);
+  const [weatherImpact, setWeatherImpact] = useState<Awaited<ReturnType<typeof analyzeWeatherImpact>>>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
-  const [insulinSensitivity, setInsulinSensitivity] = useState<any>(null);
+  const [insulinSensitivity, setInsulinSensitivity] = useState<ReturnType<typeof analyzeInsulinSensitivity> | null>(null);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   
   // Time selection state
@@ -62,64 +65,47 @@ const Analysis = () => {
       }
     );
   }, []);
-  
+
   useEffect(() => {
     if (!data && !loading) {
-      fetchDataForDays(14);
+      runSafeAsync(() => fetchDataForDays(14), { label: 'Analysis initial fetch' });
     }
   }, [data, loading, fetchDataForDays]);
 
-  // Get filtered readings based on time selection
-  const filteredReadings = React.useMemo(() => {
-    if (!data?.entries?.length) {
-      return [];
+  const entriesSortedAsc = React.useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return [...data.entries].sort((a, b) => a.date - b.date);
+  }, [data?.entries]);
+
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
+  const selectedRange = React.useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
     }
 
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= startTime && reading.date <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return sortedEntries.filter(reading => {
-        return reading.date >= cutoffTime;
-      });
-    }
-  }, [data?.entries, timeWindow, isCustomRange, customDateRange]);
+    const now = Date.now();
+    const timeWindowMs = timeWindow * 60 * 60 * 1000;
+    return { startMs: now - timeWindowMs, endMs: now };
+  }, [timeWindow, isCustomRange, customDateRange]);
+
+  // Get filtered readings based on time selection
+  const filteredReadings = React.useMemo(() => {
+    if (entriesSortedAsc.length === 0) return [];
+    return sliceSortedByTimeRange(entriesSortedAsc, (e) => e.date, selectedRange.startMs, selectedRange.endMs);
+  }, [entriesSortedAsc, selectedRange]);
 
   // Get filtered treatments based on time selection
   const filteredTreatments = React.useMemo(() => {
-    if (!data?.treatments?.length) {
-      return [];
-    }
-
-    if (isCustomRange) {
-      const startTime = startOfDay(new Date(customDateRange.startDate)).getTime();
-      const endTime = endOfDay(new Date(customDateRange.endDate)).getTime();
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= startTime && treatmentTime <= endTime;
-      });
-    } else {
-      const now = Date.now();
-      const timeWindowMs = timeWindow * 60 * 60 * 1000;
-      const cutoffTime = now - timeWindowMs;
-      
-      return data.treatments.filter(treatment => {
-        const treatmentTime = new Date(treatment.created_at).getTime();
-        return treatmentTime >= cutoffTime;
-      });
-    }
-  }, [data?.treatments, timeWindow, isCustomRange, customDateRange]);
+    if (treatmentsSortedAsc.length === 0) return [];
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange]);
 
   // Calculate time in range for filtered readings
   const filteredStats = React.useMemo(() => {
@@ -195,7 +181,7 @@ const Analysis = () => {
       }
     };
 
-    processData();
+    runSafeAsync(() => processData(), { label: 'Analysis processData effect' });
   }, [filteredReadings, filteredTreatments, location]);
 
   // Analyze data when available
@@ -217,7 +203,7 @@ const Analysis = () => {
       }
     };
     
-    runAnalysis();
+    runSafeAsync(() => runAnalysis(), { label: 'Analysis runAnalysis effect' });
   }, [data]);
   
   const currentProfile = analysisResults?.currentProfile;
@@ -275,7 +261,7 @@ const Analysis = () => {
       // Fetch more data if needed for longer time periods
       const daysNeeded = Math.ceil(newTimeWindow / 24) + 1;
       if (daysNeeded > 7) {
-        fetchDataForDays(Math.min(daysNeeded, 90));
+        runSafeAsync(() => fetchDataForDays(Math.min(daysNeeded, 90)), { label: 'Analysis fetch more data for time window' });
       }
     }
   };
@@ -298,7 +284,7 @@ const Analysis = () => {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
     const daysToFetch = Math.max(diffDays + 7, 14);
-    fetchDataForDays(Math.min(daysToFetch, 90));
+    runSafeAsync(() => fetchDataForDays(Math.min(daysToFetch, 90)), { label: 'Analysis fetch data for custom range' });
     
     setIsCustomRange(true);
     setShowCalendar(false);
@@ -306,20 +292,19 @@ const Analysis = () => {
 
   // Calculate available data span
   const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
-    
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
+    if (entriesSortedAsc.length === 0) return null;
+
+    const oldestEntry = entriesSortedAsc[0];
+    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
     const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
     
     return {
       oldestDate: new Date(oldestEntry.date),
       newestDate: new Date(newestEntry.date),
       spanDays,
-      totalReadings: data.entries.length
+      totalReadings: entriesSortedAsc.length
     };
-  }, [data?.entries]);
+  }, [entriesSortedAsc]);
   
   if (loading) return <LoadingSpinner />;
   
@@ -343,7 +328,7 @@ const Analysis = () => {
       <div className="text-center p-8">
         <p className="text-gray-600 dark:text-gray-400">No data available for analysis. Please fetch data first.</p>
         <button
-          onClick={() => fetchDataForDays(14)}
+          onClick={() => runSafeAsync(() => fetchDataForDays(14), { label: 'Analysis fetch data (no data state)' })}
           className="mt-4 px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
         >
           Fetch Data
@@ -421,7 +406,7 @@ const Analysis = () => {
                 handleCustomDateSubmit();
               } else {
                 const daysNeeded = Math.ceil(timeWindow / 24) + 1;
-                fetchDataForDays(Math.max(daysNeeded, 14));
+                runSafeAsync(() => fetchDataForDays(Math.max(daysNeeded, 14)), { label: 'Analysis refresh fetch data' });
               }
             }}
             className={
@@ -549,7 +534,7 @@ const Analysis = () => {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {patterns?.map((pattern: any, index: number) => (
+          {patterns?.map((pattern, index) => (
             <div key={index} className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
               <h4 className="font-medium text-purple-900 dark:text-purple-100">{pattern.timeOfDay}</h4>
               <div className="mt-2 space-y-1">
@@ -651,7 +636,7 @@ const Analysis = () => {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {insulinSensitivity.map((segment: any, index: number) => (
+            {insulinSensitivity.map((segment, index) => (
               <div key={index} className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
                 <h4 className="font-medium text-green-900 dark:text-green-100">
                   {segment.start}:00 - {segment.end}:00
@@ -690,7 +675,7 @@ const Analysis = () => {
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {Object.entries(weatherImpact.circadianAnalysis).map(([period, stats]: [string, any]) => (
+            {Object.entries(weatherImpact.circadianAnalysis).map(([period, stats]) => (
               <div key={period} className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
                 <h4 className="font-medium text-orange-900 dark:text-orange-100 capitalize">
                   {period}

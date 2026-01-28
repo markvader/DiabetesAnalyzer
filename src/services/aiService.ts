@@ -3,6 +3,8 @@ import type TensorFlowAIService from './tensorFlowAIService';
 import GeminiService from './geminiService';
 import { safeJsonParseFromText } from '../utils/safeJson';
 import { asNumber, asRiskAssessment, asStringArray, normalizeDetails } from './aiValidation';
+import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
 import {
   DEFAULT_GEMINI_MODEL,
   DEFAULT_OPENAI_MODEL,
@@ -19,8 +21,60 @@ export interface CustomGlucoseRanges {
   targetMax: number;
 }
 
+type AIProvider = {
+  name: 'OpenAI' | 'Gemini' | 'DeepSeek' | 'Anthropic';
+  endpoint: string;
+  model: string;
+  apiKey: string;
+};
+
+export type GlucoseContext = {
+  unit: 'mmol' | 'mgdl';
+  formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string;
+  getUnitLabel?: () => string;
+  getCurrentGlucoseRanges?: () => { TARGET_MIN: number; TARGET_MAX: number; LOW_THRESHOLD: number };
+};
+
+export type TimeInRangeSummary = {
+  timeInRange: number;
+  highPercentage: number;
+  lowPercentage: number;
+};
+
+type ProfileScheduleEntry = { time: string; value?: number; rate?: number };
+export type ProfileLike = {
+  basal?: ProfileScheduleEntry[];
+  sens?: ProfileScheduleEntry[];
+  carbratio?: ProfileScheduleEntry[];
+};
+
+type ParsedAiJson = Record<string, unknown> & {
+  insights?: unknown;
+  recommendations?: unknown;
+  riskAssessment?: unknown;
+  confidence?: unknown;
+  details?: unknown;
+
+  mealTiming?: unknown;
+  exerciseTypes?: unknown;
+  rapidRises?: unknown;
+  variability?: unknown;
+  sleepQualityScore?: unknown;
+  dawnPhenomenon?: unknown;
+  sleepDisruptions?: unknown;
+  stressImpactScore?: unknown;
+  potentialStressTimes?: unknown;
+};
+
+export type TensorFlowInfo = {
+  isReady: boolean;
+  isEnabled: boolean;
+  shouldUse: boolean;
+  modelInfo: ReturnType<TensorFlowAIService['getModelInfo']>;
+};
+
 class AIService {
-  providers: any[] = [];
+  providers: AIProvider[] = [];
   private tensorFlowService: TensorFlowAIService | null = null;
   private tensorFlowServicePromise: Promise<TensorFlowAIService> | null = null;
   private geminiService: GeminiService;
@@ -261,7 +315,7 @@ class AIService {
   }
 
   // Get TensorFlow info
-  getTensorFlowInfo(): any {
+  getTensorFlowInfo(): TensorFlowInfo {
     const svc = this.tensorFlowService;
     return {
       isReady: svc?.isReady?.() ?? false,
@@ -272,7 +326,12 @@ class AIService {
   }
 
   // Analyze glucose patterns - API Primary, TensorFlow Fallback
-  async analyzeGlucosePatterns(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }, _customGlucoseRanges?: CustomGlucoseRanges) {
+  async analyzeGlucosePatterns(
+    readings: NightscoutEntry[],
+    timeInRange: TimeInRangeSummary,
+    glucoseContext?: GlucoseContext,
+    _customGlucoseRanges?: CustomGlucoseRanges
+  ) {
     console.log('🔍 Glucose Pattern Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       hasTimeInRange: !!timeInRange 
@@ -413,12 +472,17 @@ class AIService {
               });
               
               // Convert Gemini result to expected format
+              const geminiRecord: Record<string, unknown> =
+                (typeof geminiResult === 'object' && geminiResult !== null)
+                  ? (geminiResult as Record<string, unknown>)
+                  : {};
+
                   return {
-                    insights: (geminiResult as any).insights ?? geminiResult.reasoning,
+                    insights: geminiRecord.insights ?? geminiResult.reasoning,
                 recommendations: geminiResult.recommendations,
                 riskAssessment: geminiResult.riskAssessment,
                 confidence: Math.round(geminiResult.confidence * 100),
-                    details: (geminiResult as any).details ?? null,
+                    details: geminiRecord.details ?? null,
                 patterns: {
                   timeInRange: timeInRange,
                   variability: stats.cv,
@@ -500,7 +564,10 @@ class AIService {
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: ParsedAiJson =
+              (typeof rawResult === 'object' && rawResult !== null)
+                ? (rawResult as ParsedAiJson)
+                : {};
 
             console.log(`✅ ${provider.name} glucose analysis successful`);
 
@@ -543,7 +610,12 @@ class AIService {
   }
 
   // Generate management plan
-  async generateManagementPlan(readings: any[], _treatments: any[], glucoseContext?: any, customGlucoseRanges?: CustomGlucoseRanges) {
+  async generateManagementPlan(
+    readings: NightscoutEntry[],
+    _treatments: NightscoutTreatment[],
+    glucoseContext?: GlucoseContext,
+    customGlucoseRanges?: CustomGlucoseRanges
+  ) {
     // Priority 1: TensorFlow (offline) when available
     const tfService = await this.getTensorFlowServiceAsync();
     if (tfService?.shouldUseTensorFlow()) {
@@ -723,7 +795,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
 
   // Analyze meal patterns
-  async analyzeMealPatterns(readings: any[], treatments: any[], glucoseContext?: any) {
+  async analyzeMealPatterns(readings: NightscoutEntry[], treatments: NightscoutTreatment[], glucoseContext?: GlucoseContext) {
     console.log('🍽️ Meal Pattern Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       treatmentsCount: treatments?.length || 0 
@@ -863,7 +935,9 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             if (provider.name === 'Gemini') {
               const gemini = await this.geminiService.generateJson(provider.model, prompt);
-              const result = gemini.json;
+              const resultRaw = gemini.json;
+              const result: Record<string, unknown> =
+                (typeof resultRaw === 'object' && resultRaw !== null) ? (resultRaw as Record<string, unknown>) : {};
 
               tokenUsage = {
                 inputTokens: gemini.tokenUsage.prompt,
@@ -874,10 +948,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
 
               return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                mealTiming: result.mealTiming || [],
-                details: result.details || null,
+                insights: asStringArray(result.insights, 12),
+                recommendations: asStringArray(result.recommendations, 12),
+                mealTiming: Array.isArray(result.mealTiming) ? result.mealTiming : [],
+                details: normalizeDetails(result.details),
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -955,7 +1029,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: ParsedAiJson =
+              (typeof rawResult === 'object' && rawResult !== null)
+                ? (rawResult as ParsedAiJson)
+                : {};
 
             console.log(`✅ ${provider.name} meal analysis successful`);
             const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
@@ -990,7 +1067,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
 
   // Analyze exercise impact
-  async analyzeExerciseImpact(readings: any[], treatments: any[], glucoseContext?: any) {
+  async analyzeExerciseImpact(readings: NightscoutEntry[], treatments: NightscoutTreatment[], glucoseContext?: GlucoseContext) {
     console.log('🏃 Exercise Impact Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       treatmentsCount: treatments?.length || 0 
@@ -1131,7 +1208,9 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             if (provider.name === 'Gemini') {
               const gemini = await this.geminiService.generateJson(provider.model, prompt);
-              const result = gemini.json;
+              const resultRaw = gemini.json;
+              const result: Record<string, unknown> =
+                (typeof resultRaw === 'object' && resultRaw !== null) ? (resultRaw as Record<string, unknown>) : {};
 
               tokenUsage = {
                 inputTokens: gemini.tokenUsage.prompt,
@@ -1141,12 +1220,12 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
               this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
               return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                exerciseTypes: result.exerciseTypes || [],
-                rapidRises: result.rapidRises || 0,
-                variability: result.variability || stats.cv,
-                details: result.details || null,
+                insights: asStringArray(result.insights, 12),
+                recommendations: asStringArray(result.recommendations, 12),
+                exerciseTypes: Array.isArray(result.exerciseTypes) ? result.exerciseTypes : [],
+                rapidRises: asNumber(result.rapidRises, 0, 0, 100000),
+                variability: asNumber(result.variability, stats.cv, 0, 1000),
+                details: normalizeDetails(result.details),
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -1224,7 +1303,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: ParsedAiJson =
+              (typeof rawResult === 'object' && rawResult !== null)
+                ? (rawResult as ParsedAiJson)
+                : {};
 
             console.log(`✅ ${provider.name} exercise analysis successful`);
             const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
@@ -1261,7 +1343,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
 
   // Analyze sleep patterns
-  async analyzeSleepPatterns(readings: any[], glucoseContext?: any) {
+  async analyzeSleepPatterns(readings: NightscoutEntry[], glucoseContext?: GlucoseContext) {
     console.log('🌙 Sleep Pattern Analysis - Starting...', { 
       readingsCount: readings?.length || 0 
     });
@@ -1293,7 +1375,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
             const sleepDisruptions = (() => {
               if (nightReadings.length < 2) return 0;
               // Count threshold crossings during night as a proxy for disruptions
-              const values = nightReadings.map(r => r.sgv).filter((v: any) => typeof v === 'number');
+              const values = nightReadings.map(r => r.sgv).filter((v): v is number => typeof v === 'number');
               let crossings = 0;
               for (let i = 1; i < values.length; i++) {
                 const prev = values[i - 1];
@@ -1410,7 +1492,9 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             if (provider.name === 'Gemini') {
               const gemini = await this.geminiService.generateJson(provider.model, prompt);
-              const result = gemini.json;
+              const resultRaw = gemini.json;
+              const result: Record<string, unknown> =
+                (typeof resultRaw === 'object' && resultRaw !== null) ? (resultRaw as Record<string, unknown>) : {};
 
               tokenUsage = {
                 inputTokens: gemini.tokenUsage.prompt,
@@ -1420,12 +1504,12 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               const costUSD = calculateCostFromTokenUsage(provider.model, tokenUsage);
               this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
               return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                sleepQualityScore: result.sleepQualityScore || 75,
-                dawnPhenomenon: result.dawnPhenomenon || dawnEffect,
-                sleepDisruptions: result.sleepDisruptions || 1,
-                details: result.details || null,
+                insights: asStringArray(result.insights, 12),
+                recommendations: asStringArray(result.recommendations, 12),
+                sleepQualityScore: asNumber(result.sleepQualityScore, 75, 0, 100),
+                dawnPhenomenon: asNumber(result.dawnPhenomenon, dawnEffect, -1000, 1000),
+                sleepDisruptions: asNumber(result.sleepDisruptions, 1, 0, 1000),
+                details: normalizeDetails(result.details),
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -1503,7 +1587,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: ParsedAiJson =
+              (typeof rawResult === 'object' && rawResult !== null)
+                ? (rawResult as ParsedAiJson)
+                : {};
 
             console.log(`✅ ${provider.name} sleep analysis successful`);
             const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
@@ -1540,7 +1627,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
 
   // Analyze stress impact
-  async analyzeStressImpact(readings: any[], glucoseContext?: any) {
+  async analyzeStressImpact(readings: NightscoutEntry[], glucoseContext?: GlucoseContext) {
     console.log('😰 Stress Impact Analysis - Starting...', { 
       readingsCount: readings?.length || 0 
     });
@@ -1668,7 +1755,9 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             if (provider.name === 'Gemini') {
               const gemini = await this.geminiService.generateJson(provider.model, prompt);
-              const result = gemini.json;
+              const resultRaw = gemini.json;
+              const result: Record<string, unknown> =
+                (typeof resultRaw === 'object' && resultRaw !== null) ? (resultRaw as Record<string, unknown>) : {};
 
               tokenUsage = {
                 inputTokens: gemini.tokenUsage.prompt,
@@ -1679,13 +1768,15 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
 
               return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                stressImpactScore: result.stressImpactScore ?? 50,
-                rapidRises: result.rapidRises ?? rapidRises,
-                variability: result.variability ?? stats.cv,
-                potentialStressTimes: result.potentialStressTimes || this.estimateStressPeriods(readings, stats.cv),
-                details: result.details || null,
+                insights: asStringArray(result.insights, 12),
+                recommendations: asStringArray(result.recommendations, 12),
+                stressImpactScore: asNumber(result.stressImpactScore, 50, 0, 100),
+                rapidRises: asNumber(result.rapidRises, rapidRises, 0, 100000),
+                variability: asNumber(result.variability, stats.cv, 0, 1000),
+                potentialStressTimes: Array.isArray(result.potentialStressTimes)
+                  ? result.potentialStressTimes
+                  : this.estimateStressPeriods(readings, stats.cv),
+                details: normalizeDetails(result.details),
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -1763,7 +1854,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: ParsedAiJson =
+              (typeof rawResult === 'object' && rawResult !== null)
+                ? (rawResult as ParsedAiJson)
+                : {};
 
             console.log(`✅ ${provider.name} stress analysis successful`);
             const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
@@ -1805,7 +1899,12 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     }
   }
   // Optimize insulin sensitivity
-  async optimizeInsulinSensitivity(readings: any[], treatments: any[], currentProfile: any, glucoseContext?: any) {
+  async optimizeInsulinSensitivity(
+    readings: NightscoutEntry[],
+    treatments: NightscoutTreatment[],
+    currentProfile: ProfileLike,
+    glucoseContext?: GlucoseContext
+  ) {
     console.log('🎯 ISF Optimization Analysis - Starting...', { 
       readingsCount: readings?.length || 0, 
       treatmentsCount: treatments?.length || 0,
@@ -1833,10 +1932,13 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               return Math.max(0.9, Math.min(1.1, raw));
             })();
 
-            const isfSuggestions = currentISFSchedule.map((entry: any) => ({
-              time: entry.time,
-              rate: typeof entry.value === 'number' ? Number((entry.value * factor).toFixed(2)) : entry.value
-            }));
+            const isfSuggestions = currentISFSchedule.map((entry) => {
+              const base = typeof entry.value === 'number' ? entry.value : typeof entry.rate === 'number' ? entry.rate : NaN;
+              return {
+                time: entry.time,
+                rate: Number.isFinite(base) ? Number((base * factor).toFixed(2)) : base
+              };
+            });
 
             const calculatedISFs = this.estimateISFFromCorrections(readings, treatments, glucoseContext);
 
@@ -1927,7 +2029,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
           Clean correction examples detected: ${correctionCandidates.length}
 
           Current ISF schedule (time/value):
-          ${currentSchedule.slice(0, 12).map((s: any) => `- ${s.time}: ${s.value}`).join('\n')}
+          ${currentSchedule.slice(0, 12).map((s) => `- ${s.time}: ${s.value}`).join('\n')}
 
           Return JSON with:
           1. insights: 3-5 observations
@@ -1956,7 +2058,9 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             if (provider.name === 'Gemini') {
               const gemini = await this.geminiService.generateJson(provider.model, prompt);
-              const result = gemini.json;
+              const resultRaw = gemini.json;
+              const result: Record<string, unknown> =
+                (typeof resultRaw === 'object' && resultRaw !== null) ? (resultRaw as Record<string, unknown>) : {};
               tokenUsage = {
                 inputTokens: gemini.tokenUsage.prompt,
                 outputTokens: gemini.tokenUsage.completion,
@@ -1966,12 +2070,14 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               this.storeLastAICost({ provider: provider.name, model: provider.model, tokenUsage, costUSD });
 
               return {
-                insights: result.insights || [],
-                recommendations: result.recommendations || [],
-                isfSuggestions: result.isfSuggestions || currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
-                calculatedISFs: result.calculatedISFs || correctionCandidates,
-                confidenceLevel: result.confidenceLevel || 75,
-                details: result.details || null,
+                insights: asStringArray(result.insights, 12),
+                recommendations: asStringArray(result.recommendations, 12),
+                isfSuggestions: Array.isArray(result.isfSuggestions)
+                  ? result.isfSuggestions
+                  : currentSchedule.map((s) => ({ time: s.time, rate: s.value })),
+                calculatedISFs: Array.isArray(result.calculatedISFs) ? result.calculatedISFs : correctionCandidates,
+                confidenceLevel: asNumber(result.confidenceLevel, 75, 0, 100),
+                details: normalizeDetails(result.details),
                 provider: provider.name,
                 model: provider.model,
                 tokenUsage,
@@ -2049,7 +2155,8 @@ ${(tf.recommendations && tf.recommendations.length > 0)
                   recommendations: []
                 };
 
-            const result = (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as any) : {};
+            const result: Record<string, unknown> =
+              (typeof rawResult === 'object' && rawResult !== null) ? (rawResult as Record<string, unknown>) : {};
 
             console.log(`✅ ${provider.name} ISF optimization successful`);
             const costUSD = tokenUsage ? calculateCostFromTokenUsage(provider.model, tokenUsage) : null;
@@ -2059,11 +2166,21 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
             const isfSuggestions = Array.isArray(result.isfSuggestions)
               ? result.isfSuggestions
-                  .map((s: any) => ({
-                    time: typeof s?.time === 'string' ? s.time : undefined,
-                    rate: typeof s?.rate === 'number' ? s.rate : Number(s?.rate)
-                  }))
-                  .filter((s: any) => typeof s.time === 'string' && Number.isFinite(s.rate))
+                  .map((s): { time: string; rate: number } | null => {
+                    if (typeof s !== 'object' || s === null) return null;
+                    const rec = s as Record<string, unknown>;
+                    const time = typeof rec.time === 'string' ? rec.time : null;
+                    const rateRaw = rec.rate;
+                    const rate =
+                      typeof rateRaw === 'number'
+                        ? rateRaw
+                        : typeof rateRaw === 'string'
+                          ? Number(rateRaw)
+                          : NaN;
+                    if (!time || !Number.isFinite(rate)) return null;
+                    return { time, rate };
+                  })
+                  .filter((s): s is { time: string; rate: number } => s !== null)
               : [];
 
             const calculatedISFs = Array.isArray(result.calculatedISFs) ? result.calculatedISFs : null;
@@ -2072,7 +2189,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
               recommendations: asStringArray(result.recommendations, 12),
               isfSuggestions: isfSuggestions.length
                 ? isfSuggestions
-                : currentSchedule.map((s: any) => ({ time: s.time, rate: s.value })),
+                : currentSchedule.map((s) => ({ time: s.time, rate: s.value })),
               calculatedISFs: calculatedISFs ?? correctionCandidates,
               confidenceLevel: asNumber(result.confidenceLevel, 75, 0, 100),
               details: normalizeDetails(result.details),
@@ -2100,7 +2217,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   // Helper methods
   // Currently unused but kept for potential future use
   /*
-  private sampleData(data: any[], maxSamples: number) {
+  private sampleData<T>(data: T[], maxSamples: number): T[] {
     if (!data || data.length <= maxSamples) return data;
     
     const step = Math.ceil(data.length / maxSamples);
@@ -2114,7 +2231,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
   */
 
-  private calculateBasicStats(readings: any[]) {
+  private calculateBasicStats(readings: NightscoutEntry[]): { mean: number; stdDev: number; cv: number; high: number } {
     if (!readings || readings.length === 0) {
       return { mean: 0, stdDev: 0, cv: 0, high: 0 };
     }
@@ -2137,7 +2254,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private estimateStressPeriods(readings: any[], overallCv: number) {
+  private estimateStressPeriods(readings: NightscoutEntry[], overallCv: number) {
     if (!readings || readings.length < 12) return [];
 
     // Split day into coarse blocks and pick the most variable ones.
@@ -2150,8 +2267,8 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     const perBlock = blocks
       .map((b) => {
-        const inBlock = readings.filter((r: any) => {
-          const d = new Date(r.dateString || r.date);
+        const inBlock = readings.filter((r) => {
+          const d = new Date(getEntryMs(r));
           const h = d.getHours();
           if (b.start < b.end) return h >= b.start && h < b.end;
           return h >= b.start || h < b.end;
@@ -2173,7 +2290,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     return perBlock;
   }
 
-  private estimateISFFromCorrections(readings: any[], treatments: any[], glucoseContext?: any) {
+  private estimateISFFromCorrections(readings: NightscoutEntry[], treatments: NightscoutTreatment[], glucoseContext?: GlucoseContext) {
     if (!readings || readings.length < 12 || !treatments || treatments.length === 0) return [];
 
     const unit: 'mgdl' | 'mmol' = glucoseContext?.unit === 'mgdl' ? 'mgdl' : 'mmol';
@@ -2181,18 +2298,17 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     // Very conservative heuristic: look for correction boluses and estimate drop over 3 hours.
     const boluses = treatments
-      .filter((t: any) => (t.eventType === 'Correction Bolus' || t.eventType === 'Bolus') && typeof t.insulin === 'number')
+      .filter((t) => (t.eventType === 'Correction Bolus' || t.eventType === 'Bolus') && typeof t.insulin === 'number')
       .slice(0, 25);
 
-    const byTime = (a: any, b: any) => new Date(a.dateString || a.date).getTime() - new Date(b.dateString || b.date).getTime();
-    const sortedReadings = [...readings].sort(byTime);
+    const sortedReadings = [...readings].sort((a, b) => getEntryMs(a) - getEntryMs(b));
 
     const findNearestReading = (timeMs: number) => {
       // Linear scan is ok for small lists; keep it simple.
-      let best: any = null;
+      let best: NightscoutEntry | null = null;
       let bestDelta = Infinity;
       for (const r of sortedReadings) {
-        const t = new Date(r.dateString || r.date).getTime();
+        const t = getEntryMs(r);
         const d = Math.abs(t - timeMs);
         if (d < bestDelta) {
           best = r;
@@ -2202,10 +2318,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
       return { reading: best, deltaMs: bestDelta };
     };
 
-    const results: Array<any> = [];
+    const results: Array<{ time: string; insulin: number; preGlucose: number; postGlucose: number; drop: number; calculatedISF: number }> = [];
 
     for (const b of boluses) {
-      const bolusTime = new Date(b.dateString || b.created_at || b.timestamp || b.date).getTime();
+      const bolusTime = getTreatmentMs(b);
       if (!Number.isFinite(bolusTime)) continue;
 
       const pre = findNearestReading(bolusTime);
@@ -2247,7 +2363,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     return results;
   }
 
-  private coerceTimeInRangePercent(timeInRange: any, fallbackFromTensorFlow?: any): { low: number; inRange: number; high: number } {
+  private coerceTimeInRangePercent(timeInRange: TimeInRangeSummary, fallbackFromTensorFlow?: unknown): { low: number; inRange: number; high: number } {
     const fromUI = timeInRange && typeof timeInRange === 'object'
       ? {
           low: typeof timeInRange.lowPercentage === 'number' ? timeInRange.lowPercentage : undefined,
@@ -2256,13 +2372,15 @@ ${(tf.recommendations && tf.recommendations.length > 0)
         }
       : {};
 
-    const fromTF = fallbackFromTensorFlow && typeof fallbackFromTensorFlow === 'object'
-      ? {
-          low: typeof fallbackFromTensorFlow.low === 'number' ? fallbackFromTensorFlow.low : undefined,
-          inRange: typeof fallbackFromTensorFlow.inRange === 'number' ? fallbackFromTensorFlow.inRange : undefined,
-          high: typeof fallbackFromTensorFlow.high === 'number' ? fallbackFromTensorFlow.high : undefined
-        }
-      : {};
+    const fromTF = (() => {
+      if (!fallbackFromTensorFlow || typeof fallbackFromTensorFlow !== 'object') return {} as const;
+      const tf = fallbackFromTensorFlow as Record<string, unknown>;
+      return {
+        low: typeof tf.low === 'number' ? tf.low : undefined,
+        inRange: typeof tf.inRange === 'number' ? tf.inRange : undefined,
+        high: typeof tf.high === 'number' ? tf.high : undefined
+      };
+    })();
 
     const low = (fromUI.low ?? fromTF.low ?? 0);
     const inRange = (fromUI.inRange ?? fromTF.inRange ?? 0);
@@ -2341,10 +2459,10 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   private buildLocalGlucoseDetails(
     tir: { low: number; inRange: number; high: number },
     stats: { mean: number; stdDev: number; cv: number; high: number },
-    readings: any[],
+    readings: NightscoutEntry[],
     formatValue: (value: number) => string
   ) {
-    const values = readings.map(r => r?.sgv).filter((v: any) => typeof v === 'number' && Number.isFinite(v));
+    const values = readings.map(r => r?.sgv).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
     const min = values.length ? Math.min(...values) : null;
     const max = values.length ? Math.max(...values) : null;
 
@@ -2389,7 +2507,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 
     const dataQualityNotes: string[] = [];
     if (values.length < 24) dataQualityNotes.push('Limited data volume; conclusions may be less reliable.');
-    const times = readings.map(r => (typeof r?.date === 'number' ? r.date : (r?.date ? new Date(r.date).getTime() : null))).filter((t: any) => typeof t === 'number' && Number.isFinite(t));
+    const times = readings.map(r => getEntryMs(r)).filter((t): t is number => typeof t === 'number' && Number.isFinite(t));
     if (times.length >= 2) {
       const spanHours = (Math.max(...times) - Math.min(...times)) / (1000 * 60 * 60);
       if (spanHours < 12) dataQualityNotes.push('Data window appears short; a 3–14 day view is usually more informative for patterns.');
@@ -2407,7 +2525,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private calculateTimeInRange(readings: any[], customRanges?: CustomGlucoseRanges) {
+  private calculateTimeInRange(readings: NightscoutEntry[], customRanges?: CustomGlucoseRanges) {
     if (!readings || readings.length === 0) {
       return { inRange: 0, high: 0, low: 0 };
     }
@@ -2438,14 +2556,14 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private calculateMealStats(carbTreatments: any[], readings: any[]) {
+  private calculateMealStats(carbTreatments: NightscoutTreatment[], readings: NightscoutEntry[]) {
     const avgCarbs = carbTreatments.reduce((sum, t) => sum + t.carbs, 0) / carbTreatments.length;
     
     let glucoseRises = 0;
     let hypoCount = 0;
     
     carbTreatments.forEach(meal => {
-      const mealTime = new Date(meal.created_at).getTime();
+      const mealTime = getTreatmentMs(meal);
       
       // Get pre-meal glucose
       const preMealReadings = readings.filter(r => 
@@ -2482,7 +2600,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private calculateDawnEffect(readings: any[], glucoseContext?: any): number {
+  private calculateDawnEffect(readings: NightscoutEntry[], glucoseContext?: GlucoseContext): number {
     // Filter readings by time
     const nightReadings = readings.filter(r => {
       const hour = new Date(r.date).getHours();
@@ -2507,7 +2625,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     return glucoseContext?.unit === 'mgdl' ? difference : toMmol(difference);
   }
 
-  private countRapidGlucoseRises(readings: any[]): number {
+  private countRapidGlucoseRises(readings: NightscoutEntry[]): number {
     if (readings.length < 3) return 0;
     
     let rapidRises = 0;
@@ -2526,7 +2644,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
   }
 
   // Fallback methods when AI is unavailable
-  private getFallbackGlucoseAnalysis(readings: any[], timeInRange: any, glucoseContext?: { unit: 'mmol' | 'mgdl', formatGlucoseValue: (value: number, fromUnit?: 'mmol' | 'mgdl', showUnit?: boolean) => string, getUnitLabel: () => string }) {
+  private getFallbackGlucoseAnalysis(readings: NightscoutEntry[], timeInRange: TimeInRangeSummary, glucoseContext?: GlucoseContext) {
     const stats = this.calculateBasicStats(readings);
     
     // Format glucose value based on unit context
@@ -2551,7 +2669,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private getFallbackManagementPlan(glucoseContext?: any) {
+  private getFallbackManagementPlan(glucoseContext?: GlucoseContext) {
     const ranges = glucoseContext?.getCurrentGlucoseRanges() || { TARGET_MIN: 70, TARGET_MAX: 180 };
     const targetRangeText = glucoseContext 
       ? `(${glucoseContext.formatGlucoseValue(ranges.TARGET_MIN, 'mgdl')}-${glucoseContext.formatGlucoseValue(ranges.TARGET_MAX, 'mgdl')} ${glucoseContext.getUnitLabel()})`
@@ -2585,7 +2703,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
 * Consult with your healthcare provider before making significant changes`;
   }
 
-  private getFallbackMealAnalysis(_glucoseContext?: any) {
+  private getFallbackMealAnalysis(_glucoseContext?: GlucoseContext) {
     return {
       insights: [
         "Meal timing and composition significantly impact glucose control.",
@@ -2654,7 +2772,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private getFallbackSleepAnalysis(readings: any[], glucoseContext?: any) {
+  private getFallbackSleepAnalysis(readings: NightscoutEntry[], glucoseContext?: GlucoseContext) {
     const dawnEffect = this.calculateDawnEffect(readings, glucoseContext);
     
     return {
@@ -2674,7 +2792,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private getFallbackStressAnalysis(readings: any[]) {
+  private getFallbackStressAnalysis(readings: NightscoutEntry[]) {
     const stats = this.calculateBasicStats(readings);
     const rapidRises = this.countRapidGlucoseRises(readings);
     
@@ -2709,7 +2827,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
     };
   }
 
-  private getFallbackISFOptimization(_readings: any[], _treatments: any[], currentProfile: any) {
+  private getFallbackISFOptimization(_readings: NightscoutEntry[], _treatments: NightscoutTreatment[], currentProfile: ProfileLike) {
     const currentISF = currentProfile?.sens || [];
     
     return {
@@ -2723,7 +2841,7 @@ ${(tf.recommendations && tf.recommendations.length > 0)
         "Document the glucose drop for each unit of insulin.",
         "Adjust ISF values in 5-10% increments based on results."
       ],
-      isfSuggestions: currentISF.map((isf: any) => ({
+      isfSuggestions: currentISF.map((isf) => ({
         time: isf.time,
         rate: isf.value
       })),
