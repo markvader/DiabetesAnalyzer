@@ -252,7 +252,7 @@ const Dashboard = () => {
   // Helper functions to extract values from your specific Nightscout data structure
   const extractCageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
-    if (!deviceStatus) {
+    if (!_deviceStatus) {
       console.log('⚠️ No device status available, using cached CAGE value');
       return lastKnownCageRef.current;
     }
@@ -322,7 +322,7 @@ const Dashboard = () => {
 
   const extractSageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
-    if (!deviceStatus) {
+    if (!_deviceStatus) {
       console.log('⚠️ No device status available, using cached SAGE value');
       return lastKnownSageRef.current;
     }
