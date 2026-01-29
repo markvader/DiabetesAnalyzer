@@ -43,6 +43,8 @@ export interface MealEvent {
   carbs: number;
   time: number;
   insulinBolus?: number;
+  absorptionTauMin?: number;
+  absorptionSpeed?: 'fast' | 'medium' | 'slow';
 }
 
 export interface InsulinEvent {
@@ -66,6 +68,7 @@ export interface PredictionContext {
   isWeekend: boolean;
   stressLevel?: 'low' | 'moderate' | 'high';
   sleepQuality?: 'poor' | 'fair' | 'good';
+  carbAbsorptionTauMin?: number;
 }
 
 export interface PredictionResult {
@@ -92,6 +95,20 @@ export interface PredictionResult {
 }
 
 class AdvancedPredictionService {
+
+  /**
+   * Deterministic-only predictions (no remote AI). Useful for always-on risk calculations.
+   * Assumes 5-minute intervals (consistent with internal alert timing).
+   */
+  async generateDeterministicPredictions(
+    readings: GlucoseReading[],
+    context?: PredictionContext,
+    predictionHours: number = 6,
+    intervalMinutes: number = 5
+  ): Promise<PredictionResult> {
+    const predictionPoints = (predictionHours * 60) / intervalMinutes;
+    return this.getAdvancedMathematicalPredictions(readings, context, predictionPoints);
+  }
 
   private getFirstJsonCapableProvider(): JsonCapableProvider | null {
     const providers = (aiService as unknown as { providers?: unknown })?.providers;
@@ -502,8 +519,9 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     // Meal effects
     context.recentMeals.forEach(meal => {
       const timeSinceMeal = (Date.now() - meal.time) / 60000 + timeMinutes;
-      if (timeSinceMeal >= 0 && timeSinceMeal <= 180) { // 3 hours post-meal
-        const mealEffect = this.calculateMealEffect(meal.carbs, timeSinceMeal);
+      const mealTauMin = meal.absorptionTauMin ?? context.carbAbsorptionTauMin;
+      if (timeSinceMeal >= 0) {
+        const mealEffect = this.calculateMealEffect(meal.carbs, timeSinceMeal, mealTauMin, meal.absorptionSpeed);
         adjusted += mealEffect;
       }
     });
@@ -529,18 +547,42 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
     return adjusted;
   }
 
-  private calculateMealEffect(carbs: number, timeSinceMeal: number): number {
-    // Simplified meal absorption curve
-    if (timeSinceMeal < 0 || timeSinceMeal > 180) return 0;
-    
-    const peakTime = 60; // Peak at 1 hour
+  private calculateMealEffect(carbs: number, timeSinceMeal: number, tauMin?: number, speed?: 'fast' | 'medium' | 'slow'): number {
+    // Simplified meal absorption curve with optional per-user/per-meal decay tuning.
+    if (timeSinceMeal < 0) return 0;
+
+    const defaultPeakTime = 60; // Peak at 1 hour
+    const defaultTau = 60;
+
+    const speedDefaults: Record<'fast' | 'medium' | 'slow', { peakTime: number; tau: number; duration: number }> = {
+      fast: { peakTime: 45, tau: 45, duration: 180 },
+      medium: { peakTime: 60, tau: 60, duration: 180 },
+      slow: { peakTime: 75, tau: 90, duration: 240 }
+    };
+
+    const base = speed ? speedDefaults[speed] : { peakTime: defaultPeakTime, tau: defaultTau, duration: 180 };
+
+    const peakTime = typeof tauMin === 'number' && Number.isFinite(tauMin)
+      ? Math.min(90, Math.max(30, tauMin))
+      : base.peakTime;
+
+    const tau = typeof tauMin === 'number' && Number.isFinite(tauMin)
+      ? Math.min(180, Math.max(30, tauMin))
+      : base.tau;
+
+    const duration = typeof tauMin === 'number' && Number.isFinite(tauMin)
+      ? Math.min(300, Math.max(180, peakTime + 2.5 * tau))
+      : base.duration;
+
+    if (timeSinceMeal > duration) return 0;
+
     const maxEffect = carbs * 2; // Rough approximation
-    
+
     if (timeSinceMeal <= peakTime) {
       return maxEffect * (timeSinceMeal / peakTime);
-    } else {
-      return maxEffect * Math.exp(-(timeSinceMeal - peakTime) / 60);
     }
+
+    return maxEffect * Math.exp(-(timeSinceMeal - peakTime) / tau);
   }
 
   private calculateInsulinEffect(units: number, timeSinceInsulin: number): number {

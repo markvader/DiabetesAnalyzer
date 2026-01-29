@@ -34,7 +34,9 @@ import {
   Shield,
   Heart,
   Bed,
-  Palette
+  Palette,
+  AlertTriangle,
+  SlidersHorizontal
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import DesignModeSelector from './DesignModeSelector';
@@ -86,7 +88,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         { name: 'Overview', path: '/', icon: <Activity className="h-4 w-4" /> },
         { name: 'Time in Range', path: '/time-in-range', icon: <Clock className="h-4 w-4" /> },
         { name: 'Glucose Chart', path: '/glucose-chart', icon: <LineChart className="h-4 w-4" /> },
-        { name: 'Predictions', path: '/predictions', icon: <Brain className="h-4 w-4" /> }
+        { name: 'Predictions', path: '/predictions', icon: <Brain className="h-4 w-4" /> },
+        { name: 'Hypo Risk Forecast', path: '/hypo-risk', icon: <AlertTriangle className="h-4 w-4" /> }
       ]
     },
     {
@@ -119,8 +122,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       icon: <Droplet className="h-5 w-5" />,
       items: [
         { name: 'Basal Rates', path: '/basal', icon: <Activity className="h-4 w-4" /> },
+        { name: 'Basal Sanity', path: '/basal-sanity', icon: <Shield className="h-4 w-4" /> },
         { name: 'ISF Settings', path: '/isf', icon: <Thermometer className="h-4 w-4" /> },
         { name: 'ISF Optimization', path: '/isf-optimization', icon: <Target className="h-4 w-4" /> },
+        { name: 'ISF/CR Tuning', path: '/isf-cr-tuning', icon: <SlidersHorizontal className="h-4 w-4" /> },
+        { name: 'Meal Absorption', path: '/meal-absorption', icon: <Cookie className="h-4 w-4" /> },
         { name: 'Carb Ratios', path: '/carb-ratio', icon: <Cookie className="h-4 w-4" /> },
         { name: 'OpenAPS SMB', path: '/openaps-smb', icon: <Zap className="h-4 w-4" /> },
         { name: 'Loop Analysis', path: '/loop-analysis', icon: <Target className="h-4 w-4" /> },

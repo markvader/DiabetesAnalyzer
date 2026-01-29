@@ -36,6 +36,30 @@ export const PredictionContextProvider: React.FC<PredictionContextProviderProps>
   const [recentExercise, setRecentExercise] = useState<ExerciseEvent[]>([]);
   const [stressLevel, setStressLevelState] = useState<'low' | 'moderate' | 'high'>('low');
   const [sleepQuality, setSleepQualityState] = useState<'poor' | 'fair' | 'good'>('good');
+  const [carbAbsorptionTauMin, setCarbAbsorptionTauMin] = useState<number | undefined>(() => {
+    try {
+      const raw = localStorage.getItem('mealAbsorptionTauMin');
+      const v = raw ? Number(raw) : undefined;
+      return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+
+  React.useEffect(() => {
+    const onUpdate = () => {
+      try {
+        const raw = localStorage.getItem('mealAbsorptionTauMin');
+        const v = raw ? Number(raw) : undefined;
+        setCarbAbsorptionTauMin(typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener('mealAbsorptionProfileUpdated', onUpdate);
+    return () => window.removeEventListener('mealAbsorptionProfileUpdated', onUpdate);
+  }, []);
 
   // Get current time-based context
   const getTimeContext = useCallback(() => {
@@ -110,6 +134,7 @@ export const PredictionContextProvider: React.FC<PredictionContextProviderProps>
     recentExercise,
     stressLevel,
     sleepQuality,
+    carbAbsorptionTauMin,
     addMeal,
     addInsulin,
     addExercise,

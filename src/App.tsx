@@ -51,6 +51,10 @@ const SleepAnalysis = lazy(() => import('./pages/SleepAnalysis'));
 const StressImpact = lazy(() => import('./pages/StressImpact'));
 const ISFOptimization = lazy(() => import('./pages/ISFOptimization'));
 const TensorFlowTest = lazy(() => import('./pages/TensorFlowTest'));
+const HypoRiskForecast = lazy(() => import('./pages/HypoRiskForecast'));
+const ISFCRTuning = lazy(() => import('./pages/ISFCRTuning'));
+const BasalSanity = lazy(() => import('./pages/BasalSanity'));
+const MealAbsorption = lazy(() => import('./pages/MealAbsorption'));
 
 function App() {
   return (
@@ -105,7 +109,11 @@ function App() {
                                     <Route path="/exercise-impact" element={<ExerciseImpact />} />
                                     <Route path="/sleep-analysis" element={<SleepAnalysis />} />
                                     <Route path="/stress-impact" element={<StressImpact />} />
+                                    <Route path="/hypo-risk" element={<HypoRiskForecast />} />
                                     <Route path="/isf-optimization" element={<ISFOptimization />} />
+                                    <Route path="/isf-cr-tuning" element={<ISFCRTuning />} />
+                                    <Route path="/basal-sanity" element={<BasalSanity />} />
+                                    <Route path="/meal-absorption" element={<MealAbsorption />} />
                                     <Route path="/tensorflow-test" element={<TensorFlowTest />} />
                                     </Routes>
                                   </Suspense>
