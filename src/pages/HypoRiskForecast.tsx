@@ -46,6 +46,41 @@ const HypoRiskForecastPage = () => {
   const { data, loading, error } = useNightscout();
   const { unit, getCurrentGlucoseRanges, formatGlucoseValue, toMgdlValue } = useGlucoseFormatting();
 
+  const formatWhyText = (text: string): string => {
+    if (unit !== 'mmol') return text;
+
+    const mgdlToMmol = (v: number) => v / 18;
+    const fmt = (vMgdl: number, decimals: number) => {
+      const v = mgdlToMmol(vMgdl);
+      // Avoid printing -0.0
+      const rounded = Number(v.toFixed(decimals));
+      return (Object.is(rounded, -0) ? 0 : rounded).toFixed(decimals);
+    };
+
+    // Convert more specific patterns first to avoid double conversion.
+    let out = text;
+
+    out = out.replace(/(-?\d+(?:\.\d+)?)\s*mg\/dL\s*per\s*5\s*min/gi, (_m, n) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return _m;
+      return `${fmt(v, 1)} mmol/L per 5 min`;
+    });
+
+    out = out.replace(/(-?\d+(?:\.\d+)?)\s*mg\/dL\s*[·\*]\s*min/gi, (_m, n) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return _m;
+      return `${fmt(v, 1)} mmol/L·min`;
+    });
+
+    out = out.replace(/(-?\d+(?:\.\d+)?)\s*mg\/dL/gi, (_m, n) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return _m;
+      return `${fmt(v, 1)} mmol/L`;
+    });
+
+    return out;
+  };
+
   const ranges = getCurrentGlucoseRanges();
 
   const [forecast, setForecast] = useState<HypoRiskForecast | null>(null);
@@ -220,7 +255,7 @@ const HypoRiskForecastPage = () => {
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
               Inputs: IOB {forecast.inputs.iobUnits !== null ? `${forecast.inputs.iobUnits.toFixed(1)}U (${forecast.inputs.inputSource.iob})` : '—'} • COB{' '}
               {forecast.inputs.cobGrams !== null ? `${forecast.inputs.cobGrams.toFixed(0)}g (${forecast.inputs.inputSource.cob})` : '—'} • SD{' '}
-              {forecast.inputs.recentSdMgdl !== null ? `${forecast.inputs.recentSdMgdl.toFixed(0)} mg/dL (~3h)` : '—'}
+              {forecast.inputs.recentSdMgdl !== null ? `${formatGlucoseValue(forecast.inputs.recentSdMgdl, 'mgdl', true)} (~3h)` : '—'}
             </p>
 
             {forecast.whyDrivers?.top3.low?.length ? (
@@ -231,7 +266,7 @@ const HypoRiskForecastPage = () => {
                 <ul className="mt-2 space-y-2">
                   {forecast.whyDrivers.top3.low.map((x) => (
                     <li key={x.id} className="text-sm text-gray-700 dark:text-gray-300">
-                      • {x.detail ? `${x.label} — ${x.detail}` : x.label}
+                      • {x.detail ? `${formatWhyText(x.label)} — ${formatWhyText(x.detail)}` : formatWhyText(x.label)}
                     </li>
                   ))}
                 </ul>
@@ -246,7 +281,7 @@ const HypoRiskForecastPage = () => {
                 <ul className="mt-2 space-y-2">
                   {forecast.whyDrivers.top3.severeLow.map((x) => (
                     <li key={x.id} className="text-sm text-gray-700 dark:text-gray-300">
-                      • {x.detail ? `${x.label} — ${x.detail}` : x.label}
+                      • {x.detail ? `${formatWhyText(x.label)} — ${formatWhyText(x.detail)}` : formatWhyText(x.label)}
                     </li>
                   ))}
                 </ul>
@@ -263,7 +298,7 @@ const HypoRiskForecastPage = () => {
                   .slice(0, 12)
                   .map((x) => (
                     <li key={x.id} className="text-sm text-gray-700 dark:text-gray-300">
-                      • {x.detail ? `${x.label} — ${x.detail}` : x.label}
+                      • {x.detail ? `${formatWhyText(x.label)} — ${formatWhyText(x.detail)}` : formatWhyText(x.label)}
                     </li>
                   ))}
               </ul>
