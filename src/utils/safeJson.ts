@@ -8,8 +8,8 @@ const stripCommonJunk = (text: string) => {
   // Minimal, conservative cleanup to improve parse success.
   // Avoid aggressive transformations that could change meaning.
   return stripBom(text)
-    .replace(/^[\s\u200B\u200C\u200D\u2060]+/, '')
-    .replace(/[\s\u200B\u200C\u200D\u2060]+$/, '')
+    .replace(/^(?:\s|\u200B|\u200C|\u200D|\u2060)+/, '')
+    .replace(/(?:\s|\u200B|\u200C|\u200D|\u2060)+$/, '')
     // smart quotes -> regular quotes (common LLM output)
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
@@ -26,10 +26,10 @@ const extractFirstJsonValue = (text: string): string | null => {
   const s = text;
   const len = s.length;
 
-  const firstBrace = s.search(/[\[{]/);
+  const firstBrace = s.search(/[[{]/);
   if (firstBrace === -1) return null;
 
-  let start = firstBrace;
+  const start = firstBrace;
   let depth = 0;
   let inString = false;
   let escaped = false;

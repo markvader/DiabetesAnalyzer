@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { getDateRangeString } from '../utils/dateUtils';
-import { analyzeData } from '../services/analysisService';
 import { Calendar, Clock } from 'lucide-react';
 import TimeInRangeChart from '../components/TimeInRangeChart';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -19,12 +17,9 @@ import {
   Select,
   MenuItem,
   FormControl,
-  InputLabel,
   Alert,
   TextField,
   Chip,
-  Card,
-  CardContent,
   useTheme,
   alpha
 } from '@mui/material';
@@ -116,7 +111,7 @@ const TimeInRange = () => {
       lowPercentage,
       totalReadings: total
     };
-  }, [filteredReadings]);
+  }, [convertToCurrentUnit, filteredReadings, getCurrentGlucoseRanges]);
 
   // Force a refresh when time window changes
   useEffect(() => {

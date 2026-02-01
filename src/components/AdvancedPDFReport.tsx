@@ -8,7 +8,6 @@ import { format, subDays, startOfDay, endOfDay, differenceInDays } from 'date-fn
 import jsPDF from 'jspdf';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, BarElement } from 'chart.js';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
-import { useNightscout } from '../contexts/NightscoutContext';
 import { aiService } from '../services/aiService';
 import type {
   NightscoutDeviceStatus,

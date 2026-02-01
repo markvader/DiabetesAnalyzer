@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
@@ -100,14 +100,7 @@ const LoopAnalysis = () => {
     return [...deviceStatus].sort((a, b) => getDeviceMs(b) - getDeviceMs(a));
   }, [data?.deviceStatus]);
 
-  useEffect(() => {
-    if (data?.treatments && data?.entries) {
-      analyzeAdvancedLoop();
-      calculateLoopStatus();
-    }
-  }, [data]);
-
-  const calculateLoopStatus = () => {
+  const calculateLoopStatus = useCallback(() => {
     if (!data?.treatments) {
       setLoopStatus(null);
       return;
@@ -255,9 +248,9 @@ const LoopAnalysis = () => {
       cgmStatus: 'connected', // Default since we have glucose data
       loopVersion: 'AAPS'
     });
-  };
+  }, [data?.deviceStatus, data?.treatments, deviceStatusSortedDesc, treatmentsSortedDesc]);
 
-  const analyzeAdvancedLoop = () => {
+  const analyzeAdvancedLoop = useCallback(() => {
     if (!data?.treatments || !data?.entries) {
       setLoopStats(null);
       setLoopCycles([]);
@@ -408,7 +401,12 @@ const LoopAnalysis = () => {
     } else {
       setLoopStats(null);
     }
-  };
+  }, [data?.entries, data?.treatments, entriesSortedAsc]);
+
+  useEffect(() => {
+    analyzeAdvancedLoop();
+    calculateLoopStatus();
+  }, [analyzeAdvancedLoop, calculateLoopStatus]);
 
   const getTrendIcon = (trend: 'rising' | 'falling' | 'stable') => {
     switch (trend) {

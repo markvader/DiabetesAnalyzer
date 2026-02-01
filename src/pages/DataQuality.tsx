@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { BarChart, AlertTriangle, CheckCircle, Clock, TrendingDown } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { format, subDays } from 'date-fns';
+import { format } from 'date-fns';
 
 interface DataQualityMetrics {
   totalReadings: number;
@@ -29,13 +29,7 @@ const DataQuality = () => {
   const [qualityMetrics, setQualityMetrics] = useState<DataQualityMetrics | null>(null);
   const [dataGaps, setDataGaps] = useState<DataGap[]>([]);
 
-  useEffect(() => {
-    if (data?.entries) {
-      analyzeDataQuality();
-    }
-  }, [data]);
-
-  const analyzeDataQuality = () => {
+  const analyzeDataQuality = useCallback(() => {
     if (!data?.entries) return;
 
     const entries = [...data.entries].sort((a, b) => a.date - b.date);
@@ -65,7 +59,6 @@ const DataQuality = () => {
     );
 
     // Detect outliers (extreme values)
-    const glucoseValues = entries.map(e => e.sgv);
     const outliers = entries.filter(entry => 
       entry.sgv < 40 || entry.sgv > 400 // Extreme values
     );
@@ -102,7 +95,11 @@ const DataQuality = () => {
 
     setQualityMetrics(metrics);
     setDataGaps(gaps.slice(0, 10)); // Show only recent gaps
-  };
+  }, [data?.entries]);
+
+  useEffect(() => {
+    analyzeDataQuality();
+  }, [analyzeDataQuality]);
 
   if (loading) return <LoadingSpinner />;
 

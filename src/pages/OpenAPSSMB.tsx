@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { Zap, Activity, TrendingUp, AlertTriangle, Clock, Target, CheckCircle, Settings, Shield, Brain, Cookie, RefreshCw, Calendar } from 'lucide-react';
@@ -49,7 +49,7 @@ const OpenAPSSMB = () => {
   const { selectedPump } = useInsulinPump();
   const { formatGlucoseValue, convertToCurrentUnit } = useGlucoseFormatting();
   const [smbEvents, setSmbEvents] = useState<SMBEvent[]>([]);
-  const [smbStats, setSmbStats] = useState<SMBStats | null>(null);
+  const [_smbStats, setSmbStats] = useState<SMBStats | null>(null);
   const [openapsAnalysis, setOpenapsAnalysis] = useState<UltraSafeOpenAPSResult | null>(null);
   const [aiOptimization, setAiOptimization] = useState<AiOptimizationResult | null>(null);
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
@@ -106,23 +106,7 @@ const OpenAPSSMB = () => {
   }, [data, entriesSortedAsc, selectedRange.endMs, selectedRange.startMs, treatmentsSortedAsc]);
 
    
-  useEffect(() => {
-    // Run automatically on initial load (default 2 weeks) or when manual refresh is triggered
-    if (filteredData && (!hasInitialLoad || manualRefresh)) {
-      analyzeSMBEvents();
-      runSafeAsync(() => analyzeOpenAPSSettings(), { label: 'OpenAPSSMB: analyzeOpenAPSSettings' });
-      
-      // Mark initial load as complete and reset manual refresh flag
-      if (!hasInitialLoad) {
-        setHasInitialLoad(true);
-      }
-      if (manualRefresh) {
-        setManualRefresh(false);
-      }
-    }
-  }, [filteredData, manualRefresh, hasInitialLoad]);
-
-  const analyzeSMBEvents = () => {
+  const analyzeSMBEvents = useCallback(() => {
     if (!filteredData?.treatments || !filteredData?.entries) {
       setSmbStats(null);
       setSmbEvents([]);
@@ -244,9 +228,9 @@ const OpenAPSSMB = () => {
     } else {
       setSmbStats(null);
     }
-  };
+  }, [filteredData]);
 
-  const analyzeOpenAPSSettings = async () => {
+  const analyzeOpenAPSSettings = useCallback(async () => {
     if (!filteredData?.entries || !filteredData?.treatments) return;
 
     setAiAnalysisLoading(true);
@@ -274,7 +258,23 @@ const OpenAPSSMB = () => {
     } finally {
       setAiAnalysisLoading(false);
     }
-  };
+  }, [data?.profile, filteredData, selectedPump?.id]);
+
+  useEffect(() => {
+    // Run automatically on initial load (default 2 weeks) or when manual refresh is triggered
+    if (filteredData && (!hasInitialLoad || manualRefresh)) {
+      analyzeSMBEvents();
+      runSafeAsync(() => analyzeOpenAPSSettings(), { label: 'OpenAPSSMB: analyzeOpenAPSSettings' });
+
+      // Mark initial load as complete and reset manual refresh flag
+      if (!hasInitialLoad) {
+        setHasInitialLoad(true);
+      }
+      if (manualRefresh) {
+        setManualRefresh(false);
+      }
+    }
+  }, [analyzeOpenAPSSettings, analyzeSMBEvents, filteredData, hasInitialLoad, manualRefresh]);
 
   const handleRefreshAI = () => {
     setManualRefresh(prev => !prev);

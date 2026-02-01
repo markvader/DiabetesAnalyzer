@@ -256,8 +256,8 @@ class AIAnalysisService {
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
     
     // Sample data to avoid token limits - INCREASED SAMPLING TO REDUCE TOKENS
-    const sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
-    const sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
+    const _sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
+    const _sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
     
     // OPTIMIZED PROMPT TO REDUCE TOKEN USAGE
     const prompt = `
@@ -332,8 +332,8 @@ class AIAnalysisService {
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
     
     // Sample data to avoid token limits - INCREASED SAMPLING TO REDUCE TOKENS
-    const sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
-    const sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
+    const _sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
+    const _sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
     
     // OPTIMIZED PROMPT TO REDUCE TOKEN USAGE
     const prompt = `
@@ -408,8 +408,8 @@ class AIAnalysisService {
     const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
     
     // Sample data to avoid token limits - INCREASED SAMPLING TO REDUCE TOKENS
-    const sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
-    const sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
+    const _sampledReadings = this.sampleData(readings, 50); // Reduced from 100 to 50
+    const _sampledTreatments = this.sampleData(treatments, 25); // Reduced from 50 to 25
     
     // OPTIMIZED PROMPT TO REDUCE TOKEN USAGE
     const prompt = `
@@ -479,7 +479,7 @@ class AIAnalysisService {
 
   private getFallbackAnalysis(readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown): AIAnalysisResult {
     const timeInRange = this.calculateTimeInRange(readings);
-    const hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
+    const _hypoglycemiaRisk = this.assessHypoglycemiaRisk(readings, treatments);
     
     const recommendations = [];
     const safetyWarnings = [];
@@ -534,7 +534,7 @@ class AIAnalysisService {
     };
   }
 
-  private assessHypoglycemiaRisk(readings: NightscoutEntry[], treatments: NightscoutTreatment[]) {
+  private assessHypoglycemiaRisk(readings: NightscoutEntry[], _treatments: NightscoutTreatment[]) {
     const lowReadings = readings.filter(r => toMmol(r.sgv) < 3.9);
     const severelyLowReadings = readings.filter(r => toMmol(r.sgv) < 3.0);
     

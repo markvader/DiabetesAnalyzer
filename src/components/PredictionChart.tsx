@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Line } from 'react-chartjs-2';
 import { format, addMinutes } from 'date-fns';
 import { Brain, TrendingUp, TrendingDown, Activity, AlertTriangle, Zap } from 'lucide-react';
-import { roundToDecimal } from '../utils/mathUtils';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { useTheme } from '../contexts/ThemeContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -63,6 +62,33 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
   const [predictionConfidence, setPredictionConfidence] = useState<number>(0);
   const [riskAssessment, setRiskAssessment] = useState<string | null>(null);
 
+  const assessRisk = useCallback((predictedValues: number[], lowScenarioValues: number[]) => {
+    const minPredicted = Math.min(...lowScenarioValues);
+    const maxPredicted = Math.max(...predictedValues);
+
+    // Convert values to current display unit for comparison with ranges
+    const minInCurrentUnit = convertToCurrentUnit(minPredicted);
+    const maxInCurrentUnit = convertToCurrentUnit(maxPredicted);
+
+    // Define critical thresholds based on current unit
+    const criticalLow = unit === 'mmol' ? 3.0 : convertToCurrentUnit(54, 'mgdl'); // 54 mg/dL = 3.0 mmol/L
+    const lowThreshold = ranges.LOW_THRESHOLD;
+    const highThreshold = ranges.HIGH_THRESHOLD;
+    const criticalHigh = unit === 'mmol' ? 16.7 : convertToCurrentUnit(300, 'mgdl'); // 300 mg/dL = 16.7 mmol/L
+
+    if (minInCurrentUnit < criticalLow) {
+      setRiskAssessment('critical-low');
+    } else if (minInCurrentUnit < lowThreshold) {
+      setRiskAssessment('low');
+    } else if (maxInCurrentUnit > criticalHigh) {
+      setRiskAssessment('critical-high');
+    } else if (maxInCurrentUnit > highThreshold) {
+      setRiskAssessment('high');
+    } else {
+      setRiskAssessment('normal');
+    }
+  }, [convertToCurrentUnit, unit, ranges.LOW_THRESHOLD, ranges.HIGH_THRESHOLD]);
+
   useEffect(() => {
     if (!readings.length) return;
 
@@ -117,9 +143,6 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
         
         setHighScenario(high);
         setLowScenario(low);
-        
-        // Assess risk based on predictions
-        assessRisk(predictedValues, low);
       } catch (err) {
         console.error('Error generating predictions:', err);
         setError('Failed to generate predictions');
@@ -129,35 +152,12 @@ const PredictionChart: React.FC<PredictionChartProps> = ({ readings, useAI = fal
     };
 
     generatePredictions();
-  }, [readings, useAI, unit]); // Add unit dependency to regenerate predictions when unit changes
+  }, [readings, useAI]);
 
-  // Assess risk based on predictions
-  const assessRisk = (predictedValues: number[], lowScenario: number[]) => {
-    const minPredicted = Math.min(...lowScenario);
-    const maxPredicted = Math.max(...predictedValues);
-    
-    // Convert values to current display unit for comparison with ranges
-    const minInCurrentUnit = convertToCurrentUnit(minPredicted);
-    const maxInCurrentUnit = convertToCurrentUnit(maxPredicted);
-    
-    // Define critical thresholds based on current unit
-    const criticalLow = unit === 'mmol' ? 3.0 : convertToCurrentUnit(54, 'mgdl'); // 54 mg/dL = 3.0 mmol/L
-    const lowThreshold = ranges.LOW_THRESHOLD;
-    const highThreshold = ranges.HIGH_THRESHOLD;
-    const criticalHigh = unit === 'mmol' ? 16.7 : convertToCurrentUnit(300, 'mgdl'); // 300 mg/dL = 16.7 mmol/L
-    
-    if (minInCurrentUnit < criticalLow) {
-      setRiskAssessment('critical-low');
-    } else if (minInCurrentUnit < lowThreshold) {
-      setRiskAssessment('low');
-    } else if (maxInCurrentUnit > criticalHigh) {
-      setRiskAssessment('critical-high');
-    } else if (maxInCurrentUnit > highThreshold) {
-      setRiskAssessment('high');
-    } else {
-      setRiskAssessment('normal');
-    }
-  };
+  useEffect(() => {
+    if (predictions.length === 0 || lowScenario.length === 0) return;
+    assessRisk(predictions, lowScenario);
+  }, [predictions, lowScenario, assessRisk]);
 
   // Function to get AI-powered predictions - OPTIMIZED FOR TOKEN USAGE
   const getAIPredictions = async (glucoseReadings: GlucoseReading[]): Promise<number[]> => {

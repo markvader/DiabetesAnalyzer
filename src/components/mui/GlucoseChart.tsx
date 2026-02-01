@@ -9,7 +9,6 @@ import {
   useTheme,
 } from '@mui/material';
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,

@@ -37,6 +37,28 @@ const nightscoutRequestCache = createAsyncRequestCache<unknown>({
   maxEntries: 250
 });
 
+const hashStringForCacheKey = (value: string): string => {
+  // Non-cryptographic hash for cache key compaction.
+  // We only need stable bucketing (not security).
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  // Force unsigned and shorten.
+  return (hash >>> 0).toString(16);
+};
+
+const getRequestCacheTtlMs = (normalizedPath: string): number => {
+  const p = normalizedPath.toLowerCase();
+  if (p.includes('/profile')) return 5 * 60_000;
+  if (p.includes('/devicestatus')) return 30_000;
+  if (p.includes('/status')) return 30_000;
+  if (p.includes('/entries')) return 15_000;
+  if (p.includes('/treatments')) return 15_000;
+  return NIGHTSCOUT_REQUEST_CACHE_TTL_MS;
+};
+
 // Detect if running in WebContainer environment
 const isWebContainer = (): boolean => {
   return typeof window !== 'undefined' && 
@@ -264,11 +286,12 @@ const makeProxyRequest = async (
     // Enabled for GET requests (no body). If a caller provides an AbortSignal, we only cancel *waiting*;
     // the underlying shared request is not aborted to avoid cross-cancelling other callers.
     const isCacheable = requestMethod === 'GET' && (requestBody === undefined || requestBody === null);
+    const cacheTtlMs = isCacheable ? getRequestCacheTtlMs(normalizedPath) : undefined;
     const cacheKey = isCacheable
       ? JSON.stringify({
           url: validatedUrl,
           path: normalizedPath,
-          token: trimmedToken ?? '',
+          tokenHash: trimmedToken ? hashStringForCacheKey(trimmedToken) : '',
           apiVersion,
           authMethod,
           method: requestMethod
@@ -493,7 +516,11 @@ const makeProxyRequest = async (
     };
 
     if (cacheKey) {
-      const shared = nightscoutRequestCache.getOrCreate(cacheKey, () => executeWithRetries(undefined));
+      const shared = nightscoutRequestCache.getOrCreate(
+        cacheKey,
+        () => executeWithRetries(undefined),
+        cacheTtlMs
+      );
       return await waitUnlessAborted(shared);
     }
 
@@ -622,7 +649,7 @@ export const testConnection = async (url: string, token?: string, apiVersion: 'v
       try {
         const alt = await makeProxyRequestWithFallback(url, '/api/v3/entries?limit=1&sort$desc=date', token, undefined, 'v3');
         if (Array.isArray(alt)) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+           
           testResult.splice(0, testResult.length, ...alt);
         }
       } catch {

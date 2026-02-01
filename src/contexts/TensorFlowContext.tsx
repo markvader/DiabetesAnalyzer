@@ -1,38 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import type { NightscoutEntry } from '../types/nightscout';
-import { runSafeAsync } from '../utils/safeAsync';
+import { createContext, useContext } from 'react';
 
-interface TensorFlowServiceLike {
-  initialize: () => Promise<void>;
-  isReady: () => boolean;
-  getModelInfo: () => unknown;
-  analyzeGlucosePatterns: (readings: NightscoutEntry[]) => Promise<unknown>;
-}
-
-const getErrorMessage = (err: unknown): string => {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string') {
-    return (err as { message: string }).message;
-  }
-  return 'Unknown error';
-};
-
-let tensorFlowService: TensorFlowServiceLike | null = null;
-let tensorFlowServicePromise: Promise<TensorFlowServiceLike> | null = null;
-
-const getTensorFlowService = async () => {
-  if (tensorFlowService) return tensorFlowService;
-  if (!tensorFlowServicePromise) {
-    tensorFlowServicePromise = import('../services/tensorFlowAIService').then(mod => {
-      const ServiceCtor = (mod as unknown as { default: new () => TensorFlowServiceLike }).default;
-      tensorFlowService = new ServiceCtor();
-      return tensorFlowService;
-    });
-  }
-  return tensorFlowServicePromise;
-};
-
-interface TensorFlowContextType {
+export interface TensorFlowContextType {
   isReady: boolean;
   isEnabled: boolean;
   isInitializing: boolean;
@@ -43,113 +12,7 @@ interface TensorFlowContextType {
   getAnalysis: (readings: NightscoutEntry[]) => Promise<unknown>;
 }
 
-const TensorFlowContext = createContext<TensorFlowContextType | undefined>(undefined);
-
-interface TensorFlowProviderProps {
-  children: ReactNode;
-}
-
-export const TensorFlowProvider: React.FC<TensorFlowProviderProps> = ({ children }) => {
-  const [isReady, setIsReady] = useState(false);
-  const [isEnabled, setIsEnabled] = useState(() => {
-    const stored = localStorage.getItem('tensorflow_enabled');
-    return stored === null ? true : stored === 'true';
-  });
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [modelInfo, setModelInfo] = useState<unknown | null>(null);
-
-  // Initialize TensorFlow on mount
-  useEffect(() => {
-    if (isEnabled) {
-      runSafeAsync(() => initializeTensorFlow(), { label: 'TensorFlow initialize' });
-    }
-  }, [isEnabled]);
-
-  const initializeTensorFlow = async () => {
-    if (isInitializing) return;
-    
-    setIsInitializing(true);
-    setError(null);
-    
-    try {
-      console.log('🤖 TensorFlow Context: Initializing...');
-      
-      // Initialize the service
-      const svc = await getTensorFlowService();
-      await svc.initialize();
-      
-      // Check if it's ready
-      const ready = svc.isReady();
-      setIsReady(ready);
-      
-      if (ready) {
-        const info = svc.getModelInfo();
-        setModelInfo(info);
-        console.log('✅ TensorFlow Context: Initialization successful', info);
-      } else {
-        console.log('⚠️ TensorFlow Context: Not ready after initialization');
-        setError('TensorFlow model failed to initialize properly');
-      }
-    } catch (err: unknown) {
-      console.error('❌ TensorFlow Context: Initialization failed', err);
-      setError(getErrorMessage(err) || 'Failed to initialize TensorFlow');
-      setIsReady(false);
-    } finally {
-      setIsInitializing(false);
-    }
-  };
-
-  const toggleEnabled = async (enabled: boolean) => {
-    setIsEnabled(enabled);
-    localStorage.setItem('tensorflow_enabled', enabled.toString());
-    
-    if (enabled) {
-      await initializeTensorFlow();
-    } else {
-      setIsReady(false);
-      setError(null);
-      setModelInfo(null);
-    }
-  };
-
-  const reinitialize = async () => {
-    if (isEnabled) {
-      await initializeTensorFlow();
-    }
-  };
-
-  const getAnalysis = async (readings: NightscoutEntry[]) => {
-    if (!isReady || !isEnabled || readings.length === 0) {
-      throw new Error('TensorFlow not ready or no data available');
-    }
-
-    try {
-      const svc = await getTensorFlowService();
-      return await svc.analyzeGlucosePatterns(readings);
-    } catch (error) {
-      console.error('TensorFlow analysis failed:', error);
-      throw error;
-    }
-  };
-
-  const value: TensorFlowContextType = {
-    isReady,
-    isEnabled,
-    isInitializing,
-    error,
-    modelInfo,
-    toggleEnabled,
-    reinitialize,
-    getAnalysis
-  };
-
-  return (
-    <TensorFlowContext.Provider value={value}>
-      {children}
-    </TensorFlowContext.Provider>
-  );
-};
+export const TensorFlowContext = createContext<TensorFlowContextType | undefined>(undefined);
 
 export const useTensorFlow = (): TensorFlowContextType => {
   const context = useContext(TensorFlowContext);
@@ -158,3 +21,5 @@ export const useTensorFlow = (): TensorFlowContextType => {
   }
   return context;
 };
+
+export default TensorFlowContext;

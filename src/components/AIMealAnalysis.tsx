@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Cookie, Clock, Lightbulb, AlertTriangle, Loader } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import { useDesignMode } from '../contexts/DesignModeContext';
@@ -44,33 +44,15 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
   const [initialLoadDone, setInitialLoadDone] = useState<boolean>(false);
 
-  useEffect(() => {
-    // Create a hash of the current data to compare
-    const dataHash = `${readings.length}-${treatments.length}`;
-    
-    // Only analyze meals if:
-    // 1. We haven't loaded anything yet, OR
-    // 2. Manual refresh was requested, OR
-    // 3. The data has changed AND we don't have any insights yet
-    const shouldAnalyze = 
-      !initialLoadDone || 
-      manualRefresh || 
-      (dataHash !== lastAnalyzedData && insights.length === 0);
-    
-    if (shouldAnalyze && readings?.length > 0 && treatments?.length > 0) {
-      analyzeMeals(dataHash);
-    }
-  }, [readings, treatments, manualRefresh]);
-
-  const analyzeMeals = async (dataHash: string) => {
+  const analyzeMeals = useCallback(async (dataHash: string) => {
     if (!readings || readings.length === 0 || !treatments || treatments.length === 0) return;
-    
+
     setLoading(true);
     setError(null);
-    
+
     try {
       const result = await aiService.analyzeMealPatterns(readings, treatments);
-      
+
       if (result) {
         setInsights(result.insights);
         setRecommendations(result.recommendations);
@@ -87,7 +69,25 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
     } finally {
       setLoading(false);
     }
-  };
+  }, [readings, treatments]);
+
+  useEffect(() => {
+    // Create a hash of the current data to compare
+    const dataHash = `${readings.length}-${treatments.length}`;
+    
+    // Only analyze meals if:
+    // 1. We haven't loaded anything yet, OR
+    // 2. Manual refresh was requested, OR
+    // 3. The data has changed AND we don't have any insights yet
+    const shouldAnalyze = 
+      !initialLoadDone || 
+      manualRefresh || 
+      (dataHash !== lastAnalyzedData && insights.length === 0);
+    
+    if (shouldAnalyze && readings?.length > 0 && treatments?.length > 0) {
+      analyzeMeals(dataHash);
+    }
+  }, [readings, treatments, manualRefresh, initialLoadDone, lastAnalyzedData, insights.length, analyzeMeals]);
 
   if (loading) {
     // Premium Design with Advanced Effects

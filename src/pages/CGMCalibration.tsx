@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { 
   Beaker, 
@@ -140,21 +140,7 @@ const CGMCalibration = () => {
     // We have CGM data but no treatments in range
     setRealCalibrations([]);
     calculateCGMMetrics(filteredEntries);
-  }, [filteredTreatments, filteredEntries]);
-
-  const getTimeWindowLabel = (hours: number) => {
-    if (hours < 24) return `${hours} hours`;
-    if (hours < 168) {
-      const days = hours / 24;
-      return `${days} day${days > 1 ? 's' : ''}`;
-    }
-    if (hours < 720) {
-      const weeks = hours / 168;
-      return `${weeks} week${weeks > 1 ? 's' : ''}`;
-    }
-    const months = Math.round(hours / 720);
-    return `${months} month${months > 1 ? 's' : ''}`;
-  };
+  }, [calculateCGMMetrics, filteredEntries, filteredTreatments]);
 
   const getAllTimeWindows = () => {
     return [
@@ -250,17 +236,16 @@ const CGMCalibration = () => {
     return value === 'CGM Sensor Start' || value === 'CGM Sensor Insert' || value === 'CGM Sensor Stop';
   };
 
-  const isRecord = (value: unknown): value is Record<string, unknown> =>
-    typeof value === 'object' && value !== null;
-
-  const getTreatmentEventType = (treatment: unknown): string => {
-    const raw = isRecord(treatment) ? (treatment.eventType ?? treatment.event_type) : undefined;
+  const getTreatmentEventType = useCallback((treatment: unknown): string => {
+    const record = typeof treatment === 'object' && treatment !== null ? (treatment as Record<string, unknown>) : null;
+    const raw = record ? (record.eventType ?? record.event_type) : undefined;
     return raw == null ? '' : String(raw);
-  };
+  }, []);
 
-  const classifySensorEvent = (treatment: unknown): SensorEventKind => {
+  const classifySensorEvent = useCallback((treatment: unknown): SensorEventKind => {
     const eventType = getTreatmentEventType(treatment).trim();
-    const notes = isRecord(treatment) && treatment.notes != null ? String(treatment.notes) : '';
+    const record = typeof treatment === 'object' && treatment !== null ? (treatment as Record<string, unknown>) : null;
+    const notes = record && record.notes != null ? String(record.notes) : '';
     const combined = `${eventType} ${notes}`.toLowerCase();
     const normalized = combined.replace(/\s+/g, ' ').trim();
 
@@ -305,10 +290,12 @@ const CGMCalibration = () => {
     if (normalized.includes('sensor')) return 'start';
 
     return 'other';
-  };
+  }, [getTreatmentEventType]);
 
-  const isSensorStartEvent = (treatment: NightscoutTreatment) => classifySensorEvent(treatment) === 'start';
-  const isSensorEndEvent = (treatment: NightscoutTreatment) => classifySensorEvent(treatment) === 'end';
+  const isSensorStartEvent = useCallback(
+    (treatment: NightscoutTreatment) => classifySensorEvent(treatment) === 'start',
+    [classifySensorEvent]
+  );
 
   const sensorPeriods = useMemo(() => {
     if (!data?.treatments?.length) {
@@ -373,7 +360,7 @@ const CGMCalibration = () => {
     }
 
     return periods.filter((p) => p.end >= selectedRange.start && p.start <= selectedRange.end);
-  }, [data?.treatments, selectedRange.start, selectedRange.end]);
+  }, [classifySensorEvent, data?.treatments, getTreatmentEventType, selectedRange.end, selectedRange.start]);
 
   const formatDurationDaysHours = (startMs: number, endMs: number) => {
     const ms = Math.max(0, endMs - startMs);
@@ -495,7 +482,7 @@ const CGMCalibration = () => {
     setRealCalibrations(calibrationEvents.sort((a, b) => b.timestampMs - a.timestampMs));
   };
 
-  const calculateCGMMetrics = (entriesInRange: NightscoutEntry[]) => {
+  const calculateCGMMetrics = useCallback((entriesInRange: NightscoutEntry[]) => {
     if (!entriesInRange || entriesInRange.length === 0) {
       setCgmMetrics(null);
       return;
@@ -563,7 +550,7 @@ const CGMCalibration = () => {
     else if (sensorAge > 7) estimatedMARD += 1.1;
 
     setSimulatedMARD(Math.min(25, estimatedMARD));
-  };
+  }, [data?.treatments, isSensorStartEvent, realCalibrations]);
 
   if (loading) return <LoadingSpinner />;
 

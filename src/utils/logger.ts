@@ -108,20 +108,20 @@ export const copyDebugReport = async (options?: { maxEvents?: number }): Promise
 export const debugLog = (...args: LogArgs) => {
   pushDebugEvent('log', args);
   if (!isConsoleDebugEnabled()) return;
-  // eslint-disable-next-line no-console
+   
   console.log(...args);
 };
 
 export const debugWarn = (...args: LogArgs) => {
   pushDebugEvent('warn', args);
   if (!isConsoleDebugEnabled()) return;
-  // eslint-disable-next-line no-console
+   
   console.warn(...args);
 };
 
 export const debugError = (...args: LogArgs) => {
   pushDebugEvent('error', args);
   if (!isConsoleDebugEnabled()) return;
-  // eslint-disable-next-line no-console
+   
   console.error(...args);
 };

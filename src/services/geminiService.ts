@@ -277,7 +277,7 @@ Respond only with the JSON object, no additional text.`;
           throw new Error(parsedJson.error);
         }
         analysisResult = parsedJson.value;
-      } catch (parseError) {
+      } catch {
         // If JSON parsing fails, create a structured response from the text
         analysisResult = {
           recommendations: [responseText],

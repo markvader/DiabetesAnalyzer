@@ -22,7 +22,7 @@ interface ComprehensivePDFReportProps {
 
 export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
   data,
-  basicStats,
+  basicStats: _basicStats,
   filteredReadings,
   formatGlucoseValue,
   getUnitLabel,
@@ -408,7 +408,7 @@ export const ComprehensivePDFReport: React.FC<ComprehensivePDFReportProps> = ({
         return 20;
       };
 
-      const checkPageBreak = (requiredSpace: number, currentY: number) => {
+      const _checkPageBreak = (requiredSpace: number, currentY: number) => {
         if (currentY + requiredSpace > 280) {
           return addNewPage();
         }

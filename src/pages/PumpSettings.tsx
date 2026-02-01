@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
@@ -48,13 +48,7 @@ const PumpSettings = () => {
   const [pumpHistory, setPumpHistory] = useState<PumpHistoryEvent[]>([]);
   const [activeProfile, setActiveProfile] = useState<ActiveProfile | null>(null);
 
-  useEffect(() => {
-    if (data) {
-      analyzePumpData();
-    }
-  }, [data, unit]);
-
-  const analyzePumpData = () => {
+  const analyzePumpData = useCallback(() => {
     if (!data?.treatments || !data?.profile) return;
 
     // Get current profile
@@ -100,7 +94,11 @@ const PumpSettings = () => {
     }));
 
     setPumpHistory(history);
-  };
+  }, [data?.profile, data?.treatments]);
+
+  useEffect(() => {
+    analyzePumpData();
+  }, [analyzePumpData]);
 
   if (loading) return <LoadingSpinner />;
 

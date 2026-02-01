@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import {
   DataGrid,
   GridColDef,
@@ -54,21 +54,21 @@ export const AdvancedDataGrid: React.FC<AdvancedDataGridProps> = ({
   const theme = useTheme();
   const { formatGlucoseValue, getCurrentGlucoseRanges } = useGlucoseFormatting();
 
-  const getGlucoseColor = (value: number) => {
+  const getGlucoseColor = useCallback((value: number) => {
     const ranges = getCurrentGlucoseRanges();
     if (value < ranges.LOW_THRESHOLD) return theme.palette.glucose.low;
     if (value > ranges.HIGH_THRESHOLD) return theme.palette.glucose.high;
     if (value >= ranges.TARGET_MIN && value <= ranges.TARGET_MAX) return theme.palette.glucose.target;
     return theme.palette.warning.main;
-  };
+  }, [getCurrentGlucoseRanges, theme]);
 
-  const getGlucoseStatus = (value: number) => {
+  const getGlucoseStatus = useCallback((value: number) => {
     const ranges = getCurrentGlucoseRanges();
     if (value < ranges.LOW_THRESHOLD) return 'Low';
     if (value > ranges.HIGH_THRESHOLD) return 'High';
     if (value >= ranges.TARGET_MIN && value <= ranges.TARGET_MAX) return 'Target';
     return 'Borderline';
-  };
+  }, [getCurrentGlucoseRanges]);
 
   const getTrendIcon = (trend?: string) => {
     switch (trend) {
@@ -204,7 +204,7 @@ export const AdvancedDataGrid: React.FC<AdvancedDataGridProps> = ({
         </Typography>
       ),
     },
-  ], [theme, formatGlucoseValue, getCurrentGlucoseRanges]);
+  ], [theme, formatGlucoseValue, getGlucoseColor, getGlucoseStatus]);
 
   const rows = useMemo(() => 
     data.map((reading, index) => ({

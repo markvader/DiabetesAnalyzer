@@ -1,17 +1,17 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { MaterialUIProvider } from './theme/MaterialUIProvider';
-import { NightscoutProvider } from './contexts/NightscoutContext';
-import { ThemeProvider } from './contexts/ThemeContext';
-import { SubscriptionProvider } from './contexts/SubscriptionContext';
-import { GlucoseUnitsProvider } from './contexts/GlucoseUnitsContext';
-import { InsulinPumpProvider } from './contexts/InsulinPumpContext';
-import { TimeFormatProvider } from './contexts/TimeFormatContext';
-import { TensorFlowProvider } from './contexts/TensorFlowContext';
-import { DashboardDisplayProvider } from './contexts/DashboardDisplayContext';
-import { TimeInRangeProvider } from './contexts/TimeInRangeContext';
-import { DesignModeProvider } from './contexts/DesignModeContext';
-import { AsyncErrorProvider } from './contexts/AsyncErrorContext';
+import { NightscoutProvider } from './contexts/NightscoutProvider';
+import { ThemeProvider } from './contexts/ThemeProvider';
+import { SubscriptionProvider } from './contexts/SubscriptionProvider';
+import { GlucoseUnitsProvider } from './contexts/GlucoseUnitsProvider';
+import { InsulinPumpProvider } from './contexts/InsulinPumpProvider';
+import { TimeFormatProvider } from './contexts/TimeFormatProvider';
+import { TensorFlowProvider } from './contexts/TensorFlowProvider';
+import { DashboardDisplayProvider } from './contexts/DashboardDisplayProvider';
+import { TimeInRangeProvider } from './contexts/TimeInRangeProvider';
+import { DesignModeProvider } from './contexts/DesignModeProvider';
+import { AsyncErrorProvider } from './contexts/AsyncErrorProvider';
 import AdaptiveLayout from './components/AdaptiveLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 

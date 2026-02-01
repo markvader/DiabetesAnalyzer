@@ -1,4 +1,3 @@
-import { toMmol } from '../utils/glucoseUtils';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 import { getTreatmentMs } from '../utils/nightscoutTime';
 
@@ -71,7 +70,6 @@ export const predictGlucose = async (readings: Array<Pick<NightscoutEntry, 'sgv'
     // Simple exponential smoothing prediction
     const predictions = [];
     let currentFeature = [...readings.slice(-lookback).map(r => r.sgv)];
-    const alpha = 0.3; // Smoothing factor
 
     // Calculate trend from recent readings
     const recentSlope = (currentFeature[currentFeature.length - 1] - currentFeature[0]) / currentFeature.length;

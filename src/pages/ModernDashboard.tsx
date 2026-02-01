@@ -61,7 +61,7 @@ const ModernDashboard: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<'3h' | '6h' | '12h' | '24h' | '7d'>('12h');
   const [data, setData] = useState<DashboardData | null>(null);
 

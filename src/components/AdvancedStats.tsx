@@ -304,7 +304,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           setComputing(false);
         });
     }
-  }, [readings, currentReadingsHash]);
+  }, [readings, currentReadingsHash, convertToCurrentUnit, getCurrentGlucoseRanges]);
 
   if (computing) {
     return (

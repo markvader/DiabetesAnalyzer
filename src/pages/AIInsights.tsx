@@ -4,7 +4,7 @@ import { useNightscout } from '../contexts/NightscoutContext';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { Brain, Calendar, Clock, RefreshCw, Cpu, Info, Sparkles } from 'lucide-react';
+import { Brain, Calendar, Clock, RefreshCw, Cpu, Sparkles } from 'lucide-react';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { toMmol } from '../utils/glucoseUtils';

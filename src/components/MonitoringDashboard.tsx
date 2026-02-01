@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { monitoringService } from '../services/monitoringService';
 import { Activity, AlertTriangle, Clock, TrendingUp, Download, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
@@ -54,7 +54,7 @@ const MonitoringDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState(7);
 
-  const generateReport = async () => {
+  const generateReport = useCallback(async () => {
     setLoading(true);
     try {
       const newReport = monitoringService.generateComprehensiveReport(selectedPeriod) as unknown as MonitoringReport;
@@ -64,11 +64,11 @@ const MonitoringDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedPeriod]);
 
   useEffect(() => {
     generateReport();
-  }, [selectedPeriod]);
+  }, [generateReport]);
 
   const exportReport = () => {
     if (!report) return;

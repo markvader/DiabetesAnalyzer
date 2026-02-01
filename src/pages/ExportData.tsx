@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileText, Database, Activity, Brain, Sparkles, Award, TrendingUp, Share, FileDown, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
+import { FileText, Database, Activity, Brain, Sparkles, Award, TrendingUp, Share, Calendar, AlertTriangle, RefreshCw } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';

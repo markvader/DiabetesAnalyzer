@@ -83,7 +83,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
   title,
   showInsulinDelivery = false,
 }) => {
-  const { convertToCurrentUnit, formatGlucoseValue, unit, getCurrentGlucoseRanges } = useGlucoseFormatting();
+  const { convertToCurrentUnit, unit, getCurrentGlucoseRanges } = useGlucoseFormatting();
   const { theme } = useTheme();
   const { isModern, isPremium } = useDesignMode();
   const muiTheme = useMuiTheme();
@@ -445,7 +445,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
         intersect: false
       }
     };
-  }, [isDark, title, getCurrentGlucoseRanges, unit]);
+  }, [isDark, title, unit, getCurrentGlucoseRanges]);
   
   const targetRangePlugin = React.useMemo(() => {
     const ranges = getCurrentGlucoseRanges();
@@ -467,7 +467,7 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
         ctx.fillRect(chartArea.left, lowY, chartArea.width, chartArea.bottom - lowY);
       }
     } satisfies Plugin<MixedChartType>;
-  }, [colors, getCurrentGlucoseRanges, unit]);
+  }, [colors, getCurrentGlucoseRanges]);
   
   // Premium Design with Advanced Effects
   if (isPremium) {

@@ -47,7 +47,7 @@ class MonitoringService {
   private performanceStartTimes: Map<string, number> = new Map();
 
   // Performance tracking
-  startPerformanceTracking(action: string): string {
+  startPerformanceTracking(_action: string): string {
     const id = crypto.randomUUID();
     const startTime = performance.now();
     this.performanceStartTimes.set(id, startTime);

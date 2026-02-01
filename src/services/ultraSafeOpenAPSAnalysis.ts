@@ -94,7 +94,7 @@ export const analyzeUltraSafeOpenAPS = async (
   const baseSettings = calculateMoreAggressiveSettings(readings, treatments, currentProfile, safetyLevel);
   
   // Apply safety multipliers
-  const safetyMultipliers = getSafetyMultipliers(safetyLevel, hypoglycemiaRiskScore);
+  const _safetyMultipliers = getSafetyMultipliers(safetyLevel, hypoglycemiaRiskScore);
   
   // Analyze carb coverage specifically for SMB
   const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile);
@@ -383,7 +383,7 @@ function calculateTotalDailyInsulin(treatments: NightscoutTreatment[]): number {
   return recentTreatments.reduce((sum, t) => sum + (t.insulin || 0), 0);
 }
 
-function getSafetyMultipliers(safetyLevel: string, riskScore: number) {
+function getSafetyMultipliers(safetyLevel: string, _riskScore: number) {
   // OPTIMIZED: Much more aggressive multipliers for real-world effectiveness
   switch (safetyLevel) {
     case 'ultra-conservative':

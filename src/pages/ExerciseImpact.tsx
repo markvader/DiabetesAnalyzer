@@ -65,8 +65,7 @@ const ExerciseImpact = () => {
     return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
   }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
-  useEffect(() => {
-    const analyzeExercise = async () => {
+  const analyzeExercise = React.useCallback(async () => {
       // Skip if no data or already loading
       if (aiLoading || (!filteredReadings.length && !filteredTreatments.length)) {
         return;
@@ -97,14 +96,24 @@ const ExerciseImpact = () => {
           setAiLoading(false);
         }
       }
-    };
-    
+    }, [
+      aiLoading,
+      exerciseAnalysis,
+      filteredReadings,
+      filteredTreatments,
+      formatGlucoseValue,
+      getUnitLabel,
+      manualRefresh,
+      unit
+    ]);
+
+  useEffect(() => {
     // Add a small delay to prevent rapid re-renders
     const timeoutId = setTimeout(() => {
       runSafeAsync(() => analyzeExercise(), { label: 'ExerciseImpact analyzeExercise (delayed)' });
     }, 100);
     return () => clearTimeout(timeoutId);
-  }, [filteredReadings.length, filteredTreatments.length, manualRefresh, unit]);
+  }, [analyzeExercise]);
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {

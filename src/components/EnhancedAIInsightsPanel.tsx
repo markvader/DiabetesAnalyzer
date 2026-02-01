@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { Brain, Lightbulb, CheckCircle, AlertTriangle, Loader, Cpu, Activity } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
@@ -23,12 +23,14 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
   const { unit, formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const { isReady: tensorFlowReady, isEnabled: tensorFlowEnabled, error: tensorFlowError } = useTensorFlow();
   
-  // Defensive check for timeInRange prop
-  const safeTimeInRange = timeInRange || {
-    timeInRange: 0,
-    highPercentage: 0,
-    lowPercentage: 0
-  };
+  // Defensive check for timeInRange prop (memoized so effects don't fire every render)
+  const safeTimeInRange = useMemo(() => {
+    return timeInRange || {
+      timeInRange: 0,
+      highPercentage: 0,
+      lowPercentage: 0
+    };
+  }, [timeInRange]);
   
   const [insights, setInsights] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<string[]>([]);
@@ -39,6 +41,60 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
   const [analysisProvider, setAnalysisProvider] = useState<string>('');
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
   const initialLoadDone = useRef<boolean>(false);
+
+  const fetchInsights = useCallback(async (dataHash: string) => {
+    if (!readings || readings.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+    setAnalysisProvider('');
+
+    try {
+      console.log('🎯 Enhanced AI Insights - Starting analysis...');
+
+      const result = await aiService.analyzeGlucosePatterns(readings, safeTimeInRange, {
+        unit,
+        formatGlucoseValue,
+        getUnitLabel
+      });
+
+      if (result) {
+        setInsights(result.insights || []);
+        setRecommendations(result.recommendations || []);
+        setRiskAssessment(result.riskAssessment || 'medium');
+        setConfidence(result.confidence || 70);
+        setLastAnalyzedData(dataHash);
+        initialLoadDone.current = true;
+
+        // Determine which provider was used
+        if (tensorFlowEnabled && tensorFlowReady) {
+          setAnalysisProvider('TensorFlow');
+        } else {
+          // Check if any external API was used
+          const apiKeys = {
+            openai: !!localStorage.getItem('openai_api_key'),
+            deepseek: !!localStorage.getItem('deepseek_api_key'),
+            anthropic: !!localStorage.getItem('anthropic_api_key')
+          };
+
+          if (apiKeys.openai) setAnalysisProvider('OpenAI');
+          else if (apiKeys.deepseek) setAnalysisProvider('DeepSeek');
+          else if (apiKeys.anthropic) setAnalysisProvider('Anthropic');
+          else setAnalysisProvider('Basic Analysis');
+        }
+
+        console.log('✅ Enhanced AI Insights - Analysis complete');
+      } else {
+        setError('Unable to generate AI insights at this time.');
+        console.log('❌ Enhanced AI Insights - No result returned');
+      }
+    } catch (err) {
+      console.error('❌ Enhanced AI Insights - Error:', err);
+      setError('An error occurred while analyzing your data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [formatGlucoseValue, getUnitLabel, readings, safeTimeInRange, tensorFlowEnabled, tensorFlowReady, unit]);
 
   useEffect(() => {
     // Create a hash of the current data to compare - with safe number handling
@@ -68,59 +124,7 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
     if (shouldFetch && readings && readings.length > 0) {
       fetchInsights(dataHash);
     }
-    }, [readings, safeTimeInRange, manualRefresh]);
-
-  const fetchInsights = async (dataHash: string) => {
-    if (!readings || readings.length === 0) return;
-    
-    setLoading(true);
-    setError(null);
-    setAnalysisProvider('');
-    
-    try {
-      console.log('🎯 Enhanced AI Insights - Starting analysis...');
-      
-      const result = await aiService.analyzeGlucosePatterns(readings, safeTimeInRange, { 
-        unit, 
-        formatGlucoseValue, 
-        getUnitLabel 
-      });      if (result) {
-        setInsights(result.insights || []);
-        setRecommendations(result.recommendations || []);
-        setRiskAssessment(result.riskAssessment || 'medium');
-        setConfidence(result.confidence || 70);
-        setLastAnalyzedData(dataHash);
-        initialLoadDone.current = true;
-
-        // Determine which provider was used
-        if (tensorFlowEnabled && tensorFlowReady) {
-          setAnalysisProvider('TensorFlow');
-        } else {
-          // Check if any external API was used
-          const apiKeys = {
-            openai: !!localStorage.getItem('openai_api_key'),
-            deepseek: !!localStorage.getItem('deepseek_api_key'),
-            anthropic: !!localStorage.getItem('anthropic_api_key')
-          };
-          
-          if (apiKeys.openai) setAnalysisProvider('OpenAI');
-          else if (apiKeys.deepseek) setAnalysisProvider('DeepSeek');
-          else if (apiKeys.anthropic) setAnalysisProvider('Anthropic');
-          else setAnalysisProvider('Basic Analysis');
-        }
-        
-        console.log('✅ Enhanced AI Insights - Analysis complete');
-      } else {
-        setError('Unable to generate AI insights at this time.');
-        console.log('❌ Enhanced AI Insights - No result returned');
-      }
-    } catch (err) {
-      console.error('❌ Enhanced AI Insights - Error:', err);
-      setError('An error occurred while analyzing your data.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [fetchInsights, insights.length, lastAnalyzedData, manualRefresh, readings, safeTimeInRange]);
 
   const getRiskColor = () => {
     switch (riskAssessment) {

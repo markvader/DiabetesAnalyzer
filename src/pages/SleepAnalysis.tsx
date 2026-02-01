@@ -113,7 +113,7 @@ const SleepAnalysis = () => {
     };
     
     runSafeAsync(() => analyzeSleep(), { label: 'SleepAnalysis analyzeSleep effect' });
-  }, [filteredReadings, manualRefresh]);
+  }, [filteredReadings, formatGlucoseValue, getUnitLabel, manualRefresh, sleepAnalysis, unit]);
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {
@@ -287,7 +287,7 @@ const SleepAnalysis = () => {
         }
       ]
     };
-  }, [nightReadings, isDark]);
+  }, [nightReadings, isDark, unit]);
 
   const chartOptions = {
     responsive: true,

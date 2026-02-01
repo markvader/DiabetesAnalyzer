@@ -47,7 +47,7 @@ const BackupSync = () => {
 
       setBackupStatus('success');
       setTimeout(() => setBackupStatus('idle'), 3000);
-    } catch (err) {
+    } catch (_err) {
       setBackupStatus('error');
       setTimeout(() => setBackupStatus('idle'), 3000);
     }

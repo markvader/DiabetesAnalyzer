@@ -4,7 +4,6 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { Sun, Moon, Sunrise, Sunset } from 'lucide-react';
 import { Line } from 'react-chartjs-2';
-import { format } from 'date-fns';
 import LoadingSpinner from '../components/LoadingSpinner';
 import SunCalc from 'suncalc';
 import type { NightscoutEntry } from '../types/nightscout';

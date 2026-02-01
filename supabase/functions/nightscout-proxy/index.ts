@@ -1,4 +1,5 @@
 // Enhanced Nightscout proxy with full API v1 and v3 support
+// @ts-expect-error - Deno std remote import is resolved at runtime in Supabase Edge Functions
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts"
 
 const corsHeaders = {
@@ -27,7 +28,7 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -49,7 +50,7 @@ serve(async (req) => {
     let requestData: ProxyRequest;
     try {
       requestData = await req.json();
-    } catch (error) {
+    } catch {
       return new Response(
         JSON.stringify({ 
           error: 'Invalid JSON', 
@@ -67,7 +68,7 @@ serve(async (req) => {
       path,
       token,
       apiVersion = 'auto',
-      authMethod = 'auto',
+      authMethod: _authMethod = 'auto',
       method = 'GET',
       body,
     } = requestData;
@@ -191,10 +192,12 @@ serve(async (req) => {
         body: shouldSendBody ? JSON.stringify(body ?? {}) : undefined,
         signal: controller.signal,
       });
-    } catch (error) {
+    } catch (error: unknown) {
       clearTimeout(timeoutId);
+
+      const err = error instanceof Error ? error : new Error(getErrorMessage(error));
       
-      if (error.name === 'AbortError') {
+      if (err.name === 'AbortError') {
         return new Response(
           JSON.stringify({ 
             error: 'Request timeout', 
@@ -208,16 +211,16 @@ serve(async (req) => {
       }
 
       console.error('Fetch error details:', {
-        name: error.name,
-        message: error.message,
-        cause: error.cause,
-        stack: error.stack,
+        name: err.name,
+        message: err.message,
+        cause: (err as Error & { cause?: unknown }).cause,
+        stack: err.stack,
         targetUrl: targetUrl,
         hostname: new URL(url).hostname
       });
       
       // Enhanced error message for network connectivity issues
-      let errorMessage = `Unable to connect to Nightscout server: ${error.message || 'Unknown network error'}`;
+      let errorMessage = `Unable to connect to Nightscout server: ${err.message || 'Unknown network error'}`;
       
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
         errorMessage = `Failed to connect to your Nightscout server (${new URL(url).hostname}). This could be due to:
@@ -235,7 +238,7 @@ Please verify:
 3. The URL uses HTTPS (required for secure connections)
 4. Your Nightscout instance allows external API access
 
-Original error: ${error.message}`;
+Original error: ${err.message}`;
       } else if (error instanceof TypeError && !error.message) {
         errorMessage = `Failed to connect to your Nightscout server (${new URL(url).hostname}). This could be due to:
 • Your Nightscout URL is incorrect or unreachable from the internet
@@ -260,8 +263,8 @@ Network error occurred with no specific error message.`;
           error: 'Connection failed', 
           message: errorMessage,
           debugInfo: {
-            errorType: error.name,
-            originalMessage: error.message,
+            errorType: err.name,
+            originalMessage: err.message,
             hostname: new URL(url).hostname,
             targetUrl: targetUrl
           }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Bell, BellOff, Volume2, VolumeX } from 'lucide-react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -17,24 +17,32 @@ const Alerts = () => {
   const [lastReading, setLastReading] = useState<Date | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Sound effects
-  const highAlert = new Howl({
+  // Sound effects (instantiate once)
+  const highAlert = useMemo(() => new Howl({
     src: ['https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'],
     volume: 0.5,
     preload: true
-  });
+  }), []);
 
-  const lowAlert = new Howl({
+  const lowAlert = useMemo(() => new Howl({
     src: ['https://assets.mixkit.co/active_storage/sfx/2867/2867-preview.mp3'],
     volume: 0.5,
     preload: true
-  });
+  }), []);
 
-  const noDataAlert = new Howl({
+  const noDataAlert = useMemo(() => new Howl({
     src: ['https://assets.mixkit.co/active_storage/sfx/2872/2872-preview.mp3'],
     volume: 0.5,
     preload: true
-  });
+  }), []);
+
+  useEffect(() => {
+    return () => {
+      highAlert.unload();
+      lowAlert.unload();
+      noDataAlert.unload();
+    };
+  }, [highAlert, lowAlert, noDataAlert]);
 
   useEffect(() => {
     if (!alertsEnabled || !data?.entries?.length) return;
@@ -57,7 +65,7 @@ const Alerts = () => {
     if (timeDiff > noDataTimeout * 60 * 1000 && soundEnabled) {
       noDataAlert.play();
     }
-  }, [data, alertsEnabled, highThreshold, lowThreshold, noDataTimeout, soundEnabled]);
+  }, [alertsEnabled, data, convertToCurrentUnit, highAlert, highThreshold, lowAlert, lowThreshold, noDataAlert, noDataTimeout, soundEnabled]);
 
   return (
     <div className="space-y-6">

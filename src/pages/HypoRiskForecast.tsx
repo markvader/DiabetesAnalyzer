@@ -66,7 +66,7 @@ const HypoRiskForecastPage = () => {
       return `${fmt(v, 1)} mmol/L per 5 min`;
     });
 
-    out = out.replace(/(-?\d+(?:\.\d+)?)\s*mg\/dL\s*[·\*]\s*min/gi, (_m, n) => {
+    out = out.replace(/(-?\d+(?:\.\d+)?)\s*mg\/dL\s*[·*]\s*min/gi, (_m, n) => {
       const v = Number(n);
       if (!Number.isFinite(v)) return _m;
       return `${fmt(v, 1)} mmol/L·min`;

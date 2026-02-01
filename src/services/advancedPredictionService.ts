@@ -165,7 +165,7 @@ class AdvancedPredictionService {
     try {
       const response = await this.callAIService(prompt, provider);
       return this.parseAIResponse(response, recentReadings);
-    } catch (error) {
+    } catch {
       return null;
     }
   }
@@ -316,7 +316,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
 
       const content = data?.choices?.[0]?.message?.content;
       return typeof content === 'string' ? content : '';
-    } catch (error) {
+    } catch {
       return '';
     }
   }
@@ -380,7 +380,7 @@ Provide realistic, medically sound predictions based on diabetes physiology.`;
   }
 
   private validateTrend(trend: unknown): 'rising' | 'falling' | 'stable' {
-    if (['rising', 'falling', 'stable'].includes(trend)) {
+    if (typeof trend === 'string' && ['rising', 'falling', 'stable'].includes(trend)) {
       return trend as 'rising' | 'falling' | 'stable';
     }
     return 'stable';

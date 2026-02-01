@@ -17,15 +17,13 @@ import {
   Select,
   MenuItem,
   Button,
-  Alert,
-  useTheme 
+  Alert
 } from '@mui/material';
 
 const A1C = () => {
   const { data, loading, error, fetchDataForDays, forceRefresh } = useNightscout();
   const { formatGlucoseValue } = useGlucoseFormatting();
   const { isModern } = useDesignMode();
-  const theme = useTheme();
   
   // Time selection state
   const [timeWindow, setTimeWindow] = useState(168); // Default to 7 days (168 hours)

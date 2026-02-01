@@ -174,7 +174,7 @@ const GlucoseTrendChart: React.FC<GlucoseTrendChartProps> = ({ readings, hours }
       labels,
       datasets
     };
-  }, [readings, hours, colors, getCurrentGlucoseRanges, convertToCurrentUnit, unit]);
+  }, [readings, hours, colors, getCurrentGlucoseRanges, convertToCurrentUnit]);
 
   const options: ChartOptions<'line'> = React.useMemo(() => {
     const ranges = getCurrentGlucoseRanges();

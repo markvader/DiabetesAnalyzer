@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
-import { Shield, AlertTriangle, CheckCircle, Brain, Activity, TrendingUp, RefreshCw } from 'lucide-react';
+import { Shield, AlertTriangle, Brain, Activity, TrendingUp, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { aiService } from '../services/aiService';
@@ -25,11 +25,11 @@ const SafetyAnalysis = () => {
   const { formatGlucoseValue, getCurrentGlucoseRanges } = useGlucoseFormatting();
   const [safetyAnalysis, setSafetyAnalysis] = useState<SafetyAnalysisState | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [_aiError, setAiError] = useState<string | null>(null);
   const [manualRefresh, setManualRefresh] = useState(false);
 
   // Move calculation functions here to access hook
-  const calculateTimeInRange = (readings: NightscoutEntry[]) => {
+  const calculateTimeInRange = useCallback((readings: NightscoutEntry[]) => {
     if (!readings.length) return { inRange: 0, high: 0, low: 0 };
     
     const ranges = getCurrentGlucoseRanges();
@@ -52,9 +52,9 @@ const SafetyAnalysis = () => {
       high: (high / total) * 100,
       low: (low / total) * 100
     };
-  };
+  }, [getCurrentGlucoseRanges]);
 
-  const calculateVariability = (readings: NightscoutEntry[]) => {
+  const calculateVariability = useCallback((readings: NightscoutEntry[]) => {
     if (!readings.length) return { cv: 0, stdDev: 0 };
     
     const values = readings.map(r => r.sgv);
@@ -66,9 +66,9 @@ const SafetyAnalysis = () => {
       cv: (stdDev / mean) * 100,
       stdDev: stdDev // Keep in mg/dL, format on display
     };
-  };
+  }, []);
 
-  const calculateHypoglycemiaRisk = (readings: NightscoutEntry[]) => {
+  const calculateHypoglycemiaRisk = useCallback((readings: NightscoutEntry[]) => {
     const ranges = getCurrentGlucoseRanges();
     const lowReadings = readings.filter(r => r.sgv < ranges.TARGET_MIN).length;
     const severelyLowReadings = readings.filter(r => r.sgv < ranges.LOW_THRESHOLD).length; // Use LOW_THRESHOLD for severe hypo
@@ -82,7 +82,49 @@ const SafetyAnalysis = () => {
       severePercentage,
       riskScore: lowPercentage + (severePercentage * 3)
     };
-  };
+  }, [getCurrentGlucoseRanges]);
+
+  const calculateSafetyScore = useCallback(
+    (timeInRange: TimeInRangeStats, variability: VariabilityStats, hypoglycemiaRisk: HypoglycemiaRiskStats) => {
+      let score = 100;
+
+      // Penalize for time below range
+      score -= timeInRange.low * 3;
+
+      // Penalize for high variability
+      if (variability.cv > 40) score -= 20;
+      else if (variability.cv > 30) score -= 10;
+
+      // Penalize for severe hypoglycemia
+      score -= hypoglycemiaRisk.severePercentage * 10;
+
+      return Math.max(0, Math.min(100, Math.round(score)));
+    },
+    []
+  );
+
+  const generateCriticalWarnings = useCallback(
+    (timeInRange: TimeInRangeStats, variability: VariabilityStats, hypoglycemiaRisk: HypoglycemiaRiskStats) => {
+      const warnings: string[] = [];
+
+      if (timeInRange.low > 4) {
+        warnings.push('CRITICAL: Excessive hypoglycemia detected (>4% time below range). Immediate medical consultation required.');
+      } else if (timeInRange.low > 2) {
+        warnings.push('WARNING: Elevated hypoglycemia risk detected. Consider reducing insulin doses.');
+      }
+
+      if (variability.cv > 40) {
+        warnings.push('HIGH VARIABILITY: Glucose control is unstable. Consider reviewing insulin timing and doses.');
+      }
+
+      if (hypoglycemiaRisk.severePercentage > 1) {
+        warnings.push('SEVERE HYPOGLYCEMIA: Episodes below severe threshold detected. Urgent medical attention required.');
+      }
+
+      return warnings;
+    },
+    []
+  );
 
   useEffect(() => {
     const analyzeSafety = async () => {
@@ -132,51 +174,16 @@ const SafetyAnalysis = () => {
     };
     
     runSafeAsync(() => analyzeSafety(), { label: 'SafetyAnalysis: analyzeSafety' });
-  }, [data, manualRefresh]);
-
-  const calculateSafetyScore = (
-    timeInRange: TimeInRangeStats,
-    variability: VariabilityStats,
-    hypoglycemiaRisk: HypoglycemiaRiskStats
-  ) => {
-    let score = 100;
-    
-    // Penalize for time below range
-    score -= timeInRange.low * 3;
-    
-    // Penalize for high variability
-    if (variability.cv > 40) score -= 20;
-    else if (variability.cv > 30) score -= 10;
-    
-    // Penalize for severe hypoglycemia
-    score -= hypoglycemiaRisk.severePercentage * 10;
-    
-    return Math.max(0, Math.min(100, Math.round(score)));
-  };
-
-  const generateCriticalWarnings = (
-    timeInRange: TimeInRangeStats,
-    variability: VariabilityStats,
-    hypoglycemiaRisk: HypoglycemiaRiskStats
-  ) => {
-    const warnings: string[] = [];
-    
-    if (timeInRange.low > 4) {
-      warnings.push('CRITICAL: Excessive hypoglycemia detected (>4% time below range). Immediate medical consultation required.');
-    } else if (timeInRange.low > 2) {
-      warnings.push('WARNING: Elevated hypoglycemia risk detected. Consider reducing insulin doses.');
-    }
-    
-    if (variability.cv > 40) {
-      warnings.push('HIGH VARIABILITY: Glucose control is unstable. Consider reviewing insulin timing and doses.');
-    }
-    
-    if (hypoglycemiaRisk.severePercentage > 1) {
-      warnings.push('SEVERE HYPOGLYCEMIA: Episodes below severe threshold detected. Urgent medical attention required.');
-    }
-    
-    return warnings;
-  };
+  }, [
+    calculateHypoglycemiaRisk,
+    calculateSafetyScore,
+    calculateTimeInRange,
+    calculateVariability,
+    data,
+    generateCriticalWarnings,
+    manualRefresh,
+    safetyAnalysis,
+  ]);
 
   const getSafetyScoreColor = (score: number) => {
     if (score >= 80) return 'text-green-600 dark:text-green-400';

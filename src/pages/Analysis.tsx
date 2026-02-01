@@ -5,14 +5,12 @@ import { useNightscout } from '../contexts/NightscoutContext';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
-import { getDateRangeString } from '../utils/dateUtils';
 import { analyzeData } from '../services/analysisService';
-import { Activity, Droplet, Cookie, Brain, TrendingUp, Sun, Cloud, Calendar, Clock, Sparkles } from 'lucide-react';
+import { Activity, Droplet, Brain, Sun, Cloud, Calendar, Clock, Sparkles } from 'lucide-react';
 import { detectGlucosePatterns, analyzeMealPatterns, identifyMealClusters } from '../services/patternDetectionService';
 import { analyzeWeatherImpact } from '../services/weatherAnalysis';
 import { analyzeInsulinSensitivity } from '../services/insulinSensitivityAnalysis';
 import SuggestionTable from '../components/SuggestionTable';
-import GlucoseChart from '../components/GlucoseChart';
 import AdvancedStats from '../components/AdvancedStats';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AIInsightsPanel from '../components/AIInsightsPanel';
@@ -20,6 +18,7 @@ import { useSubscription } from '../contexts/SubscriptionContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { detectGlucoseAnomalies } from '../services/glucoseAnomalyDetection';
 
 const Analysis = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
@@ -28,14 +27,14 @@ const Analysis = () => {
   const { formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
   const [patterns, setPatterns] = useState<ReturnType<typeof detectGlucosePatterns> | null>(null);
-  const [mealPatterns, setMealPatterns] = useState<ReturnType<typeof analyzeMealPatterns> | null>(null);
-  const [mealClusters, setMealClusters] = useState<ReturnType<typeof identifyMealClusters> | null>(null);
+  const [_mealPatterns, setMealPatterns] = useState<ReturnType<typeof analyzeMealPatterns> | null>(null);
+  const [_mealClusters, setMealClusters] = useState<ReturnType<typeof identifyMealClusters> | null>(null);
   const [weatherImpact, setWeatherImpact] = useState<Awaited<ReturnType<typeof analyzeWeatherImpact>>>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [insulinSensitivity, setInsulinSensitivity] = useState<ReturnType<typeof analyzeInsulinSensitivity> | null>(null);
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [_analysisLoading, setAnalysisLoading] = useState(false);
   
   // Time selection state
   const [timeWindow, setTimeWindow] = useState(168); // Default to 7 days (168 hours)
@@ -141,6 +140,10 @@ const Analysis = () => {
       lowPercentage: (lowCount / total) * 100,
       totalReadings: total
     };
+  }, [filteredReadings]);
+
+  const glucoseAnomalies = React.useMemo(() => {
+    return detectGlucoseAnomalies(filteredReadings);
   }, [filteredReadings]);
 
   useEffect(() => {
@@ -519,6 +522,96 @@ const Analysis = () => {
           <div className="text-center py-8">
             <p className="text-gray-500 dark:text-gray-400">No data available for the selected time period</p>
             <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">Try selecting a different time range or fetching more data</p>
+          </div>
+        )}
+      </div>
+
+      {/* Glucose Anomalies (Advanced) */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mb-6 transition-colors duration-200">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Activity className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
+            <h3 className="text-xl font-medium text-gray-900 dark:text-gray-100">Glucose Anomalies</h3>
+          </div>
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            {getDisplayLabel()} • {glucoseAnomalies.length} detected
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+          Flags likely sensor artifacts and data-quality issues (gaps, rapid jumps, flatlines, compression lows) to help you interpret trends and predictions.
+        </p>
+
+        {glucoseAnomalies.length === 0 ? (
+          <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+            <p className="text-green-800 dark:text-green-200">No anomalies detected in the selected time range.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <span className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                Info: {glucoseAnomalies.filter(a => a.severity === 'info').length}
+              </span>
+              <span className="text-xs px-2 py-1 rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200">
+                Warnings: {glucoseAnomalies.filter(a => a.severity === 'warning').length}
+              </span>
+              <span className="text-xs px-2 py-1 rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200">
+                Critical: {glucoseAnomalies.filter(a => a.severity === 'danger').length}
+              </span>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+              <div className="max-h-72 overflow-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-900/30">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Time</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                    {glucoseAnomalies.slice(0, 20).map((a, idx) => (
+                      <tr key={`${a.type}-${a.startMs}-${idx}`} className={
+                        a.severity === 'danger'
+                          ? 'bg-red-50/50 dark:bg-red-900/10'
+                          : a.severity === 'warning'
+                          ? 'bg-yellow-50/50 dark:bg-yellow-900/10'
+                          : ''
+                      }>
+                        <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                          {format(new Date(a.startMs), 'dd.MM HH:mm')}
+                          {a.endMs !== a.startMs && (
+                            <span className="text-gray-500 dark:text-gray-400"> → {format(new Date(a.endMs), 'dd.MM HH:mm')}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200 whitespace-nowrap">
+                          <span className={
+                            a.severity === 'danger'
+                              ? 'text-red-700 dark:text-red-300 font-medium'
+                              : a.severity === 'warning'
+                              ? 'text-yellow-700 dark:text-yellow-300 font-medium'
+                              : 'text-gray-700 dark:text-gray-200'
+                          }>
+                            {a.type.replaceAll('_', ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200">
+                          <div>{a.message}</div>
+                          {a.details && (
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{a.details}</div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {glucoseAnomalies.length > 20 && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">Showing the most recent 20 anomalies.</p>
+            )}
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { format, addDays, subDays, parseISO } from 'date-fns';
+import { format, subDays, parseISO } from 'date-fns';
 
 // Format date to display format (Croatian format)
 export const formatDate = (date: Date): string => {

@@ -250,7 +250,7 @@ const Dashboard = () => {
   const lastKnownSageRef = useRef<number | null>(null);
   
   // Helper functions to extract values from your specific Nightscout data structure
-  const extractCageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
+  const extractCageValue = (_deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
     if (!_deviceStatus) {
       console.log('⚠️ No device status available, using cached CAGE value');
@@ -320,7 +320,7 @@ const Dashboard = () => {
     }
   };
 
-  const extractSageValue = (deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
+  const extractSageValue = (_deviceStatus: NightscoutDeviceStatus | null | undefined): number | null => {
     // If no device status is available, return cached value
     if (!_deviceStatus) {
       console.log('⚠️ No device status available, using cached SAGE value');
@@ -718,7 +718,7 @@ const Dashboard = () => {
     });
     
     return result;
-  }, [filteredReadings]);
+  }, [filteredReadings, convertToCurrentUnit, getCurrentGlucoseRanges]);
 
   const handleAlertSettingsSave = (settings: unknown) => {
     console.log('Alert settings saved:', settings);

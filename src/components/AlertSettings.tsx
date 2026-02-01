@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Bell, BellOff } from 'lucide-react';
-import { toMgdl, toMmol, formatGlucose } from '../utils/glucoseUtils';
+import { toMgdl, toMmol } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 
 interface AlertSettings {
@@ -18,7 +18,7 @@ const AlertSettings: React.FC<AlertSettingsProps> = ({
   initialSettings,
   onSave 
 }) => {
-  const { getUnitLabel, formatGlucoseValue, convertToCurrentUnit, unit } = useGlucoseFormatting();
+  const { getUnitLabel, unit } = useGlucoseFormatting();
   
   // Set default values based on current unit
   const getDefaultSettings = (): AlertSettings => {

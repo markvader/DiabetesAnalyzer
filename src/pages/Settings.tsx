@@ -6,25 +6,19 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
 import { useTimeInRange } from '../contexts/TimeInRangeContext';
-import { INSULIN_PUMPS, InsulinPumpProfile, getPumpsByCategory, getAAPSSupportedPumps } from '../constants/insulinPumps';
+import { getPumpsByCategory } from '../constants/insulinPumps';
 import { 
-  OPENAI_MODELS, 
   getModelsByCategory, 
   getModelsByProvider,
-  getRecommendedModels, 
   getModelById, 
   calculateEstimatedCost, 
   formatCostEstimate, 
   DEFAULT_OPENAI_MODEL,
-  DEFAULT_GEMINI_MODEL,
   DEFAULT_MODEL,
   DIABETES_ANALYSIS_TOKENS,
-  OpenAIModel,
-  AIModel 
 } from '../constants/openaiModels';
-import { format } from 'date-fns';
 import { testConnection } from '../services/nightscoutService';
-import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Heart, Clock, Cpu, Target, DollarSign, Zap } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Key, Shield, ExternalLink, Info, RefreshCw, Gauge, Activity, Clock, Target, DollarSign, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { aiService } from '../services/aiService';
 import TimeInRangeSettings from '../components/TimeInRangeSettings';
@@ -55,18 +49,18 @@ const Settings = () => {
   const { 
     isReady: tensorFlowReady, 
     isEnabled: tensorFlowContextEnabled, 
-    isInitializing: tensorFlowInitializing,
-    error: tensorFlowError,
+    isInitializing: _tensorFlowInitializing,
+    error: _tensorFlowError,
     toggleEnabled: toggleTensorFlow,
-    reinitialize: reinitializeTensorFlow
+    reinitialize: _reinitializeTensorFlow
   } = useTensorFlow();
   const { showDeviceStatus, setShowDeviceStatus } = useDashboardDisplay();
   const { 
-    settings: timeInRangeSettings, 
-    updateSettings: updateTimeInRangeSettings, 
+    settings: _timeInRangeSettings, 
+    updateSettings: _updateTimeInRangeSettings, 
     resetToDefaults: resetTimeInRangeToDefaults,
     getSettingsInUnit,
-    setSettingsFromUnit
+    setSettingsFromUnit: _setSettingsFromUnit
   } = useTimeInRange();
   const [newUrl, setNewUrl] = useState(url);
   const [newToken, setNewToken] = useState(token);
@@ -160,7 +154,7 @@ const Settings = () => {
         setMessage(null);
       }, 3000);
       
-    } catch (error) {
+    } catch (_error) {
       setMessage({
         text: 'An error occurred while saving settings',
         type: 'error'

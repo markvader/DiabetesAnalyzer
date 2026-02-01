@@ -6,7 +6,6 @@ import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
-import { toMgdl, toMmol } from '../utils/glucoseUtils';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
@@ -160,7 +159,7 @@ const ISF = () => {
       },
       isfSuggestions: convertIsfArray(analysisResults.isfSuggestions)
     };
-  }, [analysisResults, unit, toMgdl]);
+  }, [analysisResults, unit]);
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {

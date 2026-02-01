@@ -570,11 +570,12 @@ const Dashboard = () => {
   }, [entriesSortedAsc, convertToCurrentUnit, formatGlucoseValue, getUnitLabel]);
 
   const recentDeviceStatus = useMemo(() => {
-    if (!data?.deviceStatus?.length) return null;
-    let best: (typeof data.deviceStatus)[number] | null = null;
+    const deviceStatus = data?.deviceStatus;
+    if (!deviceStatus?.length) return null;
+    let best: (typeof deviceStatus)[number] | null = null;
     let bestMs = -Infinity;
 
-    for (const status of data.deviceStatus) {
+    for (const status of deviceStatus) {
       const ms = toEpochMs(status.mills ?? status.date ?? status.created_at);
       if (ms != null && ms > bestMs) {
         bestMs = ms;

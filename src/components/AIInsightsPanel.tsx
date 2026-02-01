@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Brain, Lightbulb, CheckCircle, AlertTriangle, Loader } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -11,7 +11,6 @@ import {
   Typography, 
   Box, 
   Chip, 
-  CircularProgress,
   Alert,
   Accordion,
   AccordionSummary,
@@ -55,6 +54,40 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   } | null>(null);
   const initialLoadDone = useRef<boolean>(false);
 
+  const fetchInsights = useCallback(async (dataHash: string) => {
+    if (!readings || readings.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await aiService.analyzeGlucosePatterns(readings, timeInRange, { unit, formatGlucoseValue, getUnitLabel });
+
+      if (result) {
+        setInsights(result.insights);
+        setRecommendations(result.recommendations);
+        setRiskAssessment(result.riskAssessment);
+        setConfidence(result.confidence);
+        setDetails((result as { details?: unknown }).details ?? null);
+        setLastUsageInfo({
+          provider: result.provider,
+          model: result.model,
+          tokenUsage: result.tokenUsage,
+          costUSD: result.costUSD
+        });
+        setLastAnalyzedData(dataHash);
+        initialLoadDone.current = true;
+      } else {
+        setError('Unable to generate AI insights at this time.');
+      }
+    } catch (err) {
+      console.error('Error fetching AI insights:', err);
+      setError('An error occurred while analyzing your data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [readings, timeInRange, unit, formatGlucoseValue, getUnitLabel]);
+
   useEffect(() => {
     // Create a hash of the current data to compare - with safe number handling
     const safeTimeInRange = typeof timeInRange.timeInRange === 'number' ? timeInRange.timeInRange.toFixed(1) : '0.0';
@@ -83,41 +116,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
     if (shouldFetch && readings && readings.length > 0) {
       fetchInsights(dataHash);
     }
-  }, [readings, timeInRange, manualRefresh]);
-
-  const fetchInsights = async (dataHash: string) => {
-    if (!readings || readings.length === 0) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const result = await aiService.analyzeGlucosePatterns(readings, timeInRange, { unit, formatGlucoseValue, getUnitLabel });
-      
-      if (result) {
-        setInsights(result.insights);
-        setRecommendations(result.recommendations);
-        setRiskAssessment(result.riskAssessment);
-        setConfidence(result.confidence);
-        setDetails((result as { details?: unknown }).details ?? null);
-        setLastUsageInfo({
-          provider: result.provider,
-          model: result.model,
-          tokenUsage: result.tokenUsage,
-          costUSD: result.costUSD
-        });
-        setLastAnalyzedData(dataHash);
-        initialLoadDone.current = true;
-      } else {
-        setError('Unable to generate AI insights at this time.');
-      }
-    } catch (err) {
-      console.error('Error fetching AI insights:', err);
-      setError('An error occurred while analyzing your data.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [readings, timeInRange, manualRefresh, lastAnalyzedData, insights.length, fetchInsights]);
 
   const getRiskColor = () => {
     switch (riskAssessment) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, Loader, AlertTriangle, Download } from 'lucide-react';
 import { aiService } from '../services/aiService';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -12,7 +12,6 @@ import {
   Alert,
   Button,
   Chip,
-  Divider,
   useTheme,
   alpha
 } from '@mui/material';
@@ -36,6 +35,31 @@ const AIManagementPlan: React.FC<AIManagementPlanProps> = ({ readings, treatment
   const [lastAnalyzedData, setLastAnalyzedData] = useState<string>('');
   const initialLoadDone = useRef<boolean>(false);
 
+  const generatePlan = useCallback(async (dataHash: string) => {
+    if (!readings || readings.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await aiService.generateManagementPlan(readings, treatments, { unit, formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges });
+
+      if (result) {
+        setPlan(result);
+        setGeneratedDate(new Date());
+        setLastAnalyzedData(dataHash);
+        initialLoadDone.current = true;
+      } else {
+        setError('Unable to generate management plan at this time.');
+      }
+    } catch (err) {
+      console.error('Error generating management plan:', err);
+      setError('An error occurred while generating your management plan.');
+    } finally {
+      setLoading(false);
+    }
+  }, [readings, treatments, unit, formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges]);
+
   useEffect(() => {
     // Create a hash of the current data to compare
     const dataHash = `${readings.length}-${treatments.length}`;
@@ -52,32 +76,7 @@ const AIManagementPlan: React.FC<AIManagementPlanProps> = ({ readings, treatment
     if (shouldGenerate && readings?.length > 0 && treatments?.length > 0) {
       generatePlan(dataHash);
     }
-  }, [readings, treatments, manualRefresh]);
-
-  const generatePlan = async (dataHash: string) => {
-    if (!readings || readings.length === 0) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const result = await aiService.generateManagementPlan(readings, treatments, { unit, formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges });
-      
-      if (result) {
-        setPlan(result);
-        setGeneratedDate(new Date());
-        setLastAnalyzedData(dataHash);
-        initialLoadDone.current = true;
-      } else {
-        setError('Unable to generate management plan at this time.');
-      }
-    } catch (err) {
-      console.error('Error generating management plan:', err);
-      setError('An error occurred while generating your management plan.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [readings, treatments, manualRefresh, lastAnalyzedData, plan, generatePlan]);
 
   const downloadPlan = () => {
     if (!plan) return;
