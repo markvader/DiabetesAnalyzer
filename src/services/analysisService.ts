@@ -288,6 +288,16 @@ function analyzeISF(params: {
     return Math.min(max, Math.max(min, suggested));
   };
 
+  // Adaptive rounding:
+  // - mmol/L/U schedules are typically < 20 and should keep 0.1 precision.
+  // - mg/dL/U schedules are typically >= 20 and can be integer.
+  const roundIsf = (value: number, reference: number): number => {
+    const decimals = reference < 20 ? 1 : 0;
+    return roundToDecimal(value, decimals);
+  };
+
+  const visibleStep = (reference: number): number => (reference < 20 ? 0.1 : 1);
+
   const hadAnyLowInHour = (hour: number): boolean => {
     const bgValues = timeGroups[`${hour}`] ?? [];
     return bgValues.some((bg) => toMmol(bg) < 3.9);
@@ -301,6 +311,38 @@ function analyzeISF(params: {
     // Start from current schedule.
     const current = sens.rate;
     let target = current;
+
+    // Safety/need signals from CGM + treatment patterns (works even when clean corrections are scarce).
+    // These are small “nudges” that can trigger a safe suggestion when needed.
+    const nBg = bgValues.length;
+    const lowCount = bgValues.filter((bg) => toMmol(bg) < 3.9).length;
+    const lowPct = nBg ? (lowCount / nBg) * 100 : 0;
+    const avgBg = nBg ? bgValues.reduce((sum, bg) => sum + bg, 0) / nBg : null;
+    const avgBGMmol = avgBg !== null ? toMmol(avgBg) : null;
+
+    const hourCorrections = params.treatments.filter((t) => {
+      const units = t.insulin ?? t.units;
+      const carbs = t.carbs ?? 0;
+      if (typeof units !== 'number' || units < 0.2) return false;
+      if (carbs > 0) return false;
+      const h = new Date(getTreatmentMs(t)).getHours();
+      return h === hour;
+    });
+
+    // Positive means less aggressive (increase ISF); negative means more aggressive (decrease ISF)
+    let nudge = 0;
+    if (lowPct > 0) {
+      // Any lows in that window → prefer less aggressive for that segment.
+      nudge = Math.max(nudge, 0.03);
+    } else if (hypoglycemiaRisk > 10) {
+      // Elevated overall risk → slight global safety bias.
+      nudge = Math.max(nudge, 0.02);
+    }
+
+    if (!forbidMoreAggressive && avgBGMmol !== null) {
+      // If consistently high and there are frequent corrections, allow tiny increase in aggressiveness.
+      if (avgBGMmol > 10 && hourCorrections.length >= 3) nudge = Math.min(nudge, -0.02);
+    }
 
     const startMin = timeToMinutes(sens.time);
     const t = startMin === null ? undefined : tuningByStartMin.get(startMin);
@@ -328,6 +370,14 @@ function analyzeISF(params: {
       }
     }
 
+    // Apply the nudge on top of the data-driven target.
+    // For positive nudges (less aggressive), take the max; for negative (more aggressive), take the min.
+    if (nudge > 0) {
+      target = Math.max(target, current * (1 + nudge));
+    } else if (nudge < 0 && !forbidMoreAggressive) {
+      target = Math.min(target, current * (1 + nudge));
+    }
+
     // Safety gating:
     // - If there are any lows in this hour (or overall hypo risk is elevated), never make ISF more aggressive.
     if ((lowInThisHour || forbidMoreAggressive) && target < current) {
@@ -337,7 +387,25 @@ function analyzeISF(params: {
 
     // Ultra-safe cap: always limit changes to ±5%.
     const capped = clampRelative(current, target, ADJUSTMENT_FACTOR_ISF);
-    adjustedISF.push({ time: sens.time, rate: roundToDecimal(capped, 1) });
+
+    // Round in a unit-aware way and ensure that meaningful changes remain visible after rounding.
+    const currentRounded = roundIsf(current, current);
+    let rounded = roundIsf(capped, current);
+
+    const relativeMove = current > 0 ? Math.abs(capped - current) / current : 0;
+    const minVisibleRelative = 0.015; // ~1.5%
+    if (rounded === currentRounded && relativeMove >= minVisibleRelative) {
+      const step = visibleStep(current);
+      const sign = capped > current ? 1 : capped < current ? -1 : 0;
+      if (sign !== 0) {
+        const candidate = currentRounded + sign * step;
+        const withinCap = candidate >= current * (1 - ADJUSTMENT_FACTOR_ISF) && candidate <= current * (1 + ADJUSTMENT_FACTOR_ISF);
+        const violatesSafety = (lowInThisHour || forbidMoreAggressive) && candidate < currentRounded;
+        if (withinCap && !violatesSafety) rounded = candidate;
+      }
+    }
+
+    adjustedISF.push({ time: sens.time, rate: rounded });
 
     // If we have very sparse data for this segment, nudge user via warning (no UI change).
     if (bgValues.length < 6) {
@@ -526,9 +594,36 @@ export async function analyzeData(
   let aiEnhanced;
   try {
     aiEnhanced = await analyzeWithAI(readings, treatments, currentProfile);
+
+    const hasMeaningfulIsfDelta = (() => {
+      try {
+        const currentByMin = new Map<number, number>();
+        for (const s of currentProfile.sens) {
+          const m = timeToMinutes(s.time);
+          if (m !== null) currentByMin.set(m, s.rate);
+        }
+
+        const suggestedByMin = new Map<number, number>();
+        for (const s of aiEnhanced?.isfSuggestions ?? []) {
+          const m = timeToMinutes(s.time);
+          if (m !== null) suggestedByMin.set(m, s.rate);
+        }
+
+        for (const [m, current] of currentByMin.entries()) {
+          const suggested = suggestedByMin.get(m);
+          if (typeof suggested !== 'number' || !Number.isFinite(suggested) || !Number.isFinite(current) || current <= 0) continue;
+          const rel = Math.abs(suggested - current) / current;
+          // Require a small but non-trivial difference; avoids early-returning when AI mirrors current.
+          if (rel >= 0.01) return true;
+        }
+        return false;
+      } catch {
+        return true;
+      }
+    })();
     
     // Use AI suggestions if available and safe
-    if (aiEnhanced.hypoglycemiaRisk < 20 && aiEnhanced.safetyScore > 60) {
+    if (aiEnhanced.hypoglycemiaRisk < 20 && aiEnhanced.safetyScore > 60 && hasMeaningfulIsfDelta) {
       return {
         basalSuggestions: aiEnhanced.basalSuggestions,
         isfSuggestions: aiEnhanced.isfSuggestions,
