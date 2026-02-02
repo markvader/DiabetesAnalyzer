@@ -24,7 +24,7 @@ const Analysis = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
   const { isPremium } = useDesignMode();
   const { isSubscribed } = useSubscription();
-  const { formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
+  const { unit, formatGlucoseValue, convertToCurrentUnit, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
   const [patterns, setPatterns] = useState<ReturnType<typeof detectGlucosePatterns> | null>(null);
   const [_mealPatterns, setMealPatterns] = useState<ReturnType<typeof analyzeMealPatterns> | null>(null);
@@ -145,6 +145,69 @@ const Analysis = () => {
   const glucoseAnomalies = React.useMemo(() => {
     return detectGlucoseAnomalies(filteredReadings);
   }, [filteredReadings]);
+
+  const formatDelta = React.useCallback(
+    (deltaMgdl: number): string => {
+      const converted = convertToCurrentUnit(deltaMgdl, 'mgdl');
+      const sign = converted > 0 ? '+' : '';
+      const digits = unit === 'mmol' ? 1 : 0;
+      const rounded = Number(converted.toFixed(digits));
+      return `${sign}${rounded} ${unit === 'mmol' ? 'mmol/L' : 'mg/dL'}`;
+    },
+    [convertToCurrentUnit, unit]
+  );
+
+  const formatRate = React.useCallback(
+    (rateMgdlPerMin: number): string => {
+      const converted = convertToCurrentUnit(rateMgdlPerMin, 'mgdl');
+      const digits = unit === 'mmol' ? 2 : 1;
+      const rounded = Number(converted.toFixed(digits));
+      return `${rounded} ${unit === 'mmol' ? 'mmol/L/min' : 'mg/dL/min'}`;
+    },
+    [convertToCurrentUnit, unit]
+  );
+
+  const formatAnomalyMessage = React.useCallback(
+    (a: ReturnType<typeof detectGlucoseAnomalies>[number]): string => {
+      switch (a.type) {
+        case 'DATA_GAP': {
+          const mins = a.gapMinutes ?? a.durationMinutes;
+          return mins ? `Missing CGM data (~${mins} min gap)` : a.message;
+        }
+        case 'OUTLIER_VALUE': {
+          if (typeof a.valueMgdl === 'number') {
+            return `Outlier value: ${formatGlucoseValue(a.valueMgdl, 'mgdl', true)}`;
+          }
+          return a.message;
+        }
+        case 'RAPID_JUMP': {
+          if (typeof a.deltaMgdl === 'number' && typeof a.durationMinutes === 'number' && typeof a.rateMgdlPerMin === 'number') {
+            return `Rapid change: ${formatDelta(a.deltaMgdl)} in ${a.durationMinutes} min (${formatRate(a.rateMgdlPerMin)})`;
+          }
+          return a.message;
+        }
+        case 'FLATLINE': {
+          if (typeof a.durationMinutes === 'number' && typeof a.valueMgdl === 'number') {
+            return `Flatline: ~${a.durationMinutes} min at ${formatGlucoseValue(a.valueMgdl, 'mgdl', true)}`;
+          }
+          return a.message;
+        }
+        case 'POSSIBLE_COMPRESSION_LOW': {
+          if (typeof a.dropMgdl === 'number' && typeof a.valueMgdl === 'number' && typeof a.riseMgdl === 'number') {
+            const drop = formatDelta(-Math.abs(a.dropMgdl));
+            const rise = formatDelta(Math.abs(a.riseMgdl));
+            const low = formatGlucoseValue(a.valueMgdl, 'mgdl', true);
+            const rebound = typeof a.reboundMgdl === 'number' ? formatGlucoseValue(a.reboundMgdl, 'mgdl', true) : null;
+            return `Possible compression low: ${drop} → ${low} then rebound ${rise}${rebound ? ` (to ~${rebound})` : ''}`;
+          }
+          return a.message;
+        }
+        default:
+          return a.message;
+      }
+    },
+    [formatDelta, formatGlucoseValue, formatRate]
+  );
 
   useEffect(() => {
     const processData = async () => {
@@ -597,7 +660,7 @@ const Analysis = () => {
                           </span>
                         </td>
                         <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200">
-                          <div>{a.message}</div>
+                          <div>{formatAnomalyMessage(a)}</div>
                           {a.details && (
                             <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{a.details}</div>
                           )}

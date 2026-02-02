@@ -16,6 +16,16 @@ export type GlucoseAnomaly = {
   endMs: number;
   message: string;
   details?: string;
+
+  // Optional structured fields (all mg/dL-based) for unit-aware display.
+  gapMinutes?: number;
+  durationMinutes?: number;
+  valueMgdl?: number;
+  deltaMgdl?: number;
+  rateMgdlPerMin?: number;
+  dropMgdl?: number;
+  riseMgdl?: number;
+  reboundMgdl?: number;
 };
 
 export type GlucoseAnomalyDetectionOptions = {
@@ -74,7 +84,8 @@ export function detectGlucoseAnomalies(
         severity: gapMin >= 60 ? 'danger' : 'warning',
         startMs: prev.date,
         endMs: next.date,
-        message: `Missing CGM data (~${gapMin} min gap)`
+        message: `Missing CGM data (~${gapMin} min gap)`,
+        gapMinutes: gapMin
       });
     }
   }
@@ -88,7 +99,8 @@ export function detectGlucoseAnomalies(
         severity: 'danger',
         startMs: r.date,
         endMs: r.date,
-        message: `Outlier low value: ${Math.round(r.sgv)} mg/dL`
+        message: `Outlier low value: ${Math.round(r.sgv)} mg/dL`,
+        valueMgdl: r.sgv
       });
     } else if (r.sgv > opts.outlierHighMgdl) {
       anomalies.push({
@@ -96,7 +108,8 @@ export function detectGlucoseAnomalies(
         severity: 'danger',
         startMs: r.date,
         endMs: r.date,
-        message: `Outlier high value: ${Math.round(r.sgv)} mg/dL`
+        message: `Outlier high value: ${Math.round(r.sgv)} mg/dL`,
+        valueMgdl: r.sgv
       });
     }
   }
@@ -121,7 +134,10 @@ export function detectGlucoseAnomalies(
         severity,
         startMs: a.date,
         endMs: b.date,
-        message: `Rapid change: ${delta > 0 ? '+' : ''}${Math.round(delta)} mg/dL in ${Math.round(dtMin)} min (${roundedRate} mg/dL/min)`
+        message: `Rapid change: ${delta > 0 ? '+' : ''}${Math.round(delta)} mg/dL in ${Math.round(dtMin)} min (${roundedRate} mg/dL/min)`,
+        durationMinutes: Math.round(dtMin),
+        deltaMgdl: delta,
+        rateMgdlPerMin: rate
       });
     }
   }
@@ -144,7 +160,9 @@ export function detectGlucoseAnomalies(
           severity: durMin >= 90 ? 'danger' : 'warning',
           startMs: start.date,
           endMs: end.date,
-          message: `Flatline: ~${durMin} min at ${runValue} mg/dL`
+          message: `Flatline: ~${durMin} min at ${runValue} mg/dL`,
+          durationMinutes: durMin,
+          valueMgdl: runValue
         });
       }
       runStartIdx = i;
@@ -163,7 +181,9 @@ export function detectGlucoseAnomalies(
         severity: durMin >= 90 ? 'danger' : 'warning',
         startMs: start.date,
         endMs: end.date,
-        message: `Flatline: ~${durMin} min at ${runValue} mg/dL`
+        message: `Flatline: ~${durMin} min at ${runValue} mg/dL`,
+        durationMinutes: durMin,
+        valueMgdl: runValue
       });
     }
   }
@@ -199,7 +219,11 @@ export function detectGlucoseAnomalies(
         startMs: prev.date,
         endMs: next.date,
         message: `Possible compression low: drop ${approxDrop} → ${low} mg/dL then rebound +${approxRise} (to ~${rebound})`,
-        details: 'Heuristic detection based on rapid drop + rebound. Validate against symptoms, calibrations, and context.'
+        details: 'Heuristic detection based on rapid drop + rebound. Validate against symptoms, calibrations, and context.',
+        valueMgdl: low,
+        reboundMgdl: rebound,
+        dropMgdl: approxDrop,
+        riseMgdl: approxRise
       });
     }
   }
