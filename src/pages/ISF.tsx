@@ -132,13 +132,16 @@ const ISF = () => {
   const convertedAnalysisResults = React.useMemo(() => {
     if (!analysisResults) return null;
 
-    const convertIsfValue = (value: number) => {
-      // ISF values are typically stored in mmol/L/U
-      // Convert to mg/dL/U if user prefers mg/dL
-      if (unit === 'mgdl') {
-        return Math.round(value * 18); // Convert mmol/L/U to mg/dL/U
+    // Nightscout profiles can be configured in mg/dL or mmol/L. We normalize to the UI unit.
+    // Heuristic: values > 20 are almost certainly mg/dL/U; values <= 20 are likely mmol/L/U.
+    const normalizeIsfToUnit = (raw: number) => {
+      if (!Number.isFinite(raw)) return raw;
+      const looksLikeMgdlPerU = raw > 20;
+      if (unit === 'mmol') {
+        return looksLikeMgdlPerU ? Number((raw / 18).toFixed(1)) : Number(raw.toFixed(1));
       }
-      return value;
+      // unit === 'mgdl'
+      return looksLikeMgdlPerU ? Math.round(raw) : Math.round(raw * 18);
     };
 
     type IsfLike = Record<string, unknown> & { rate?: unknown };
@@ -147,7 +150,7 @@ const ISF = () => {
       if (!Array.isArray(isfArray)) return [];
       return isfArray.map((raw): IsfLike => {
         const item: IsfLike = raw && typeof raw === 'object' ? (raw as IsfLike) : {};
-        const convertedRate = typeof item.rate === 'number' ? convertIsfValue(item.rate) : item.rate;
+        const convertedRate = typeof item.rate === 'number' ? normalizeIsfToUnit(item.rate) : item.rate;
         return { ...item, rate: convertedRate };
       });
     };

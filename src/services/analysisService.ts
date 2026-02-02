@@ -4,6 +4,8 @@ import { analyzeWithAI } from './aiEnhancedAnalysisService';
 import { InsulinPumpProfile, getPumpById } from '../constants/insulinPumps';
 import type { NightscoutEntry, NightscoutProfile, NightscoutTreatment } from '../types/nightscout';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { computeIsfCrTuning } from './isfCrTuningService';
+import { computeIsfDriftModel } from './isfDriftModelService';
 
 // Define types for analysis
 type BGReading = Pick<NightscoutEntry, 'sgv' | 'date' | 'dateString'>;
@@ -206,46 +208,116 @@ function analyzeBasalRates(readings: BGReading[], currentProfile: Profile, safet
 }
 
 // ULTRA-CONSERVATIVE ISF analysis
-function analyzeISF(readings: BGReading[], treatments: Treatment[], currentProfile: Profile, safetyWarnings: string[]): TimeSegment[] {
+function analyzeISF(params: {
+  entries: NightscoutEntry[];
+  treatments: NightscoutTreatment[];
+  profiles: NightscoutProfile[];
+  currentProfile: Profile;
+  safetyWarnings: string[];
+}): TimeSegment[] {
+  const readings = params.entries as BGReading[];
   const timeGroups = groupReadingsByTimeOfDay(readings);
   const adjustedISF: TimeSegment[] = [];
-  const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
 
-  currentProfile.sens.forEach(sens => {
+  const hypoglycemiaRisk = calculateHypoglycemiaRisk(readings);
+  const forbidMoreAggressive = hypoglycemiaRisk > 10;
+
+  // Use newer, data-driven signal first (clean correction boluses) and fall back to drift bins.
+  let tuning: ReturnType<typeof computeIsfCrTuning> | null = null;
+  try {
+    tuning = computeIsfCrTuning({ entries: params.entries, treatments: params.treatments, profiles: params.profiles });
+  } catch {
+    tuning = null;
+  }
+
+  const tuningByTime = new Map<string, { current?: number; suggested?: number; median?: number; ciWidth?: number; n: number }>();
+  if (tuning?.segments?.isf?.length) {
+    for (const seg of tuning.segments.isf) {
+      const ciWidth =
+        typeof seg.ciLow === 'number' && typeof seg.ciHigh === 'number' ? Math.max(0, seg.ciHigh - seg.ciLow) : undefined;
+      tuningByTime.set(seg.time, {
+        current: seg.currentISF,
+        suggested: seg.suggestedISF,
+        median: seg.medianISF,
+        ciWidth,
+        n: seg.n
+      });
+    }
+  }
+
+  let drift: ReturnType<typeof computeIsfDriftModel> | null = null;
+  try {
+    drift = computeIsfDriftModel({ entries: params.entries, treatments: params.treatments, timeBinMinutes: 120 });
+  } catch {
+    drift = null;
+  }
+
+  const driftMultiplierForTime = (time: string): number | null => {
+    if (!drift?.timeOfDay?.length) return null;
+    const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
+    if (!match) return null;
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    const minuteOfDay = h * 60 + m;
+    const bin = drift.timeOfDay.find((b) => minuteOfDay >= b.startMin && minuteOfDay < b.endMin);
+    if (!bin) return null;
+    if (bin.confidence === 'low') return null;
+    return typeof bin.multiplier === 'number' && Number.isFinite(bin.multiplier) ? bin.multiplier : null;
+  };
+
+  const clampRelative = (current: number, suggested: number, maxRelativeChange: number): number => {
+    const min = current * (1 - maxRelativeChange);
+    const max = current * (1 + maxRelativeChange);
+    return Math.min(max, Math.max(min, suggested));
+  };
+
+  const hadAnyLowInHour = (hour: number): boolean => {
+    const bgValues = timeGroups[`${hour}`] ?? [];
+    return bgValues.some((bg) => toMmol(bg) < 3.9);
+  };
+
+  params.currentProfile.sens.forEach((sens) => {
     const hour = parseInt(sens.time.split(':')[0]);
-    const bgValues = timeGroups[`${hour}`];
-    
-    if (bgValues.length > 0) {
-      const avgBG = bgValues.reduce((sum, bg) => sum + bg, 0) / bgValues.length;
-      const avgBGMmol = toMmol(avgBG);
-      const lowReadings = bgValues.filter(bg => toMmol(bg) < 3.9).length;
-      const lowPercentage = (lowReadings / bgValues.length) * 100;
-      
-      let adjustmentFactor = 0;
-      
-      // SAFETY FIRST: If ANY hypoglycemia, make ISF less aggressive (higher value)
-      if (lowPercentage > 0) {
-        adjustmentFactor = ADJUSTMENT_FACTOR_ISF * 2; // Make ISF much less aggressive
-        safetyWarnings.push(`Hypoglycemia detected at ${sens.time} - making ISF less aggressive`);
-      } else if (hypoglycemiaRisk > 10) {
-        // High overall risk - be conservative
-        adjustmentFactor = ADJUSTMENT_FACTOR_ISF; // Less aggressive ISF
-      } else {
-        // Lower risk but still conservative
-        if (avgBGMmol > 12.0) {
-          adjustmentFactor = -ADJUSTMENT_FACTOR_ISF * 0.5; // Very small increase in aggressiveness
-        } else if (avgBGMmol < 6.0) {
-          adjustmentFactor = ADJUSTMENT_FACTOR_ISF; // Less aggressive
-        }
-      }
-      
-      const newRate = roundToDecimal(sens.rate * (1 + adjustmentFactor), 1);
-      adjustedISF.push({ time: sens.time, rate: newRate });
+    const bgValues = timeGroups[`${hour}`] ?? [];
+    const lowInThisHour = Number.isFinite(hour) ? hadAnyLowInHour(hour) : false;
+
+    // Start from current schedule.
+    const current = sens.rate;
+    let target = current;
+
+    const t = tuningByTime.get(sens.time);
+    if (t?.suggested !== undefined && typeof t.suggested === 'number' && Number.isFinite(t.suggested)) {
+      // Prefer explicit suggestion from clean-corrections tuning.
+      target = t.suggested;
     } else {
-      adjustedISF.push({ ...sens });
+      // Fall back to drift multiplier if we have at least medium confidence.
+      const mult = driftMultiplierForTime(sens.time);
+      if (mult !== null && Number.isFinite(mult) && mult > 0) {
+        target = current * mult;
+      }
+    }
+
+    // Safety gating:
+    // - If there are any lows in this hour (or overall hypo risk is elevated), never make ISF more aggressive.
+    if ((lowInThisHour || forbidMoreAggressive) && target < current) {
+      target = current;
+      if (lowInThisHour) params.safetyWarnings.push(`Hypoglycemia detected near ${sens.time} - preventing more aggressive ISF`);
+    }
+
+    // Ultra-safe cap: always limit changes to ±5%.
+    const capped = clampRelative(current, target, ADJUSTMENT_FACTOR_ISF);
+    adjustedISF.push({ time: sens.time, rate: roundToDecimal(capped, 1) });
+
+    // If we have very sparse data for this segment, nudge user via warning (no UI change).
+    if (bgValues.length < 6) {
+      // Do not spam: only warn once.
+      if (!params.safetyWarnings.some((w) => w.includes('Sparse CGM data'))) {
+        params.safetyWarnings.push('Sparse CGM data in some periods; ISF suggestions may be less reliable.');
+      }
     }
   });
-  
+
   return adjustedISF;
 }
 
@@ -449,7 +521,13 @@ export async function analyzeData(
   
   // Fallback to ultra-conservative analysis
   const basalSuggestions = analyzeBasalRates(readings, currentProfile, safetyWarnings, pumpProfile);
-  const isfSuggestions = analyzeISF(readings, treatments, currentProfile, safetyWarnings);
+  const isfSuggestions = analyzeISF({
+    entries: data.entries,
+    treatments: data.treatments,
+    profiles: data.profile,
+    currentProfile,
+    safetyWarnings
+  });
   const { carbRatioSuggestions, carbPatterns } = analyzeCarbAnnouncements(readings, treatments, currentProfile, safetyWarnings);
   
   return {
