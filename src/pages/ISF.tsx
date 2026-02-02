@@ -9,6 +9,7 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { computeIsfDriftModel } from '../services/isfDriftModelService';
 
 const ISF = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
@@ -160,6 +161,22 @@ const ISF = () => {
       isfSuggestions: convertIsfArray(analysisResults.isfSuggestions)
     };
   }, [analysisResults, unit]);
+
+  const isfDrift = React.useMemo(() => {
+    if (!filteredReadings.length || !filteredTreatments.length) return null;
+    return computeIsfDriftModel({ entries: filteredReadings, treatments: filteredTreatments, timeBinMinutes: 120 });
+  }, [filteredReadings, filteredTreatments]);
+
+  const renderIsfMgdlPerU = (mgdlPerU: number | null) => {
+    if (mgdlPerU === null || !Number.isFinite(mgdlPerU)) return '—';
+    if (unit === 'mmol') return `${(mgdlPerU / 18).toFixed(1)} ${getUnitLabel()}/U`;
+    return `${Math.round(mgdlPerU)} mg/dL/U`;
+  };
+
+  const renderMultiplier = (m: number | null) => {
+    if (m === null || !Number.isFinite(m)) return '—';
+    return `${m.toFixed(2)}×`;
+  };
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {
@@ -509,6 +526,105 @@ const ISF = () => {
           suggestedValues={convertedAnalysisResults.isfSuggestions || []}
           unit={`${getUnitLabel()}/U`}
         />
+
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+          <h3 className="text-lg font-medium mb-2 text-gray-900 dark:text-gray-100">Personalized insulin sensitivity modeling</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Learns time-of-day and day-of-week ISF drift from your clean correction boluses. Output is an ISF multiplier schedule with confidence.
+          </p>
+
+          {!isfDrift && (
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Not enough data in the selected period.</p>
+          )}
+
+          {isfDrift && (
+            <>
+              {isfDrift.warnings.length > 0 && (
+                <div className="mt-4 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-md">
+                  <div className="flex items-start">
+                    <AlertTriangle className="h-5 w-5 text-yellow-700 dark:text-yellow-500 mt-0.5 mr-2 flex-shrink-0" />
+                    <div className="text-sm text-yellow-900 dark:text-yellow-100 space-y-1">
+                      {isfDrift.warnings.map((w, idx) => (
+                        <p key={idx}>{w}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Clean corrections used</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{isfDrift.totals.cleanCorrections}</p>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-700/40 rounded-md p-4">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Global median ISF</p>
+                  <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">{renderIsfMgdlPerU(isfDrift.globalMedianIsfMgdlPerU)}</p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Suggested ISF multiplier schedule (time-of-day)</h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-700">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Multiplier</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Confidence</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">N</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Median ISF</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">IQR</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      {isfDrift.timeOfDay.map((row) => (
+                        <tr key={row.label}>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.label}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderMultiplier(row.multiplier)}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.confidence}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.n}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderIsfMgdlPerU(row.medianIsfMgdlPerU)}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderIsfMgdlPerU(row.iqrIsfMgdlPerU)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-2">Day-of-week drift</h4>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                    <thead className="bg-gray-50 dark:bg-gray-700">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Day</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Multiplier</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Confidence</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">N</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Median ISF</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">IQR</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                      {isfDrift.dayOfWeek.map((row) => (
+                        <tr key={row.label}>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.label}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderMultiplier(row.multiplier)}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.confidence}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{row.n}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderIsfMgdlPerU(row.medianIsfMgdlPerU)}</td>
+                          <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{renderIsfMgdlPerU(row.iqrIsfMgdlPerU)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
           <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-gray-100">Understanding Ultra-Safe ISF Settings</h3>
