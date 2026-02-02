@@ -261,6 +261,7 @@ export const computeHypoRiskForecast = async (params: {
   thresholds?: { low?: number; severeLow?: number };
   horizonHours?: number;
   intervalMinutes?: number;
+  asOfMs?: number;
 }): Promise<HypoRiskForecast | null> => {
   const horizonHours = params.horizonHours ?? 6;
   const intervalMinutes = params.intervalMinutes ?? 5;
@@ -271,7 +272,7 @@ export const computeHypoRiskForecast = async (params: {
   const entries = params.entries ?? [];
   if (entries.length < 24) return null;
 
-  const readings: GlucoseReading[] = entries
+  const readingsAll: GlucoseReading[] = entries
     .map((e) => ({
       sgv: e.sgv,
       date: getEntryMs(e),
@@ -281,9 +282,26 @@ export const computeHypoRiskForecast = async (params: {
     .filter((r) => Number.isFinite(r.sgv) && Number.isFinite(r.date))
     .sort((a, b) => a.date - b.date);
 
+  if (readingsAll.length < 24) return null;
+
+  const asOfMs = typeof params.asOfMs === 'number' && Number.isFinite(params.asOfMs) ? params.asOfMs : null;
+  const readings = asOfMs === null ? readingsAll : readingsAll.filter((r) => r.date <= asOfMs);
   if (readings.length < 24) return null;
 
-  const parsed = nightscoutTreatmentParser.parseTreatments(params.treatments ?? [], 12);
+  const nowMs = readings[readings.length - 1]?.date ?? Date.now();
+  const treatments = (params.treatments ?? []).filter((t) => {
+    const ms = getTreatmentMs(t);
+    return Number.isFinite(ms) && ms <= nowMs;
+  });
+
+  const deviceStatus = Array.isArray(params.deviceStatus)
+    ? params.deviceStatus.filter((d) => {
+        const ms = getDeviceStatusMs(d);
+        return Number.isFinite(ms) && ms <= nowMs;
+      })
+    : undefined;
+
+  const parsed = nightscoutTreatmentParser.parseTreatments(treatments, 12);
   const contextPartial = nightscoutTreatmentParser.generatePredictionContext(parsed);
   const context: PredictionContext = {
     recentMeals: contextPartial.recentMeals ?? [],
@@ -312,10 +330,9 @@ export const computeHypoRiskForecast = async (params: {
 
   const diaHours = getDiaHoursFromProfile(params.profile) ?? 4;
 
-  const fromDevice = extractIobCobFromDeviceStatus(params.deviceStatus);
-  const nowMs = readings[readings.length - 1]?.date ?? Date.now();
+  const fromDevice = extractIobCobFromDeviceStatus(deviceStatus);
   const fromTreatments = estimateIobCobFromTreatments({
-    treatments: params.treatments ?? [],
+    treatments,
     nowMs,
     diaHours,
     carbAbsorptionHours: 3

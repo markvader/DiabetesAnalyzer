@@ -4,6 +4,11 @@ import { useNightscout } from '../contexts/NightscoutContext';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { computeHypoRiskForecast, type HypoRiskForecast } from '../services/hypoRiskForecastService';
+import {
+  computeHypoRiskCalibration,
+  type CalibrationMetrics,
+  type HypoRiskCalibrationResult
+} from '../services/hypoRiskCalibrationService';
 import { runSafeAsync } from '../utils/safeAsync';
 
 const percent = (p: number) => `${Math.round(p * 100)}%`;
@@ -41,6 +46,62 @@ const Sparkline: React.FC<{ series: number[]; className: string }> = ({ series, 
     </svg>
   );
 };
+
+const score = (v: number | null) => (v === null ? '—' : v.toFixed(3));
+
+const binLabel = (start: number, end: number) => `${Math.round(start * 100)}–${Math.round(end * 100)}%`;
+
+const CalibrationCurve: React.FC<{ metrics: CalibrationMetrics; className: string }> = ({ metrics, className }) => {
+  const w = 320;
+  const h = 220;
+  const pad = 18;
+
+  const pts = metrics.bins.filter((b) => b.count > 0);
+  const toX = (p: number) => pad + clamp01(p) * (w - pad * 2);
+  const toY = (p: number) => h - pad - clamp01(p) * (h - pad * 2);
+
+  const points = pts
+    .map((b) => {
+      const x = toX(b.meanPred);
+      const y = toY(b.observed);
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-56">
+      <rect x={0} y={0} width={w} height={h} fill="none" className="stroke-gray-100 dark:stroke-gray-700" />
+      <line x1={pad} y1={h - pad} x2={w - pad} y2={pad} className="stroke-gray-200 dark:stroke-gray-700" strokeWidth="2" />
+      {pts.length > 0 ? (
+        <>
+          <polyline
+            fill="none"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={points}
+            className={className}
+          />
+          {pts.map((b) => {
+            const x = toX(b.meanPred);
+            const y = toY(b.observed);
+            return <circle key={`${b.binStart}-${b.binEnd}`} cx={x} cy={y} r={3} className={className} />;
+          })}
+        </>
+      ) : null}
+      <text x={pad} y={pad - 4} className="fill-gray-500 dark:fill-gray-400" fontSize="10">
+        Observed
+      </text>
+      <text x={w - pad - 44} y={h - 6} className="fill-gray-500 dark:fill-gray-400" fontSize="10">
+        Predicted
+      </text>
+    </svg>
+  );
+};
+
+function clamp01(p: number) {
+  return Math.max(0, Math.min(1, p));
+}
 
 const HypoRiskForecastPage = () => {
   const { data, loading, error } = useNightscout();
@@ -88,6 +149,11 @@ const HypoRiskForecastPage = () => {
   const [calcError, setCalcError] = useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
 
+  const [calibration, setCalibration] = useState<HypoRiskCalibrationResult | null>(null);
+  const [calibrationLoading, setCalibrationLoading] = useState(false);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
+  const [calibrationProgress, setCalibrationProgress] = useState<{ done: number; total: number } | null>(null);
+
   // Forecast math runs in mg/dL (Nightscout entries are mg/dL). Convert thresholds if UI is in mmol/L.
   const thresholdsMgdl = useMemo(() => {
     const lowMgdl = unit === 'mgdl' ? ranges.TARGET_MIN : toMgdlValue(ranges.TARGET_MIN);
@@ -122,6 +188,53 @@ const HypoRiskForecastPage = () => {
         setCalcLoading(false);
       }
     });
+  }, [data?.deviceStatus, data?.entries, data?.profile, data?.treatments, thresholdsMgdl, refreshNonce]);
+
+  useEffect(() => {
+    if (!data?.entries?.length) {
+      setCalibration(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    runSafeAsync(async () => {
+      setCalibrationLoading(true);
+      setCalibrationError(null);
+      setCalibrationProgress({ done: 0, total: 0 });
+
+      try {
+        const res = await computeHypoRiskCalibration({
+          entries: data.entries,
+          treatments: data.treatments ?? [],
+          deviceStatus: data.deviceStatus ?? [],
+          profile: data.profile ?? [],
+          thresholds: thresholdsMgdl,
+          backtestDays: 7,
+          horizonHours: 2,
+          strideMinutes: 120,
+          bins: 10,
+          maxSamples: 90,
+          onProgress: (done, total) => {
+            if (cancelled) return;
+            setCalibrationProgress({ done, total });
+          }
+        });
+
+        if (cancelled) return;
+        setCalibration(res);
+      } catch (e) {
+        if (cancelled) return;
+        setCalibration(null);
+        setCalibrationError(e instanceof Error ? e.message : 'Failed to compute calibration');
+      } finally {
+        if (!cancelled) setCalibrationLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [data?.deviceStatus, data?.entries, data?.profile, data?.treatments, thresholdsMgdl, refreshNonce]);
 
   if (loading) return <LoadingSpinner message="Loading Nightscout data..." />;
@@ -341,6 +454,143 @@ const HypoRiskForecastPage = () => {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Reliability / Calibration</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Backtest over the last {calibration?.params.backtestDays ?? 7} days using historical “as-of” forecasts every{' '}
+              {calibration?.params.strideMinutes ?? 120} minutes. Outcome is whether CGM drops below the threshold within 2 hours.
+            </p>
+
+            {calibrationError && (
+              <div className="mt-4 bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border border-red-200 dark:border-red-700">
+                <p className="text-sm text-red-800 dark:text-red-200">{calibrationError}</p>
+              </div>
+            )}
+
+            {calibrationLoading && (
+              <div className="mt-4">
+                <LoadingSpinner message="Computing calibration..." />
+                {calibrationProgress?.total ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    {Math.min(calibrationProgress.done, calibrationProgress.total)} / {calibrationProgress.total} samples
+                  </p>
+                ) : null}
+              </div>
+            )}
+
+            {calibration && !calibrationLoading ? (
+              <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="border border-gray-100 dark:border-gray-700 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Low (below {formatGlucoseValue(thresholdsMgdl.low, 'mgdl', true)})
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Samples: {calibration.low2h.samples}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Brier</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{score(calibration.low2h.brier)}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">ECE</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{score(calibration.low2h.ece)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <CalibrationCurve metrics={calibration.low2h} className="stroke-blue-600 fill-blue-600 dark:stroke-blue-400 dark:fill-blue-400" />
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                      <thead className="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Bin
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Pred
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Obs
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            N
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {calibration.low2h.bins.map((b) => (
+                          <tr key={`${b.binStart}-${b.binEnd}`}>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{binLabel(b.binStart, b.binEnd)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{percent(b.meanPred)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{percent(b.observed)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{b.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="border border-gray-100 dark:border-gray-700 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Severe low (below {formatGlucoseValue(thresholdsMgdl.severeLow, 'mgdl', true)})
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Samples: {calibration.severeLow2h.samples}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Brier</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{score(calibration.severeLow2h.brier)}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">ECE</p>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{score(calibration.severeLow2h.ece)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3">
+                    <CalibrationCurve metrics={calibration.severeLow2h} className="stroke-red-600 fill-red-600 dark:stroke-red-400 dark:fill-red-400" />
+                  </div>
+
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                      <thead className="bg-gray-50 dark:bg-gray-700">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Bin
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Pred
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            Obs
+                          </th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            N
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                        {calibration.severeLow2h.bins.map((b) => (
+                          <tr key={`${b.binStart}-${b.binEnd}`}>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{binLabel(b.binStart, b.binEnd)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{percent(b.meanPred)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{percent(b.observed)}</td>
+                            <td className="px-3 py-2 text-sm text-gray-900 dark:text-gray-100">{b.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {!calibration && !calibrationLoading && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">Not enough recent data to compute calibration.</p>
+            )}
           </div>
         </>
       )}
