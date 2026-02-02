@@ -230,13 +230,23 @@ function analyzeISF(params: {
     tuning = null;
   }
 
-  const tuningByTime = new Map<string, { current?: number; suggested?: number; median?: number; ciWidth?: number; n: number }>();
+  const timeToMinutes = (time: string): number | null => {
+    const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time.trim());
+    if (!match) return null;
+    const h = Number(match[1]);
+    const m = Number(match[2]);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+    return h * 60 + m;
+  };
+
+  const tuningByStartMin = new Map<number, { suggested?: number; median?: number; ciWidth?: number; n: number }>();
   if (tuning?.segments?.isf?.length) {
     for (const seg of tuning.segments.isf) {
+      const startMin = timeToMinutes(seg.time);
+      if (startMin === null) continue;
       const ciWidth =
         typeof seg.ciLow === 'number' && typeof seg.ciHigh === 'number' ? Math.max(0, seg.ciHigh - seg.ciLow) : undefined;
-      tuningByTime.set(seg.time, {
-        current: seg.currentISF,
+      tuningByStartMin.set(startMin, {
         suggested: seg.suggestedISF,
         median: seg.medianISF,
         ciWidth,
@@ -262,8 +272,14 @@ function analyzeISF(params: {
     const minuteOfDay = h * 60 + m;
     const bin = drift.timeOfDay.find((b) => minuteOfDay >= b.startMin && minuteOfDay < b.endMin);
     if (!bin) return null;
-    if (bin.confidence === 'low') return null;
     return typeof bin.multiplier === 'number' && Number.isFinite(bin.multiplier) ? bin.multiplier : null;
+  };
+
+  const driftAlpha = (conf: 'high' | 'medium' | 'low'): number => {
+    // Shrink low-confidence drift toward 1.0 so we still get gentle suggestions.
+    if (conf === 'high') return 1.0;
+    if (conf === 'medium') return 0.6;
+    return 0.3;
   };
 
   const clampRelative = (current: number, suggested: number, maxRelativeChange: number): number => {
@@ -286,15 +302,29 @@ function analyzeISF(params: {
     const current = sens.rate;
     let target = current;
 
-    const t = tuningByTime.get(sens.time);
+    const startMin = timeToMinutes(sens.time);
+    const t = startMin === null ? undefined : tuningByStartMin.get(startMin);
     if (t?.suggested !== undefined && typeof t.suggested === 'number' && Number.isFinite(t.suggested)) {
       // Prefer explicit suggestion from clean-corrections tuning.
       target = t.suggested;
+    } else if (t?.median !== undefined && typeof t.median === 'number' && Number.isFinite(t.median) && t.n >= 3) {
+      // New behavior: if we have a stable-ish median but the tuner declined to suggest,
+      // still allow a tiny, ultra-safe adjustment toward the data.
+      target = t.median;
+
+      // If CI is very wide, dampen toward current.
+      if (typeof t.ciWidth === 'number' && Number.isFinite(t.ciWidth) && t.ciWidth > 140) {
+        target = current + 0.5 * (target - current);
+      }
     } else {
-      // Fall back to drift multiplier if we have at least medium confidence.
+      // Fall back to drift multiplier with confidence-weighted blending.
       const mult = driftMultiplierForTime(sens.time);
-      if (mult !== null && Number.isFinite(mult) && mult > 0) {
-        target = current * mult;
+      if (mult !== null && Number.isFinite(mult) && mult > 0 && drift?.timeOfDay?.length) {
+        const minuteOfDay = startMin ?? null;
+        const bin = minuteOfDay === null ? null : drift.timeOfDay.find((b) => minuteOfDay >= b.startMin && minuteOfDay < b.endMin);
+        const alpha = bin ? driftAlpha(bin.confidence) : 0.3;
+        const eff = 1 + alpha * (mult - 1);
+        target = current * eff;
       }
     }
 
