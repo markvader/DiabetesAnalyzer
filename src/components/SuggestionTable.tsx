@@ -2,6 +2,7 @@ import React from 'react';
 import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { calculatePercentChange } from '../utils/mathUtils';
 import { AlertTriangle } from 'lucide-react';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 interface TimeSegment {
   time: string;
@@ -22,10 +23,17 @@ const SuggestionTable: React.FC<SuggestionTableProps> = ({
   unit
 }) => {
   const { formatTimeString } = useTimeFormat();
+  const { isPremium } = useDesignMode();
   // Ensure we have values to display
   if (!currentValues?.length || !suggestedValues?.length) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6 transition-colors duration-200">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10 p-4 mb-6'
+            : 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6 transition-colors duration-200'
+        }
+      >
         <h3 className="text-lg font-medium mb-2 text-gray-900 dark:text-gray-100">{title}</h3>
         <p className="text-gray-500 dark:text-gray-400">No data available</p>
       </div>
@@ -59,7 +67,13 @@ const SuggestionTable: React.FC<SuggestionTableProps> = ({
   });
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6 overflow-x-auto transition-colors duration-200">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10 p-4 mb-6 overflow-x-auto'
+          : 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6 overflow-x-auto transition-colors duration-200'
+      }
+    >
       <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-gray-100">{title}</h3>
       
       {/* Safety Warning for Significant Changes */}
@@ -79,7 +93,7 @@ const SuggestionTable: React.FC<SuggestionTableProps> = ({
       )}
       
       <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-        <thead className="bg-gray-50 dark:bg-gray-700">
+        <thead className={isPremium ? 'bg-white/40 dark:bg-white/5' : 'bg-gray-50 dark:bg-gray-700'}>
           <tr>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
               Time
@@ -98,7 +112,7 @@ const SuggestionTable: React.FC<SuggestionTableProps> = ({
             </th>
           </tr>
         </thead>
-        <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+        <tbody className={isPremium ? 'bg-white/20 dark:bg-white/0 divide-y divide-gray-200/70 dark:divide-white/10' : 'bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700'}>
           {suggestedValues.map((segment, index) => {
             const currentValue = currentValues.find(c => c.time === segment.time)?.rate || 0;
             const percentChange = calculatePercentChange(currentValue, segment.rate);
@@ -107,7 +121,18 @@ const SuggestionTable: React.FC<SuggestionTableProps> = ({
             const isSafeChange = Math.abs(percentChange) <= 5;
             
             return (
-              <tr key={segment.time} className={index % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-700'}>
+              <tr
+                key={segment.time}
+                className={
+                  isPremium
+                    ? index % 2 === 0
+                      ? 'bg-white/10 dark:bg-white/0'
+                      : 'bg-white/30 dark:bg-white/5'
+                    : index % 2 === 0
+                      ? 'bg-white dark:bg-gray-800'
+                      : 'bg-gray-50 dark:bg-gray-700'
+                }
+              >
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                   {formatTime(segment.time)}
                 </td>

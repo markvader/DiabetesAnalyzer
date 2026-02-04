@@ -1,6 +1,7 @@
 import React from 'react';
 import { Utensils, Syringe, Zap, Activity, Droplets, Clock } from 'lucide-react';
 import { format } from 'date-fns';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 interface Treatment {
   id: string;
@@ -21,6 +22,7 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
   treatments, 
   maxItems = 8 
 }) => {
+  const { isPremium } = useDesignMode();
   // Sort treatments by timestamp (most recent first) and limit
   const sortedTreatments = treatments
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
@@ -98,7 +100,13 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
 
   if (sortedTreatments.length === 0) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10 p-4'
+            : 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-4'
+        }
+      >
         <div className="flex items-center space-x-2 mb-4">
           <Clock className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
@@ -114,7 +122,13 @@ const TreatmentTimeline: React.FC<TreatmentTimelineProps> = ({
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10 p-4'
+          : 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-4'
+      }
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <Clock className="w-5 h-5 text-gray-600 dark:text-gray-400" />

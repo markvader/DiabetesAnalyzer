@@ -310,7 +310,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
   if (computing) {
     return (
-      <div className="flex items-center justify-center p-8">
+      <div
+        className={
+          isPremium
+            ? 'flex items-center justify-center p-8 rounded-2xl bg-white/60 dark:bg-dark-800/60 backdrop-blur-md border border-white/20 dark:border-white/10 shadow-lg'
+            : 'flex items-center justify-center p-8'
+        }
+      >
         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600 dark:border-blue-400 mr-3"></div>
         <p className="text-gray-700 dark:text-gray-300">Computing advanced statistics...</p>
       </div>
@@ -319,7 +325,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
   if (!stats) {
     return (
-      <div className="text-center p-8">
+      <div
+        className={
+          isPremium
+            ? 'text-center p-8 rounded-2xl bg-white/60 dark:bg-dark-800/60 backdrop-blur-md border border-white/20 dark:border-white/10 shadow-lg'
+            : 'text-center p-8'
+        }
+      >
         <p className="text-gray-500 dark:text-gray-400">No data available for analysis</p>
       </div>
     );
@@ -402,7 +414,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-4 rounded-2xl shadow-lg border-2 border-green-200 dark:border-green-700'
+              ? 'bg-gradient-to-br from-white/90 to-green-50/60 dark:from-dark-800/80 dark:to-green-900/30 p-4 rounded-2xl shadow-lg shadow-glow-success border-2 border-green-200/70 dark:border-green-700/60'
               : 'bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-700'
           }
         >
@@ -420,7 +432,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 p-6 rounded-2xl shadow-lg border-2 border-blue-200 dark:border-blue-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              ? 'bg-gradient-to-br from-white/90 to-blue-50/60 dark:from-dark-800/80 dark:to-blue-900/35 p-6 rounded-2xl shadow-lg shadow-glow border-2 border-blue-200/70 dark:border-blue-700/60 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
               : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
           }
         >
@@ -437,7 +449,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-purple-900/20 p-6 rounded-2xl shadow-lg border-2 border-purple-200 dark:border-purple-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              ? 'bg-gradient-to-br from-white/90 to-purple-50/60 dark:from-dark-800/80 dark:to-purple-900/35 p-6 rounded-2xl shadow-lg border-2 border-purple-200/70 dark:border-purple-700/60 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
               : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
           }
         >
@@ -454,7 +466,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-6 rounded-2xl shadow-lg border-2 border-green-200 dark:border-green-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              ? 'bg-gradient-to-br from-white/90 to-green-50/60 dark:from-dark-800/80 dark:to-green-900/35 p-6 rounded-2xl shadow-lg shadow-glow-success border-2 border-green-200/70 dark:border-green-700/60 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
               : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
           }
         >
@@ -475,7 +487,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-amber-50 dark:from-gray-800 dark:to-orange-900/20 p-6 rounded-2xl shadow-lg border-2 border-amber-200 dark:border-orange-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              ? 'bg-gradient-to-br from-white/90 to-amber-50/60 dark:from-dark-800/80 dark:to-orange-900/35 p-6 rounded-2xl shadow-lg shadow-glow-warning border-2 border-amber-200/70 dark:border-orange-700/60 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
               : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
           }
         >
@@ -492,7 +504,7 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         <div
           className={
             isPremium
-              ? 'bg-gradient-to-br from-white to-indigo-50 dark:from-gray-800 dark:to-indigo-900/20 p-6 rounded-2xl shadow-lg border-2 border-indigo-200 dark:border-indigo-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              ? 'bg-gradient-to-br from-white/90 to-indigo-50/60 dark:from-dark-800/80 dark:to-indigo-900/35 p-6 rounded-2xl shadow-lg border-2 border-indigo-200/70 dark:border-indigo-700/60 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
               : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
           }
         >
@@ -514,11 +526,17 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       <div
         className={
           isPremium
-            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
             : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
         }
       >
-        <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+        <h3
+          className={
+            isPremium
+              ? 'text-lg font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent mb-4'
+              : 'text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'
+          }
+        >
           24-Hour Glucose Pattern Analysis
         </h3>
         <div className="h-64 mb-4">
@@ -578,11 +596,17 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       <div
         className={
           isPremium
-            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
             : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
         }
       >
-        <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+        <h3
+          className={
+            isPremium
+              ? 'text-lg font-semibold bg-gradient-to-r from-purple-600 to-pink-600 dark:from-purple-400 dark:to-pink-400 bg-clip-text text-transparent mb-4'
+              : 'text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'
+          }
+        >
           Advanced Glucose Distribution
         </h3>
         <div className="space-y-4">
@@ -657,11 +681,19 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       <div
         className={
           isPremium
-            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
             : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
         }
       >
-        <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Advanced Risk Analysis</h3>
+        <h3
+          className={
+            isPremium
+              ? 'text-lg font-semibold bg-gradient-to-r from-danger-600 to-warning-600 dark:from-danger-400 dark:to-warning-400 bg-clip-text text-transparent mb-4'
+              : 'text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'
+          }
+        >
+          Advanced Risk Analysis
+        </h3>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div
@@ -731,13 +763,21 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       <div
         className={
           isPremium
-            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
             : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
         }
       >
         <div className="flex items-center mb-4">
           <AlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400 mr-2" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Insights & Recommendations</h3>
+          <h3
+            className={
+              isPremium
+                ? 'text-lg font-semibold bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent'
+                : 'text-lg font-medium text-gray-900 dark:text-gray-100'
+            }
+          >
+            AI-Powered Insights & Recommendations
+          </h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {stats.cv > 36 && (

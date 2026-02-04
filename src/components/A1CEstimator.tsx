@@ -2,6 +2,7 @@ import React from 'react';
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 interface A1CEstimatorProps {
   averageGlucose: number;
@@ -9,6 +10,7 @@ interface A1CEstimatorProps {
 
 const A1CEstimator: React.FC<A1CEstimatorProps> = ({ averageGlucose }) => {
   const { formatGlucoseValue } = useGlucoseFormatting();
+  const { isPremium } = useDesignMode();
   
   // Convert averageGlucose (always in mg/dL from Nightscout) to mmol/L for A1C calculation
   const mmolAvg = toMmol(averageGlucose);
@@ -24,7 +26,13 @@ const A1CEstimator: React.FC<A1CEstimatorProps> = ({ averageGlucose }) => {
   const status = getA1CStatus(estimatedA1C);
   
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200'
+      }
+    >
       <h3 className="text-lg font-medium mb-4 text-gray-900 dark:text-gray-100">Estimated A1C</h3>
       <div className="flex items-baseline">
         <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">{estimatedA1C}%</span>

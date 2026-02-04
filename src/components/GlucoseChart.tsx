@@ -604,7 +604,13 @@ const GlucoseChart: React.FC<GlucoseChartProps> = ({
 
   // Classic Tailwind Design
   return (
-    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200'
+      }
+    >
       <div className="h-64 sm:h-80">
         {readings && readings.length > 0 ? (
           <Chart 

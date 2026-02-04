@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { 
   nightscoutTreatmentParser, 
   type ParsedNightscoutData 
@@ -27,6 +28,7 @@ const NightscoutDataDisplay: React.FC<NightscoutDataDisplayProps> = ({
   hoursBack = 12 
 }) => {
   const { data, loading, error, lastFetchTime } = useNightscout();
+  const { isPremium } = useDesignMode();
 
   // Parse treatments data whenever it changes
   const parsedData = useMemo(() => {
@@ -85,7 +87,13 @@ const NightscoutDataDisplay: React.FC<NightscoutDataDisplayProps> = ({
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <div className="flex items-center justify-center">
           <RefreshCw className="w-5 h-5 mr-2 animate-spin text-blue-500" />
           <span className="text-gray-600 dark:text-gray-400">Loading Nightscout data...</span>
@@ -125,7 +133,13 @@ const NightscoutDataDisplay: React.FC<NightscoutDataDisplayProps> = ({
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+      }
+    >
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
           <Database className="w-5 h-5 mr-2" />

@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTheme } from '../contexts/ThemeContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 ChartJS.register(
   CategoryScale,
@@ -41,6 +42,7 @@ interface GlucoseTrendChartProps {
 
 const GlucoseTrendChart: React.FC<GlucoseTrendChartProps> = ({ readings, hours }) => {
   const { theme } = useTheme();
+  const { isPremium } = useDesignMode();
   const { getCurrentGlucoseRanges, convertToCurrentUnit, unit } = useGlucoseFormatting();
   const isDark = theme === 'dark';
   const colors = isDark ? GLUCOSE_RANGES.COLORS.DARK : GLUCOSE_RANGES.COLORS;
@@ -236,7 +238,13 @@ const GlucoseTrendChart: React.FC<GlucoseTrendChartProps> = ({ readings, hours }
   }, [isDark, getCurrentGlucoseRanges, unit]);
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md transition-colors duration-200'
+      }
+    >
       <div className="h-64">
         <Line data={processedData} options={options} />
       </div>
