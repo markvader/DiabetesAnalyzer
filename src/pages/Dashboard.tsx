@@ -3331,11 +3331,23 @@ const Dashboard = () => {
           </div>
 
           <div className="w-full">
-            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+            <div
+              className={
+                isPremium
+                  ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10 mb-4'
+                  : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md mb-4'
+              }
+            >
+              <h3
+                className={
+                  isPremium
+                    ? 'text-lg font-semibold bg-gradient-to-r from-purple-600 to-pink-600 dark:from-purple-400 dark:to-pink-400 bg-clip-text text-transparent mb-2'
+                    : 'text-lg font-medium text-gray-900 dark:text-gray-100 mb-2'
+                }
+              >
                 Advanced Statistics - {ultraSafeRender(getDisplayLabel())}
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className={isPremium ? 'text-sm text-gray-700 dark:text-gray-300' : 'text-sm text-gray-600 dark:text-gray-400'}>
                 Analysis based on {ultraSafeRender(typeof filteredStats.totalReadings === 'number' ? filteredStats.totalReadings.toLocaleString() : 'N/A')} readings from the selected time period
               </p>
             </div>

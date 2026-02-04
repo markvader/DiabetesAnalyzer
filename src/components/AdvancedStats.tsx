@@ -15,6 +15,7 @@ import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useTheme } from '../contexts/ThemeContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { TrendingUp, Activity, AlertTriangle, Target, Clock, Zap } from 'lucide-react';
 
 ChartJS.register(
@@ -272,6 +273,7 @@ const computeStatsAsync = (
 
 const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
   const { theme } = useTheme();
+  const { isPremium } = useDesignMode();
   const { getCurrentGlucoseRanges, formatGlucoseValue, getUnitLabel, convertToCurrentUnit } = useGlucoseFormatting();
   const ranges = getCurrentGlucoseRanges();
   const isDark = theme === 'dark';
@@ -397,7 +399,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
     <div className="space-y-6">
       {/* Performance optimization notice */}
       {stats.sampleInfo.sampled && (
-        <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-700">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-4 rounded-2xl shadow-lg border-2 border-green-200 dark:border-green-700'
+              : 'bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-200 dark:border-green-700'
+          }
+        >
           <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">⚡ Ultra-Fast Processing Active</h4>
           <p className="text-sm text-green-800 dark:text-green-200">
             Optimized for maximum responsiveness: Using {stats.sampleInfo.processedCount.toLocaleString()} 
@@ -409,7 +417,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
 
       {/* Enhanced Primary Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 p-6 rounded-2xl shadow-lg border-2 border-blue-200 dark:border-blue-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center mb-2">
             <Activity className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
             <h4 className="font-medium text-gray-900 dark:text-gray-100">Mean Glucose</h4>
@@ -420,7 +434,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           <p className="text-sm text-gray-500 dark:text-gray-400">±{formatGlucoseValue(stats.stdDev)}</p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-purple-900/20 p-6 rounded-2xl shadow-lg border-2 border-purple-200 dark:border-purple-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center mb-2">
             <TrendingUp className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
             <h4 className="font-medium text-gray-900 dark:text-gray-100">Variability (CV)</h4>
@@ -431,7 +451,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           <p className="text-sm text-gray-500 dark:text-gray-400">Target: &lt;36%</p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-6 rounded-2xl shadow-lg border-2 border-green-200 dark:border-green-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center mb-2">
             <Target className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
             <h4 className="font-medium text-gray-900 dark:text-gray-100">Quality Score</h4>
@@ -446,7 +472,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           </p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-amber-50 dark:from-gray-800 dark:to-orange-900/20 p-6 rounded-2xl shadow-lg border-2 border-amber-200 dark:border-orange-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center mb-2">
             <Zap className="h-5 w-5 text-orange-600 dark:text-orange-400 mr-2" />
             <h4 className="font-medium text-gray-900 dark:text-gray-100">Momentum</h4>
@@ -457,7 +489,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           <p className="text-sm text-gray-500 dark:text-gray-400">{getUnitLabel()} acceleration</p>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-gradient-to-br from-white to-indigo-50 dark:from-gray-800 dark:to-indigo-900/20 p-6 rounded-2xl shadow-lg border-2 border-indigo-200 dark:border-indigo-700 hover:shadow-2xl hover:scale-[1.01] transition-all duration-300'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center mb-2">
             <Clock className="h-5 w-5 text-indigo-600 dark:text-indigo-400 mr-2" />
             <h4 className="font-medium text-gray-900 dark:text-gray-100">Est. A1C</h4>
@@ -473,7 +511,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       </div>
 
       {/* Hourly Pattern Analysis */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
           24-Hour Glucose Pattern Analysis
         </h3>
@@ -483,7 +527,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
         
         {/* Pattern Insights */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+          <div
+            className={
+              isPremium
+                ? 'bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 p-4 rounded-2xl border border-blue-200/60 dark:border-blue-700/60 shadow-sm'
+                : 'bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg'
+            }
+          >
             <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">Peak Hours</h4>
             <p className="text-blue-800 dark:text-blue-200">
               Highest glucose typically at {
@@ -492,7 +542,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
             </p>
           </div>
           
-          <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+          <div
+            className={
+              isPremium
+                ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-4 rounded-2xl border border-green-200/60 dark:border-green-700/60 shadow-sm'
+                : 'bg-green-50 dark:bg-green-900/20 p-4 rounded-lg'
+            }
+          >
             <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">Most Stable</h4>
             <p className="text-green-800 dark:text-green-200">
               Lowest variability at {
@@ -501,7 +557,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
             </p>
           </div>
           
-          <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+          <div
+            className={
+              isPremium
+                ? 'bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-purple-900/20 p-4 rounded-2xl border border-purple-200/60 dark:border-purple-700/60 shadow-sm'
+                : 'bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg'
+            }
+          >
             <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Dawn Effect</h4>
             <p className="text-purple-800 dark:text-purple-200">
               {stats.dawnPhenomenon > 1 ? `+${formatGlucoseValue(stats.dawnPhenomenon)} rise` : 
@@ -513,7 +575,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       </div>
 
       {/* Enhanced Glucose Distribution */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
           Advanced Glucose Distribution
         </h3>
@@ -586,11 +654,23 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       </div>
 
       {/* Enhanced Risk Analysis */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Advanced Risk Analysis</h3>
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-red-50 dark:from-gray-800 dark:to-red-900/20 p-4 rounded-2xl border border-red-200/60 dark:border-red-700/60 shadow-sm'
+                  : 'bg-red-50 dark:bg-red-900/20 p-4 rounded-lg'
+              }
+            >
               <h4 className="font-medium text-red-900 dark:text-red-100 mb-2">Low Glucose Risk (LBGI)</h4>
               <div className="flex items-center justify-between">
                 <span className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.lbgi}</span>
@@ -604,7 +684,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
               </div>
             </div>
 
-            <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-amber-50 dark:from-gray-800 dark:to-orange-900/20 p-4 rounded-2xl border border-amber-200/60 dark:border-orange-700/60 shadow-sm'
+                  : 'bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg'
+              }
+            >
               <h4 className="font-medium text-orange-900 dark:text-orange-100 mb-2">High Glucose Risk (HBGI)</h4>
               <div className="flex items-center justify-between">
                 <span className="text-2xl font-bold text-orange-600 dark:text-orange-400">{stats.hbgi}</span>
@@ -618,7 +704,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
               </div>
             </div>
 
-            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-purple-900/20 p-4 rounded-2xl border border-purple-200/60 dark:border-purple-700/60 shadow-sm'
+                  : 'bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg'
+              }
+            >
               <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">Glycemic Risk Assessment</h4>
               <div className="flex items-center justify-between">
                 <span className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.gra}</span>
@@ -636,14 +728,26 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
       </div>
 
       {/* Enhanced Recommendations */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/70 dark:bg-gray-800/70 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <div className="flex items-center mb-4">
           <AlertTriangle className="h-6 w-6 text-amber-600 dark:text-amber-400 mr-2" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Insights & Recommendations</h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {stats.cv > 36 && (
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border-l-4 border-yellow-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-yellow-50 dark:from-gray-800 dark:to-yellow-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-yellow-400'
+                  : 'bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border-l-4 border-yellow-400'
+              }
+            >
               <h4 className="font-medium text-yellow-900 dark:text-yellow-100 mb-2">🎯 High Variability Detected</h4>
               <p className="text-yellow-800 dark:text-yellow-200 text-sm">
                 Your glucose variability (CV) is {stats.cv.toFixed(1)}%, which is above the target of 36%. 
@@ -653,7 +757,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
           
           {stats.timeInRanges.low + stats.timeInRanges.veryLow > 4 && (
-            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border-l-4 border-red-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-red-50 dark:from-gray-800 dark:to-red-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-red-400'
+                  : 'bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border-l-4 border-red-400'
+              }
+            >
               <h4 className="font-medium text-red-900 dark:text-red-100 mb-2">⚠️ Frequent Low Glucose</h4>
               <p className="text-red-800 dark:text-red-200 text-sm">
                 {(stats.timeInRanges.low + stats.timeInRanges.veryLow).toFixed(1)}% of readings are below range. 
@@ -663,7 +773,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
           
           {stats.qualityScore < 60 && (
-            <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-l-4 border-blue-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-blue-50 dark:from-gray-800 dark:to-blue-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-blue-400'
+                  : 'bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg border-l-4 border-blue-400'
+              }
+            >
               <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2">📈 Quality Improvement</h4>
               <p className="text-blue-800 dark:text-blue-200 text-sm">
                 Your glucose management quality score is {stats.qualityScore}/100. 
@@ -673,7 +789,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
           
           {Math.abs(stats.dawnPhenomenon) > 2 && (
-            <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg border-l-4 border-purple-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-purple-50 dark:from-gray-800 dark:to-purple-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-purple-400'
+                  : 'bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg border-l-4 border-purple-400'
+              }
+            >
               <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2">🌅 Dawn Phenomenon</h4>
               <p className="text-purple-800 dark:text-purple-200 text-sm">
                 {stats.dawnPhenomenon > 1 ? 'Significant dawn phenomenon detected' : 'Dawn drop detected'} 
@@ -684,7 +806,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
 
           {stats.momentum > 1 && (
-            <div className="bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border-l-4 border-orange-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-amber-50 dark:from-gray-800 dark:to-orange-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-orange-400'
+                  : 'bg-orange-50 dark:bg-orange-900/20 p-4 rounded-lg border-l-4 border-orange-400'
+              }
+            >
               <h4 className="font-medium text-orange-900 dark:text-orange-100 mb-2">⚡ Rising Trend Alert</h4>
               <p className="text-orange-800 dark:text-orange-200 text-sm">
                 Glucose is accelerating upward (+{formatGlucoseValue(stats.momentum)}). 
@@ -694,7 +822,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
 
           {stats.momentum < -1 && (
-            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border-l-4 border-green-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-green-400'
+                  : 'bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border-l-4 border-green-400'
+              }
+            >
               <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">📉 Falling Trend Alert</h4>
               <p className="text-green-800 dark:text-green-200 text-sm">
                 Glucose is accelerating downward ({formatGlucoseValue(stats.momentum)}). 
@@ -704,7 +838,13 @@ const AdvancedStats: React.FC<AdvancedStatsProps> = ({ readings }) => {
           )}
 
           {stats.timeInRanges.inRange > 70 && stats.cv < 36 && (
-            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border-l-4 border-green-400">
+            <div
+              className={
+                isPremium
+                  ? 'bg-gradient-to-br from-white to-green-50 dark:from-gray-800 dark:to-green-900/20 p-4 rounded-2xl shadow-sm border-l-4 border-green-400'
+                  : 'bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border-l-4 border-green-400'
+              }
+            >
               <h4 className="font-medium text-green-900 dark:text-green-100 mb-2">🎉 Excellent Control</h4>
               <p className="text-green-800 dark:text-green-200 text-sm">
                 Great job! You have {stats.timeInRanges.inRange.toFixed(1)}% time in range with good variability control. 
