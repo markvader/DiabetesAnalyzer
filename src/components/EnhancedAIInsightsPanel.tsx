@@ -3,6 +3,7 @@ import { Brain, Lightbulb, CheckCircle, AlertTriangle, Loader, Cpu, Activity } f
 import { aiService } from '../services/aiService';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import type { NightscoutEntry } from '../types/nightscout';
 
 interface EnhancedAIInsightsPanelProps {
@@ -22,6 +23,7 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
 }) => {
   const { unit, formatGlucoseValue, getUnitLabel } = useGlucoseFormatting();
   const { isReady: tensorFlowReady, isEnabled: tensorFlowEnabled, error: tensorFlowError } = useTensorFlow();
+  const { isPremium } = useDesignMode();
   
   // Defensive check for timeInRange prop (memoized so effects don't fire every render)
   const safeTimeInRange = useMemo(() => {
@@ -151,7 +153,13 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
 
   if (loading) {
     return (
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200'
+        }
+      >
         <div className="flex items-center mb-4">
           <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Insights</h3>
@@ -178,7 +186,13 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
 
   if (error) {
     return (
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200'
+        }
+      >
         <div className="flex items-center mb-4">
           <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Insights</h3>
@@ -208,13 +222,25 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200'
+      }
+    >
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center">
           <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Insights</h3>
           {analysisProvider && (
-            <div className="ml-3 flex items-center bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
+            <div
+              className={
+                isPremium
+                  ? 'ml-3 flex items-center bg-white/40 dark:bg-white/5 backdrop-blur px-2 py-1 rounded-full border border-white/20 dark:border-white/10'
+                  : 'ml-3 flex items-center bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full'
+              }
+            >
               {getProviderIcon()}
               <span className="text-xs text-gray-700 dark:text-gray-300 ml-1">
                 {analysisProvider}
@@ -235,7 +261,13 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {insights.length > 0 && (
-          <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+          <div
+            className={
+              isPremium
+                ? 'bg-gradient-to-br from-white/70 to-purple-50/40 dark:from-purple-900/25 dark:to-dark-900/10 p-4 rounded-2xl border border-white/20 dark:border-white/10 shadow-sm'
+                : 'bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg'
+            }
+          >
             <div className="flex items-center mb-3">
               <Lightbulb className="h-5 w-5 text-purple-600 dark:text-purple-400 mr-2" />
               <h4 className="font-medium text-purple-900 dark:text-purple-100">Pattern Insights</h4>
@@ -251,7 +283,13 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
         )}
         
         {recommendations.length > 0 && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+          <div
+            className={
+              isPremium
+                ? 'bg-gradient-to-br from-white/70 to-blue-50/40 dark:from-blue-900/25 dark:to-dark-900/10 p-4 rounded-2xl border border-white/20 dark:border-white/10 shadow-sm'
+                : 'bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg'
+            }
+          >
             <div className="flex items-center mb-3">
               <CheckCircle className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
               <h4 className="font-medium text-blue-900 dark:text-blue-100">Recommendations</h4>

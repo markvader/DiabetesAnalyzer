@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { Cpu, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 const TensorFlowStatus: React.FC = () => {
   const { 
@@ -11,6 +12,7 @@ const TensorFlowStatus: React.FC = () => {
     modelInfo,
     reinitialize 
   } = useTensorFlow();
+  const { isPremium } = useDesignMode();
 
   const getStatusIcon = () => {
     if (isInitializing) return <Clock className="h-4 w-4 text-yellow-500 animate-spin" />;
@@ -37,7 +39,13 @@ const TensorFlowStatus: React.FC = () => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border border-gray-200 dark:border-gray-700'
+      }
+    >
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Cpu className="h-5 w-5 text-blue-600 dark:text-blue-400" />
@@ -95,7 +103,7 @@ const TensorFlowStatus: React.FC = () => {
         </button>
       )}
 
-      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+      <div className={isPremium ? 'mt-3 pt-3 border-t border-white/20 dark:border-white/10' : 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-700'}>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           TensorFlow provides fast, private AI analysis directly in your browser.
         </p>
