@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Plus, Utensils, Syringe, Activity, Brain } from 'lucide-react';
 import { usePredictionContext } from '../contexts/PredictionContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 
 interface PredictionContextInputProps {
   onContextUpdate?: () => void;
 }
 
 const PredictionContextInput: React.FC<PredictionContextInputProps> = ({ onContextUpdate }) => {
+  const { isPremium } = useDesignMode();
   const {
     addMeal,
     addInsulin,
@@ -99,7 +101,13 @@ const PredictionContextInput: React.FC<PredictionContextInputProps> = ({ onConte
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+          : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+      }
+    >
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center">
           <Brain className="w-5 h-5 mr-2" />
@@ -116,17 +124,17 @@ const PredictionContextInput: React.FC<PredictionContextInputProps> = ({ onConte
 
       {/* Recent Events Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+        <div className={isPremium ? 'text-center p-3 bg-white/40 dark:bg-white/5 rounded-2xl border border-white/20 dark:border-white/10' : 'text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg'}>
           <Utensils className="w-6 h-6 mx-auto mb-1 text-orange-500" />
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Recent Meals</div>
           <div className="text-xs text-gray-600 dark:text-gray-400">{recentMeals.length} in last 6h</div>
         </div>
-        <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+        <div className={isPremium ? 'text-center p-3 bg-white/40 dark:bg-white/5 rounded-2xl border border-white/20 dark:border-white/10' : 'text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg'}>
           <Syringe className="w-6 h-6 mx-auto mb-1 text-blue-500" />
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Insulin Doses</div>
           <div className="text-xs text-gray-600 dark:text-gray-400">{recentInsulin.length} in last 6h</div>
         </div>
-        <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+        <div className={isPremium ? 'text-center p-3 bg-white/40 dark:bg-white/5 rounded-2xl border border-white/20 dark:border-white/10' : 'text-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg'}>
           <Activity className="w-6 h-6 mx-auto mb-1 text-green-500" />
           <div className="text-sm font-medium text-gray-900 dark:text-gray-100">Exercise</div>
           <div className="text-xs text-gray-600 dark:text-gray-400">{recentExercise.length} in last 12h</div>
@@ -173,7 +181,7 @@ const PredictionContextInput: React.FC<PredictionContextInputProps> = ({ onConte
 
       {/* Input Forms */}
       {showInputs && (
-        <div className="space-y-4 border-t border-gray-200 dark:border-gray-600 pt-4">
+        <div className={isPremium ? 'space-y-4 border-t border-white/20 dark:border-white/10 pt-4' : 'space-y-4 border-t border-gray-200 dark:border-gray-600 pt-4'}>
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap gap-2">
             <button

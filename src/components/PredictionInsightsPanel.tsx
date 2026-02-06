@@ -1,6 +1,7 @@
 import React from 'react';
 import { TrendingUp, TrendingDown, AlertTriangle, CheckCircle, Brain, Target, Clock, Activity } from 'lucide-react';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import type { NightscoutEntry } from '../types/nightscout';
 
 interface PredictionInsightsPanelProps {
@@ -23,6 +24,7 @@ const PredictionInsightsPanel: React.FC<PredictionInsightsPanelProps> = ({
   recentTrends
 }) => {
   const { formatGlucoseValue, getCurrentGlucoseRanges } = useGlucoseFormatting();
+  const { isPremium } = useDesignMode();
   const ranges = getCurrentGlucoseRanges();
 
   // Calculate current glucose and trend
@@ -76,7 +78,13 @@ const PredictionInsightsPanel: React.FC<PredictionInsightsPanelProps> = ({
   const isInRange = currentGlucose >= ranges.TARGET_MIN && currentGlucose <= ranges.TARGET_MAX;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 space-y-4">
+    <div
+      className={
+        isPremium
+          ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10 p-4 space-y-4'
+          : 'bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 space-y-4'
+      }
+    >
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
           Prediction Insights

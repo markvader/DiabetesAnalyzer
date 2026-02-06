@@ -15,6 +15,7 @@ import {
   Info
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useDesignMode } from '../contexts/DesignModeContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { 
@@ -62,6 +63,7 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
   context 
 }) => {
   const { theme } = useTheme();
+  const { isPremium } = useDesignMode();
   const { unit, formatGlucoseValue, convertToCurrentUnit } = useGlucoseFormatting();
   const isDark = theme === 'dark';
   const colors = isDark ? GLUCOSE_RANGES.COLORS.DARK : GLUCOSE_RANGES.COLORS;
@@ -100,7 +102,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96 bg-white dark:bg-gray-800 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'flex items-center justify-center h-96 bg-white/60 dark:bg-dark-800/60 backdrop-blur-md rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'flex items-center justify-center h-96 bg-white dark:bg-gray-800 rounded-lg shadow-md'
+        }
+      >
         <LoadingSpinner />
       </div>
     );
@@ -318,7 +326,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
   return (
     <div className="space-y-6">
       {/* Prediction Chart */}
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+      <div
+        className={
+          isPremium
+            ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+            : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+        }
+      >
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-6">
           <div className="flex items-center gap-3 mb-4 lg:mb-0">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
@@ -340,7 +354,11 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
                 const next = e.target.value;
                 if (isScenario(next)) setSelectedScenario(next);
               }}
-              className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+              className={
+                isPremium
+                  ? 'px-3 py-1 text-sm border border-white/20 dark:border-white/10 rounded-md bg-white/50 dark:bg-white/5 text-gray-900 dark:text-gray-100 backdrop-blur'
+                  : 'px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              }
             >
               <option value="predicted">Predicted</option>
               <option value="optimistic">Optimistic</option>
@@ -351,7 +369,11 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
             <select
               value={predictionHours}
               onChange={(e) => setPredictionHours(Number(e.target.value))}
-              className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+              className={
+                isPremium
+                  ? 'px-3 py-1 text-sm border border-white/20 dark:border-white/10 rounded-md bg-white/50 dark:bg-white/5 text-gray-900 dark:text-gray-100 backdrop-blur'
+                  : 'px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+              }
             >
               <option value={1}>1 Hour</option>
               <option value={2}>2 Hours</option>
@@ -362,7 +384,11 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
             {/* Advanced Metrics Toggle */}
             <button
               onClick={() => setShowAdvancedMetrics(!showAdvancedMetrics)}
-              className="flex items-center px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600"
+              className={
+                isPremium
+                  ? 'flex items-center px-3 py-1 text-sm border border-white/20 dark:border-white/10 rounded-md bg-white/50 dark:bg-white/5 text-gray-900 dark:text-gray-100 hover:bg-white/70 dark:hover:bg-white/10 backdrop-blur'
+                  : 'flex items-center px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600'
+              }
             >
               <BarChart3 className="w-4 h-4 mr-1" />
               Metrics
@@ -377,7 +403,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
 
       {/* Prediction Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+              : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Confidence</p>
@@ -389,7 +421,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
           </div>
         </div>
         
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+              : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Time in Range</p>
@@ -401,7 +439,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
           </div>
         </div>
         
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+              : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Short Term</p>
@@ -413,7 +457,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
           </div>
         </div>
         
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
+        <div
+          className={
+            isPremium
+              ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-4 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+              : 'bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md'
+          }
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Risk Alerts</p>
@@ -430,7 +480,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
       {showAdvancedMetrics && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Time in Range Breakdown */}
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div
+            className={
+              isPremium
+                ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+                : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+            }
+          >
             <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
               <Clock className="w-5 h-5 mr-2" />
               Time in Range Prediction
@@ -458,7 +514,13 @@ const AdvancedPredictionChart: React.FC<AdvancedPredictionChartProps> = ({
           </div>
 
           {/* Trend Analysis */}
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div
+            className={
+              isPremium
+                ? 'bg-white/60 dark:bg-dark-800/60 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-white/20 dark:border-white/10'
+                : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md'
+            }
+          >
             <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center">
               <TrendingUp className="w-5 h-5 mr-2" />
               Trend Analysis
