@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { analyzeData } from '../services/analysisService';
 import { useDesignMode } from '../contexts/DesignModeContext';
+import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
@@ -9,6 +10,7 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import {
   Container,
   Paper,
@@ -40,9 +42,11 @@ import {
 
 const Basal = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
-  const { isModern } = useDesignMode();
+  const { formatGlucose } = useGlucoseUnits();
+  const { isPremium } = useDesignMode();
+  const isModern = false;
   const theme = useTheme();
-  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
+  const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>> | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
@@ -126,6 +130,90 @@ const Basal = () => {
       treatments: filteredTreatments
     };
   }, [data, filteredReadings, filteredTreatments]);
+
+  type HourlyGlucoseStats = {
+    hour: number;
+    count: number;
+    avgSgvMgdl: number | null;
+    inRangePct: number;
+    lowPct: number;
+    highPct: number;
+  };
+
+  const hourlyGlucoseStats: HourlyGlucoseStats[] = React.useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      count: 0,
+      sumSgvMgdl: 0,
+      lowCount: 0,
+      highCount: 0,
+      inRangeCount: 0
+    }));
+
+    for (const reading of filteredReadings) {
+      const hour = new Date(reading.date).getHours();
+      const bucket = buckets[hour];
+      if (!bucket) continue;
+
+      const sgv = Number(reading.sgv);
+      if (!Number.isFinite(sgv) || sgv <= 0) continue;
+
+      bucket.count += 1;
+      bucket.sumSgvMgdl += sgv;
+
+      const mmol = toMmol(sgv);
+      if (mmol < GLUCOSE_RANGES.TARGET_MIN) {
+        bucket.lowCount += 1;
+      } else if (mmol > GLUCOSE_RANGES.TARGET_MAX) {
+        bucket.highCount += 1;
+      } else {
+        bucket.inRangeCount += 1;
+      }
+    }
+
+    return buckets.map((b) => {
+      const avgSgvMgdl = b.count ? b.sumSgvMgdl / b.count : null;
+      const inRangePct = b.count ? (b.inRangeCount / b.count) * 100 : 0;
+      const lowPct = b.count ? (b.lowCount / b.count) * 100 : 0;
+      const highPct = b.count ? (b.highCount / b.count) * 100 : 0;
+      return {
+        hour: b.hour,
+        count: b.count,
+        avgSgvMgdl,
+        inRangePct,
+        lowPct,
+        highPct
+      };
+    });
+  }, [filteredReadings]);
+
+  const hourlyStatsSummary = React.useMemo(() => {
+    const avgPerHour = filteredReadings.length ? filteredReadings.length / 24 : 0;
+    const minCount = Math.max(12, Math.floor(avgPerHour / 4));
+    const eligible = hourlyGlucoseStats.filter((h) => h.count >= minCount);
+
+    const topLow = [...eligible]
+      .sort((a, b) => b.lowPct - a.lowPct)
+      .filter((h) => h.lowPct > 0)
+      .slice(0, 3);
+
+    const topHigh = [...eligible]
+      .sort((a, b) => b.highPct - a.highPct)
+      .filter((h) => h.highPct > 0)
+      .slice(0, 3);
+
+    const worstTir = [...eligible]
+      .sort((a, b) => a.inRangePct - b.inRangePct)
+      .slice(0, 3);
+
+    return { minCount, topLow, topHigh, worstTir };
+  }, [filteredReadings.length, hourlyGlucoseStats]);
+
+  const formatHourRange = (hour: number) => {
+    const start = `${hour.toString().padStart(2, '0')}:00`;
+    const end = `${hour.toString().padStart(2, '0')}:59`;
+    return `${start}–${end}`;
+  };
 
   useEffect(() => {
     const performAnalysis = async () => {
@@ -576,6 +664,111 @@ const Basal = () => {
                 )}
 
                 <Box sx={{ '& > *:not(:last-child)': { mb: 3 } }}>
+                  <Card elevation={2} sx={{ borderRadius: 2 }}>
+                    <CardContent>
+                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+                        Time-of-Day Glucose Patterns
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                        Aggregated across all days in the selected period. Shows the % of readings that were low, in-range, or high for each hour of day.
+                      </Typography>
+
+                      {filteredReadings.length === 0 ? (
+                        <Alert severity="info" sx={{ borderRadius: 2 }}>
+                          No glucose readings available for this time range.
+                        </Alert>
+                      ) : (
+                        <>
+                          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ mb: 2 }}>
+                            <Chip
+                              label={`Min samples/hour: ${hourlyStatsSummary.minCount}`}
+                              size="small"
+                              variant="outlined"
+                            />
+                            {hourlyStatsSummary.topLow[0] && (
+                              <Chip
+                                label={`Most lows: ${formatHourRange(hourlyStatsSummary.topLow[0].hour)} (${hourlyStatsSummary.topLow[0].lowPct.toFixed(1)}%)`}
+                                size="small"
+                                color="warning"
+                                variant="outlined"
+                              />
+                            )}
+                            {hourlyStatsSummary.topHigh[0] && (
+                              <Chip
+                                label={`Most highs: ${formatHourRange(hourlyStatsSummary.topHigh[0].hour)} (${hourlyStatsSummary.topHigh[0].highPct.toFixed(1)}%)`}
+                                size="small"
+                                color="info"
+                                variant="outlined"
+                              />
+                            )}
+                          </Stack>
+
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr', gap: 1 }}>
+                            {hourlyGlucoseStats.map((h) => {
+                              const eligible = h.count >= hourlyStatsSummary.minCount;
+                              return (
+                                <Paper
+                                  key={h.hour}
+                                  elevation={0}
+                                  sx={{
+                                    p: 1.5,
+                                    borderRadius: 2,
+                                    border: 1,
+                                    borderColor: 'divider',
+                                    opacity: eligible ? 1 : 0.6
+                                  }}
+                                >
+                                  <Box display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                                    <Box sx={{ minWidth: 92 }}>
+                                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                        {formatHourRange(h.hour)}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        n={h.count}
+                                        {h.avgSgvMgdl != null ? ` • avg ${formatGlucose(h.avgSgvMgdl, 'mgdl', true)}` : ''}
+                                      </Typography>
+                                    </Box>
+
+                                    <Box sx={{ flex: 1 }}>
+                                      <Box
+                                        sx={{
+                                          display: 'flex',
+                                          height: 10,
+                                          borderRadius: 99,
+                                          overflow: 'hidden',
+                                          backgroundColor: alpha(theme.palette.divider, 0.25)
+                                        }}
+                                      >
+                                        <Box sx={{ width: `${h.lowPct}%`, backgroundColor: theme.palette.error.main }} />
+                                        <Box sx={{ width: `${h.inRangePct}%`, backgroundColor: theme.palette.success.main }} />
+                                        <Box sx={{ width: `${h.highPct}%`, backgroundColor: theme.palette.warning.main }} />
+                                      </Box>
+                                      <Box display="flex" justifyContent="space-between" mt={0.5}>
+                                        <Typography variant="caption" color="text.secondary">
+                                          Low {h.lowPct.toFixed(1)}%
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          TIR {h.inRangePct.toFixed(1)}%
+                                        </Typography>
+                                        <Typography variant="caption" color="text.secondary">
+                                          High {h.highPct.toFixed(1)}%
+                                        </Typography>
+                                      </Box>
+                                    </Box>
+                                  </Box>
+                                </Paper>
+                              );
+                            })}
+                          </Box>
+
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+                            Notes: “Low” is &lt; {GLUCOSE_RANGES.TARGET_MIN} mmol/L and “High” is &gt; {GLUCOSE_RANGES.TARGET_MAX} mmol/L (based on default targets).
+                          </Typography>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+
                   <SuggestionTable
                     title="Ultra-Safe Basal Rate Recommendations"
                     currentValues={analysisResults.currentProfile.basal}
@@ -844,6 +1037,84 @@ const Basal = () => {
       )}
 
       <div className="space-y-6">
+        <div
+          className={
+            isPremium
+              ? 'bg-white/70 dark:bg-slate-900/40 backdrop-blur-xl p-6 rounded-2xl border border-white/20 dark:border-slate-700/50 shadow-lg'
+              : 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200'
+          }
+        >
+          <h3 className="text-lg font-medium mb-1 text-gray-900 dark:text-gray-100">Time-of-Day Glucose Patterns</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+            Aggregated across all days in the selected period. Each hour shows % low, in-range, and high.
+          </p>
+
+          {!filteredReadings.length ? (
+            <div className="text-sm text-gray-600 dark:text-gray-400">No glucose readings available for this time range.</div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <span className={isPremium ? 'px-3 py-1 rounded-full text-xs bg-white/40 dark:bg-slate-800/40 border border-white/20 dark:border-slate-700/50 text-gray-800 dark:text-slate-200' : 'px-3 py-1 rounded-full text-xs bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200'}>
+                  Min samples/hour: {hourlyStatsSummary.minCount}
+                </span>
+                {hourlyStatsSummary.topLow[0] && (
+                  <span className={isPremium ? 'px-3 py-1 rounded-full text-xs bg-red-500/10 dark:bg-red-500/15 border border-red-500/20 text-red-700 dark:text-red-200' : 'px-3 py-1 rounded-full text-xs bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-200'}>
+                    Most lows: {formatHourRange(hourlyStatsSummary.topLow[0].hour)} ({hourlyStatsSummary.topLow[0].lowPct.toFixed(1)}%)
+                  </span>
+                )}
+                {hourlyStatsSummary.topHigh[0] && (
+                  <span className={isPremium ? 'px-3 py-1 rounded-full text-xs bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/20 text-amber-800 dark:text-amber-200' : 'px-3 py-1 rounded-full text-xs bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200'}>
+                    Most highs: {formatHourRange(hourlyStatsSummary.topHigh[0].hour)} ({hourlyStatsSummary.topHigh[0].highPct.toFixed(1)}%)
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {hourlyGlucoseStats.map((h) => {
+                  const eligible = h.count >= hourlyStatsSummary.minCount;
+                  return (
+                    <div
+                      key={h.hour}
+                      className={
+                        isPremium
+                          ? `p-3 rounded-xl border border-white/20 dark:border-slate-700/50 bg-white/30 dark:bg-slate-900/30 ${eligible ? '' : 'opacity-70'}`
+                          : `p-3 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20 ${eligible ? '' : 'opacity-70'}`
+                      }
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="min-w-[160px]">
+                          <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{formatHourRange(h.hour)}</div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            n={h.count}
+                            {h.avgSgvMgdl != null ? ` • avg ${formatGlucose(h.avgSgvMgdl, 'mgdl', true)}` : ''}
+                          </div>
+                        </div>
+
+                        <div className="flex-1">
+                          <div className="flex h-2 w-full rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
+                            <div className="h-full bg-red-500" style={{ width: `${h.lowPct}%` }} />
+                            <div className="h-full bg-green-500" style={{ width: `${h.inRangePct}%` }} />
+                            <div className="h-full bg-yellow-500" style={{ width: `${h.highPct}%` }} />
+                          </div>
+                          <div className="mt-1 flex justify-between text-[11px] text-gray-600 dark:text-gray-400">
+                            <span>Low {h.lowPct.toFixed(1)}%</span>
+                            <span>TIR {h.inRangePct.toFixed(1)}%</span>
+                            <span>High {h.highPct.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-4">
+                Low is &lt; {GLUCOSE_RANGES.TARGET_MIN} mmol/L and High is &gt; {GLUCOSE_RANGES.TARGET_MAX} mmol/L (default targets).
+              </p>
+            </>
+          )}
+        </div>
+
         <SuggestionTable
           title="Ultra-Safe Basal Rate Recommendations"
           currentValues={analysisResults.currentProfile.basal}
