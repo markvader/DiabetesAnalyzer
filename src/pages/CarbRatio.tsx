@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useDesignMode } from '../contexts/DesignModeContext';
+import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { analyzeData } from '../services/analysisService';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -10,10 +11,14 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { toMmol } from '../utils/glucoseUtils';
+import { GLUCOSE_RANGES } from '../constants/glucoseRanges';
+import type { NightscoutDeviceStatus, NightscoutTreatment } from '../types/nightscout';
 
 const CarbRatio = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
   const { isPremium } = useDesignMode();
+  const { formatGlucose } = useGlucoseUnits();
   const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [manualRefresh, setManualRefresh] = useState(false);
@@ -40,6 +45,21 @@ const CarbRatio = () => {
     if (!data?.treatments?.length) return [];
     return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
   }, [data?.treatments]);
+
+  const getDeviceStatusMs = (status: NightscoutDeviceStatus): number => {
+    const ms = status.mills ?? status.date;
+    if (typeof ms === 'number' && Number.isFinite(ms)) return ms;
+    if (status.created_at) {
+      const parsed = Date.parse(status.created_at);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  };
+
+  const deviceStatusSortedAsc = React.useMemo(() => {
+    if (!data?.deviceStatus?.length) return [];
+    return [...data.deviceStatus].sort((a, b) => getDeviceStatusMs(a) - getDeviceStatusMs(b));
+  }, [data?.deviceStatus]);
 
   const selectedRange = React.useMemo(() => {
     if (isCustomRange) {
@@ -88,6 +108,11 @@ const CarbRatio = () => {
     return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
   }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
 
+  const filteredDeviceStatus = React.useMemo(() => {
+    if (!deviceStatusSortedAsc.length) return [];
+    return sliceSortedByTimeRange(deviceStatusSortedAsc, getDeviceStatusMs, selectedRange.startMs, selectedRange.endMs);
+  }, [deviceStatusSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+
   // Create filtered data object for analysis
   const filteredData = React.useMemo(() => {
     if (!data) return null;
@@ -95,9 +120,195 @@ const CarbRatio = () => {
     return {
       ...data,
       entries: filteredReadings,
-      treatments: filteredTreatments
+      treatments: filteredTreatments,
+      deviceStatus: filteredDeviceStatus
     };
-  }, [data, filteredReadings, filteredTreatments]);
+  }, [data, filteredReadings, filteredTreatments, filteredDeviceStatus]);
+
+  type HourlyGlucoseStats = {
+    hour: number;
+    count: number;
+    avgSgvMgdl: number | null;
+    inRangePct: number;
+    lowPct: number;
+    highPct: number;
+  };
+
+  const hourlyGlucoseStats: HourlyGlucoseStats[] = React.useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      count: 0,
+      sumSgvMgdl: 0,
+      lowCount: 0,
+      highCount: 0,
+      inRangeCount: 0
+    }));
+
+    for (const reading of filteredReadings) {
+      const hour = new Date(reading.date).getHours();
+      const bucket = buckets[hour];
+      if (!bucket) continue;
+
+      const sgv = Number(reading.sgv);
+      if (!Number.isFinite(sgv) || sgv <= 0) continue;
+
+      bucket.count += 1;
+      bucket.sumSgvMgdl += sgv;
+
+      const mmol = toMmol(sgv);
+      if (mmol < GLUCOSE_RANGES.TARGET_MIN) {
+        bucket.lowCount += 1;
+      } else if (mmol > GLUCOSE_RANGES.TARGET_MAX) {
+        bucket.highCount += 1;
+      } else {
+        bucket.inRangeCount += 1;
+      }
+    }
+
+    return buckets.map((b) => {
+      const avgSgvMgdl = b.count ? b.sumSgvMgdl / b.count : null;
+      const inRangePct = b.count ? (b.inRangeCount / b.count) * 100 : 0;
+      const lowPct = b.count ? (b.lowCount / b.count) * 100 : 0;
+      const highPct = b.count ? (b.highCount / b.count) * 100 : 0;
+      return {
+        hour: b.hour,
+        count: b.count,
+        avgSgvMgdl,
+        inRangePct,
+        lowPct,
+        highPct
+      };
+    });
+  }, [filteredReadings]);
+
+  const hourlyStatsSummary = React.useMemo(() => {
+    const avgPerHour = filteredReadings.length ? filteredReadings.length / 24 : 0;
+    const minCount = Math.max(12, Math.floor(avgPerHour / 4));
+    const eligible = hourlyGlucoseStats.filter((h) => h.count >= minCount);
+
+    const topLow = [...eligible]
+      .sort((a, b) => b.lowPct - a.lowPct)
+      .filter((h) => h.lowPct > 0)
+      .slice(0, 3);
+
+    const topHigh = [...eligible]
+      .sort((a, b) => b.highPct - a.highPct)
+      .filter((h) => h.highPct > 0)
+      .slice(0, 3);
+
+    const worstTir = [...eligible]
+      .sort((a, b) => a.inRangePct - b.inRangePct)
+      .slice(0, 3);
+
+    return { minCount, topLow, topHigh, worstTir };
+  }, [filteredReadings.length, hourlyGlucoseStats]);
+
+  const formatHourRange = (hour: number) => {
+    const start = `${hour.toString().padStart(2, '0')}:00`;
+    const end = `${hour.toString().padStart(2, '0')}:59`;
+    return `${start}–${end}`;
+  };
+
+  type TherapyPatternSummary = {
+    classification: string;
+    confidence: number;
+    notes: string[];
+    stats: {
+      carbEntries: number;
+      carbAnnouncements: number;
+      mealBoluses: number;
+      insulinTreatments: number;
+      insulinOnly: number;
+      microBoluses: number;
+      loopSignals: number;
+    };
+  };
+
+  const therapyPattern = React.useMemo<TherapyPatternSummary>(() => {
+    const carbEntries = filteredTreatments.filter((t) => (t.carbs ?? 0) > 0);
+    const insulinTreatments = filteredTreatments.filter((t) => (t.insulin ?? t.units ?? 0) > 0);
+
+    const carbAnnouncements = carbEntries.filter((t) => (t.insulin ?? t.units ?? 0) <= 0.05);
+    const mealBoluses = carbEntries.filter((t) => (t.insulin ?? t.units ?? 0) > 0.05);
+
+    const insulinOnly = insulinTreatments.filter((t) => (t.carbs ?? 0) <= 0);
+    const microBoluses = insulinOnly.filter((t) => {
+      const units = t.insulin ?? t.units ?? 0;
+      return units > 0 && units <= 0.3;
+    });
+
+    const loopSignals = filteredDeviceStatus.filter((s) => {
+      const openaps = (s.openaps ?? null) as Record<string, unknown> | null;
+      const loop = (s.loop ?? null) as Record<string, unknown> | null;
+      const hasOpenapsEnacted = !!(openaps && typeof openaps === 'object' && 'enacted' in openaps);
+      const hasLoopEnacted = !!(loop && typeof loop === 'object' && 'enacted' in loop);
+      return hasOpenapsEnacted || hasLoopEnacted;
+    }).length;
+
+    const stats = {
+      carbEntries: carbEntries.length,
+      carbAnnouncements: carbAnnouncements.length,
+      mealBoluses: mealBoluses.length,
+      insulinTreatments: insulinTreatments.length,
+      insulinOnly: insulinOnly.length,
+      microBoluses: microBoluses.length,
+      loopSignals
+    };
+
+    const notes: string[] = [];
+
+    if (stats.carbEntries < 5 && stats.insulinTreatments < 5 && stats.loopSignals === 0) {
+      return {
+        classification: 'Insufficient evidence (limited treatments/device status) ',
+        confidence: 25,
+        notes: ['Not enough carbs/insulin/deviceStatus events in the selected period to infer usage reliably.'],
+        stats
+      };
+    }
+
+    const carbAnnouncementPct = stats.carbEntries ? (stats.carbAnnouncements / stats.carbEntries) * 100 : 0;
+    const mealBolusPct = stats.carbEntries ? (stats.mealBoluses / stats.carbEntries) * 100 : 0;
+    const microBolusPct = stats.insulinOnly ? (stats.microBoluses / stats.insulinOnly) * 100 : 0;
+
+    if (stats.loopSignals > 0 || (stats.microBoluses >= 10 && microBolusPct >= 40)) {
+      notes.push('DeviceStatus suggests automated loop activity (OpenAPS/Loop enacted data) and/or many small insulin-only doses (SMB-like).');
+      return {
+        classification: 'APS automation likely (SMB/temp basals) ',
+        confidence: stats.loopSignals > 0 ? 80 : 70,
+        notes,
+        stats
+      };
+    }
+
+    if (stats.carbEntries >= 10 && carbAnnouncementPct >= 70 && stats.insulinTreatments < Math.max(3, Math.floor(stats.carbEntries * 0.3))) {
+      notes.push('Most carb entries have no insulin recorded (carb announcements).');
+      notes.push('Carb ratio suggestions can be less reliable if meal boluses aren\'t recorded in Nightscout.');
+      return {
+        classification: 'Carb announcements only (no bolus recorded) ',
+        confidence: 75,
+        notes,
+        stats
+      };
+    }
+
+    if (stats.carbEntries >= 5 && mealBolusPct >= 40) {
+      notes.push('Many carb entries include insulin in the same treatment (typical bolus wizard / normal meal bolusing uploads).');
+      return {
+        classification: 'Normal meal boluses recorded (carbs + insulin) ',
+        confidence: 70,
+        notes,
+        stats
+      };
+    }
+
+    notes.push('Data looks mixed (some carbs-only, some insulin-only, limited clear loop signals).');
+    return {
+      classification: 'Mixed / unclear pattern ',
+      confidence: 55,
+      notes,
+      stats
+    };
+  }, [filteredTreatments, filteredDeviceStatus]);
 
   useEffect(() => {
     const performAnalysis = async () => {
@@ -494,6 +705,101 @@ const CarbRatio = () => {
       )}
 
       <div className="space-y-6">
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-medium mb-1 text-gray-900 dark:text-gray-100">Time-of-Day Glucose Patterns</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Hourly Low / Time-in-Range / High for the selected period
+              </p>
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 text-right">
+              Min samples/hour: <span className="font-medium">{hourlyStatsSummary.minCount}</span>
+              {hourlyStatsSummary.topLow[0] && (
+                <div className="mt-1">Most lows: <span className="font-medium">{formatHourRange(hourlyStatsSummary.topLow[0].hour)}</span> ({hourlyStatsSummary.topLow[0].lowPct.toFixed(1)}%)</div>
+              )}
+              {hourlyStatsSummary.topHigh[0] && (
+                <div>Most highs: <span className="font-medium">{formatHourRange(hourlyStatsSummary.topHigh[0].hour)}</span> ({hourlyStatsSummary.topHigh[0].highPct.toFixed(1)}%)</div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {hourlyGlucoseStats.map((h) => {
+              const eligible = h.count >= hourlyStatsSummary.minCount;
+              const bg = !eligible
+                ? 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700'
+                : h.inRangePct >= 70
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                  : h.lowPct >= 8
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                    : h.highPct >= 35
+                      ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
+
+              return (
+                <div
+                  key={h.hour}
+                  className={`border rounded-lg p-3 transition-colors duration-200 ${bg}`}
+                  title={eligible ? undefined : `Low samples for this hour (n=${h.count}).`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium text-gray-900 dark:text-gray-100">{formatHourRange(h.hour)}</div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">n={h.count}</div>
+                  </div>
+                  <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                    <div>
+                      <span className="font-medium">TIR</span>: {h.inRangePct.toFixed(1)}% · <span className="font-medium text-red-700 dark:text-red-300">Low</span>: {h.lowPct.toFixed(1)}% · <span className="font-medium text-orange-700 dark:text-orange-300">High</span>: {h.highPct.toFixed(1)}%
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                      {h.avgSgvMgdl != null ? `avg ${formatGlucose(h.avgSgvMgdl, 'mgdl', true)}` : 'avg —'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md transition-colors duration-200">
+          <div className="flex items-center mb-3">
+            <Shield className="h-5 w-5 text-blue-600 dark:text-blue-400 mr-2" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Detected Therapy Pattern (Heuristic)</h3>
+            <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Confidence: {therapyPattern.confidence}%</span>
+          </div>
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            Likely: <span className="font-medium">{therapyPattern.classification.trim()}</span>
+          </p>
+          <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div className="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-700 rounded p-3">
+              <div className="text-gray-900 dark:text-gray-100 font-medium mb-1">Treatments (selected period)</div>
+              <div className="text-gray-700 dark:text-gray-300">Carb entries: <span className="font-medium">{therapyPattern.stats.carbEntries}</span></div>
+              <div className="text-gray-700 dark:text-gray-300">Carb announcements (no insulin): <span className="font-medium">{therapyPattern.stats.carbAnnouncements}</span></div>
+              <div className="text-gray-700 dark:text-gray-300">Meal boluses (carbs + insulin): <span className="font-medium">{therapyPattern.stats.mealBoluses}</span></div>
+              <div className="text-gray-700 dark:text-gray-300">Insulin treatments: <span className="font-medium">{therapyPattern.stats.insulinTreatments}</span></div>
+              <div className="text-gray-700 dark:text-gray-300">Insulin-only microboluses (≤0.3U): <span className="font-medium">{therapyPattern.stats.microBoluses}</span></div>
+            </div>
+
+            <div className="bg-gray-50 dark:bg-gray-900/20 border border-gray-200 dark:border-gray-700 rounded p-3">
+              <div className="text-gray-900 dark:text-gray-100 font-medium mb-1">Loop signals</div>
+              <div className="text-gray-700 dark:text-gray-300">DeviceStatus enacted (OpenAPS/Loop): <span className="font-medium">{therapyPattern.stats.loopSignals}</span></div>
+              <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                Note: This is a best-effort inference from Nightscout uploads; AAPS features like Dynamic ISF are not always directly identifiable.
+              </div>
+            </div>
+          </div>
+
+          {therapyPattern.notes.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {therapyPattern.notes.map((n, idx) => (
+                <div key={idx} className="text-sm text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-3 rounded">
+                  {n}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <SuggestionTable
           title="Ultra-Safe Carb Ratio Recommendations"
           currentValues={analysisResults.currentProfile.carbratio}
