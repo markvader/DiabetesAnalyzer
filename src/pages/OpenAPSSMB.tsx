@@ -11,6 +11,9 @@ import { runSafeAsync } from '../utils/safeAsync';
 import { getTreatmentMs } from '../utils/nightscoutTime';
 import { lowerBoundByMs, upperBoundByMs, sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { toMmol } from '../utils/glucoseUtils';
+import { GLUCOSE_RANGES } from '../constants/glucoseRanges';
+import { nightscoutTreatmentParser } from '../services/nightscoutTreatmentParser';
 
 type UltraSafeOpenAPSResult = Awaited<ReturnType<typeof analyzeUltraSafeOpenAPS>>;
 
@@ -43,6 +46,16 @@ interface SMBEvent {
   delta: number;
   eventualBG: number;
 }
+
+type HourlySmbOutcome = {
+  hour: number;
+  count: number;
+  avgUnits: number | null;
+  effectivePct: number;
+  postSmbLowPct: number;
+  avgDrop2hMgdl: number | null;
+  avgStartBgMgdl: number | null;
+};
 
 const OpenAPSSMB = () => {
   const { data, loading, error } = useNightscout();
@@ -105,6 +118,319 @@ const OpenAPSSMB = () => {
     };
   }, [data, entriesSortedAsc, selectedRange.endMs, selectedRange.startMs, treatmentsSortedAsc]);
 
+  type HourlyGlucoseStats = {
+    hour: number;
+    count: number;
+    avgSgvMgdl: number | null;
+    inRangePct: number;
+    lowPct: number;
+    highPct: number;
+  };
+
+  const hourlyGlucoseStats: HourlyGlucoseStats[] = React.useMemo(() => {
+    const readings = filteredData?.entries ?? [];
+    const buckets = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      count: 0,
+      sumSgvMgdl: 0,
+      lowCount: 0,
+      highCount: 0,
+      inRangeCount: 0
+    }));
+
+    for (const reading of readings) {
+      const hour = new Date(reading.date).getHours();
+      const bucket = buckets[hour];
+      if (!bucket) continue;
+
+      const sgv = Number(reading.sgv);
+      if (!Number.isFinite(sgv) || sgv <= 0) continue;
+
+      bucket.count += 1;
+      bucket.sumSgvMgdl += sgv;
+
+      const mmol = toMmol(sgv);
+      if (mmol < GLUCOSE_RANGES.TARGET_MIN) bucket.lowCount += 1;
+      else if (mmol > GLUCOSE_RANGES.TARGET_MAX) bucket.highCount += 1;
+      else bucket.inRangeCount += 1;
+    }
+
+    return buckets.map((b) => {
+      const avgSgvMgdl = b.count ? b.sumSgvMgdl / b.count : null;
+      const inRangePct = b.count ? (b.inRangeCount / b.count) * 100 : 0;
+      const lowPct = b.count ? (b.lowCount / b.count) * 100 : 0;
+      const highPct = b.count ? (b.highCount / b.count) * 100 : 0;
+      return {
+        hour: b.hour,
+        count: b.count,
+        avgSgvMgdl,
+        inRangePct,
+        lowPct,
+        highPct
+      };
+    });
+  }, [filteredData?.entries]);
+
+  const hourlyStatsSummary = React.useMemo(() => {
+    const total = filteredData?.entries?.length ?? 0;
+    const avgPerHour = total ? total / 24 : 0;
+    const minCount = Math.max(12, Math.floor(avgPerHour / 4));
+    const eligible = hourlyGlucoseStats.filter((h) => h.count >= minCount);
+
+    const topLow = [...eligible]
+      .sort((a, b) => b.lowPct - a.lowPct)
+      .filter((h) => h.lowPct > 0)
+      .slice(0, 3);
+
+    const topHigh = [...eligible]
+      .sort((a, b) => b.highPct - a.highPct)
+      .filter((h) => h.highPct > 0)
+      .slice(0, 3);
+
+    const worstTir = [...eligible]
+      .sort((a, b) => a.inRangePct - b.inRangePct)
+      .slice(0, 3);
+
+    return { minCount, topLow, topHigh, worstTir };
+  }, [filteredData?.entries?.length, hourlyGlucoseStats]);
+
+  const overallTir = React.useMemo(() => {
+    const readings = filteredData?.entries ?? [];
+    if (!readings.length) {
+      return {
+        count: 0,
+        avgSgvMgdl: null as number | null,
+        lowPct: 0,
+        inRangePct: 0,
+        highPct: 0
+      };
+    }
+
+    let sum = 0;
+    let low = 0;
+    let high = 0;
+    let inRange = 0;
+
+    for (const r of readings) {
+      const sgv = Number(r.sgv);
+      if (!Number.isFinite(sgv) || sgv <= 0) continue;
+      sum += sgv;
+      const mmol = toMmol(sgv);
+      if (mmol < GLUCOSE_RANGES.TARGET_MIN) low += 1;
+      else if (mmol > GLUCOSE_RANGES.TARGET_MAX) high += 1;
+      else inRange += 1;
+    }
+
+    const count = low + high + inRange;
+    const avgSgvMgdl = count ? sum / count : null;
+    return {
+      count,
+      avgSgvMgdl,
+      lowPct: count ? (low / count) * 100 : 0,
+      inRangePct: count ? (inRange / count) * 100 : 0,
+      highPct: count ? (high / count) * 100 : 0
+    };
+  }, [filteredData?.entries]);
+
+  const smbBehaviorPresets = React.useMemo(() => {
+    const base = aiOptimization?.optimizedSettings ?? {
+      smbMaxMinutes: 60,
+      smbDeliveryRatio: 0.5,
+      enableSMBWithCOB: true,
+      enableSMBWithTemptarget: true,
+      enableSMBAlways: false,
+      carbsReqThreshold: 4,
+      highTemptargetRaisesSensitivity: true,
+      lowTemptargetLowersSensitivity: true
+    };
+
+    const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+    const lowRisk = overallTir.lowPct < 2 && (openapsAnalysis?.hypoglycemiaRiskScore ?? 100) < 20;
+
+    const emergency = {
+      smbMaxMinutes: clamp(Math.round(base.smbMaxMinutes * 0.6), 20, 45),
+      smbDeliveryRatio: clamp(base.smbDeliveryRatio * 0.6, 0.15, 0.35),
+      enableSMBWithCOB: overallTir.lowPct < 5,
+      enableSMBWithTemptarget: true,
+      enableSMBAlways: false,
+      carbsReqThreshold: clamp(Math.round(base.carbsReqThreshold * 1.8), 6, 12),
+      highTemptargetRaisesSensitivity: true,
+      lowTemptargetLowersSensitivity: true
+    };
+
+    const conservative = {
+      smbMaxMinutes: clamp(Math.round(base.smbMaxMinutes * 0.85), 30, 60),
+      smbDeliveryRatio: clamp(base.smbDeliveryRatio * 0.85, 0.25, 0.5),
+      enableSMBWithCOB: overallTir.lowPct < 8,
+      enableSMBWithTemptarget: true,
+      enableSMBAlways: false,
+      carbsReqThreshold: clamp(Math.round(base.carbsReqThreshold * 1.25), 4, 10),
+      highTemptargetRaisesSensitivity: true,
+      lowTemptargetLowersSensitivity: true
+    };
+
+    const standard = {
+      smbMaxMinutes: clamp(Math.round(base.smbMaxMinutes * 1.1), 45, 90),
+      smbDeliveryRatio: clamp(base.smbDeliveryRatio * 1.1, 0.4, 0.75),
+      enableSMBWithCOB: true,
+      enableSMBWithTemptarget: true,
+      enableSMBAlways: lowRisk && overallTir.inRangePct >= 60,
+      carbsReqThreshold: clamp(Math.round(base.carbsReqThreshold * 0.9), 3, 6),
+      highTemptargetRaisesSensitivity: true,
+      lowTemptargetLowersSensitivity: true
+    };
+
+    return { emergency, conservative, standard };
+  }, [aiOptimization?.optimizedSettings, openapsAnalysis?.hypoglycemiaRiskScore, overallTir.inRangePct, overallTir.lowPct]);
+
+  const smbOutcomesByHour = React.useMemo(() => {
+    const readingsAsc = filteredData?.entries ?? [];
+    if (!smbEvents.length || readingsAsc.length === 0) {
+      return {
+        minCount: 3,
+        outcomes: Array.from({ length: 24 }, (_, hour) => ({
+          hour,
+          count: 0,
+          avgUnits: null,
+          effectivePct: 0,
+          postSmbLowPct: 0,
+          avgDrop2hMgdl: null,
+          avgStartBgMgdl: null
+        })) as HourlySmbOutcome[],
+        worstHypo: [] as HourlySmbOutcome[],
+        worstEffectiveness: [] as HourlySmbOutcome[]
+      };
+    }
+
+    const getReadingMs = (e: NightscoutEntry) => e.date;
+    const pickInRange = (startMs: number, endMs: number) => {
+      const startIndex = lowerBoundByMs(readingsAsc, getReadingMs, startMs);
+      const endIndex = upperBoundByMs(readingsAsc, getReadingMs, endMs);
+      if (endIndex <= startIndex) return [] as NightscoutEntry[];
+      return readingsAsc.slice(startIndex, endIndex);
+    };
+
+    const buckets = Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      count: 0,
+      sumUnits: 0,
+      sumStartBg: 0,
+      sumDrop2h: 0,
+      drop2hCount: 0,
+      effectiveCount: 0,
+      postSmbLowCount: 0
+    }));
+
+    for (const smb of smbEvents) {
+      const hour = new Date(smb.timestampMs).getHours();
+      const bucket = buckets[hour];
+      if (!bucket) continue;
+
+      const startBg = Number(smb.glucose);
+      if (!Number.isFinite(startBg) || startBg <= 0) continue;
+
+      bucket.count += 1;
+      bucket.sumUnits += smb.smbDelivered;
+      bucket.sumStartBg += startBg;
+
+      // Effectiveness: average BG in (t+20m .. t+2h) is lower than start
+      const futureWindow = pickInRange(smb.timestampMs + 20 * 60 * 1000, smb.timestampMs + 2 * 60 * 60 * 1000);
+      if (futureWindow.length > 0) {
+        const sum = futureWindow.reduce((acc, r) => acc + Number(r.sgv || 0), 0);
+        const avgFuture = sum / futureWindow.length;
+        const drop = startBg - avgFuture;
+        bucket.sumDrop2h += drop;
+        bucket.drop2hCount += 1;
+        if (drop >= 5) bucket.effectiveCount += 1;
+      }
+
+      // Hypo risk: any low in (t .. t+3h)
+      const hypoWindow = pickInRange(smb.timestampMs, smb.timestampMs + 3 * 60 * 60 * 1000);
+      const hadLow = hypoWindow.some((r) => {
+        const sgv = Number(r.sgv);
+        if (!Number.isFinite(sgv) || sgv <= 0) return false;
+        return toMmol(sgv) < GLUCOSE_RANGES.TARGET_MIN;
+      });
+      if (hadLow) bucket.postSmbLowCount += 1;
+    }
+
+    const outcomes: HourlySmbOutcome[] = buckets.map((b) => {
+      const avgUnits = b.count ? b.sumUnits / b.count : null;
+      const avgStartBgMgdl = b.count ? b.sumStartBg / b.count : null;
+      const avgDrop2hMgdl = b.drop2hCount ? b.sumDrop2h / b.drop2hCount : null;
+      const effectivePct = b.drop2hCount ? (b.effectiveCount / b.drop2hCount) * 100 : 0;
+      const postSmbLowPct = b.count ? (b.postSmbLowCount / b.count) * 100 : 0;
+      return {
+        hour: b.hour,
+        count: b.count,
+        avgUnits,
+        effectivePct,
+        postSmbLowPct,
+        avgDrop2hMgdl,
+        avgStartBgMgdl
+      };
+    });
+
+    const avgPerHour = smbEvents.length / 24;
+    const minCount = Math.max(3, Math.floor(avgPerHour / 2));
+    const eligible = outcomes.filter((o) => o.count >= minCount);
+
+    const worstHypo = [...eligible]
+      .sort((a, b) => b.postSmbLowPct - a.postSmbLowPct)
+      .filter((o) => o.postSmbLowPct > 0)
+      .slice(0, 3);
+
+    const worstEffectiveness = [...eligible]
+      .sort((a, b) => a.effectivePct - b.effectivePct)
+      .slice(0, 3);
+
+    return { minCount, outcomes, worstHypo, worstEffectiveness };
+  }, [filteredData?.entries, smbEvents]);
+
+  const smbSetupSummary = React.useMemo(() => {
+    const starting = openapsAnalysis?.recommendedStartingLevel;
+    const tier = starting === 'standard' ? 'Standard' : starting === 'conservative' ? 'Conservative' : 'Emergency-Safe';
+
+    const reasons: string[] = [];
+    if (overallTir.count > 0) {
+      reasons.push(`Selected-period TIR: ${overallTir.inRangePct.toFixed(1)}% · Low: ${overallTir.lowPct.toFixed(1)}% · High: ${overallTir.highPct.toFixed(1)}%`);
+      if (overallTir.avgSgvMgdl != null) {
+        reasons.push(`Average glucose: ${formatGlucoseValue(overallTir.avgSgvMgdl, 'mgdl', true)}`);
+      }
+    }
+
+    if (hourlyStatsSummary.worstTir[0]) {
+      const h = hourlyStatsSummary.worstTir[0];
+      reasons.push(`Worst hour TIR: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.inRangePct.toFixed(1)}% TIR)`);
+    }
+    if (hourlyStatsSummary.topLow[0]) {
+      const h = hourlyStatsSummary.topLow[0];
+      reasons.push(`Most lows: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.lowPct.toFixed(1)}% low)`);
+    }
+    if (hourlyStatsSummary.topHigh[0]) {
+      const h = hourlyStatsSummary.topHigh[0];
+      reasons.push(`Most highs: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.highPct.toFixed(1)}% high)`);
+    }
+
+    if (smbOutcomesByHour.worstHypo[0]) {
+      const h = smbOutcomesByHour.worstHypo[0];
+      reasons.push(`Post-SMB lows highest: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.postSmbLowPct.toFixed(1)}% of SMBs followed by a low in 3h)`);
+    }
+    if (smbOutcomesByHour.worstEffectiveness[0] && smbOutcomesByHour.worstEffectiveness[0].count > 0) {
+      const h = smbOutcomesByHour.worstEffectiveness[0];
+      reasons.push(`SMBs least effective: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.effectivePct.toFixed(1)}% show a ≥5 mg/dL drop over ~2h)`);
+    }
+
+    const hardSafety = overallTir.lowPct >= 2.0 || (openapsAnalysis?.hypoglycemiaRiskScore ?? 0) >= 40;
+    const recommendedTier = hardSafety ? 'Emergency-Safe' : tier;
+
+    return {
+      recommendedTier,
+      confidence: openapsAnalysis?.safetyChecks?.dataQuality === 'high' ? 'higher' : openapsAnalysis ? 'medium' : 'low',
+      reasons
+    };
+  }, [formatGlucoseValue, hourlyStatsSummary.topHigh, hourlyStatsSummary.topLow, hourlyStatsSummary.worstTir, openapsAnalysis, overallTir.avgSgvMgdl, overallTir.count, overallTir.highPct, overallTir.inRangePct, overallTir.lowPct, smbOutcomesByHour.worstEffectiveness, smbOutcomesByHour.worstHypo]);
+
    
   const analyzeSMBEvents = useCallback(() => {
     if (!filteredData?.treatments || !filteredData?.entries) {
@@ -138,23 +464,19 @@ const OpenAPSSMB = () => {
       return candidate.date >= earliestAllowedMs ? candidate : null;
     };
 
-    // Filter SMB treatments
-    const smbTreatments = filteredData.treatments.filter(t => 
-      t.eventType === 'Correction Bolus' && 
-      t.insulin && 
-      t.insulin < 1.0 && // SMBs are typically small
-      (t.notes?.includes('SMB') || t.enteredBy?.includes('openaps'))
-    );
+    const analysisHours = Math.max(1, Math.ceil((selectedRange.endMs - selectedRange.startMs) / (60 * 60 * 1000)));
+    const parsed = nightscoutTreatmentParser.parseTreatments(filteredData.treatments, analysisHours, selectedRange.endMs);
+    const smbs = parsed.smbs;
 
-    if (smbTreatments.length === 0) {
+    if (smbs.length === 0) {
       setSmbStats(null);
       setSmbEvents([]);
       return;
     }
 
-    const events: SMBEvent[] = smbTreatments.map(treatment => {
-      const timestamp = treatment.created_at;
-      const treatmentTime = getTreatmentMs(treatment);
+    const events: SMBEvent[] = smbs.map((smb) => {
+      const treatmentTime = smb.time;
+      const timestamp = new Date(treatmentTime).toISOString();
       
       // Find closest glucose reading
       const closestReading = findClosestReading(treatmentTime);
@@ -168,12 +490,12 @@ const OpenAPSSMB = () => {
         timestamp,
         timestampMs: treatmentTime,
         glucose: closestReading.sgv,
-        iob: treatment.iob || 0,
-        cob: treatment.cob || 0,
-        smbDelivered: treatment.insulin || 0,
-        reason: treatment.notes || 'SMB delivery',
+        iob: 0,
+        cob: 0,
+        smbDelivered: smb.units,
+        reason: smb.reason || 'SMB delivery',
         delta,
-        eventualBG: treatment.eventualBG || closestReading.sgv
+        eventualBG: closestReading.sgv
       };
     });
 
@@ -228,7 +550,7 @@ const OpenAPSSMB = () => {
     } else {
       setSmbStats(null);
     }
-  }, [filteredData]);
+  }, [filteredData, selectedRange.endMs, selectedRange.startMs]);
 
   const analyzeOpenAPSSettings = useCallback(async () => {
     if (!filteredData?.entries || !filteredData?.treatments) return;
@@ -570,6 +892,226 @@ const OpenAPSSMB = () => {
               </div>
               <p className="mt-2 text-sm text-white/80">{openapsAnalysis.carbCoverage.mealPatternAnalysis}</p>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Hourly Time-in-Range (selected period) */}
+      {filteredData?.entries?.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-medium mb-1 text-gray-900 dark:text-gray-100">Hourly Time-in-Range</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Low / TIR / High by hour-of-day for the selected period
+              </p>
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 text-right">
+              Min samples/hour: <span className="font-medium">{hourlyStatsSummary.minCount}</span>
+              {overallTir.avgSgvMgdl != null && (
+                <div className="mt-1">Avg: <span className="font-medium">{formatGlucoseValue(overallTir.avgSgvMgdl, 'mgdl', true)}</span></div>
+              )}
+              <div className="mt-1">TIR: <span className="font-medium">{overallTir.inRangePct.toFixed(1)}%</span> · Low: <span className="font-medium">{overallTir.lowPct.toFixed(1)}%</span> · High: <span className="font-medium">{overallTir.highPct.toFixed(1)}%</span></div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {hourlyGlucoseStats.map((h) => {
+              const eligible = h.count >= hourlyStatsSummary.minCount;
+              const bg = !eligible
+                ? 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700'
+                : h.inRangePct >= 70
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                  : h.lowPct >= 8
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                    : h.highPct >= 35
+                      ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
+
+              return (
+                <div
+                  key={h.hour}
+                  className={`border rounded-lg p-3 transition-colors duration-200 ${bg}`}
+                  title={eligible ? undefined : `Low samples for this hour (n=${h.count}).`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium text-gray-900 dark:text-gray-100">
+                      {h.hour.toString().padStart(2, '0')}:00–{h.hour.toString().padStart(2, '0')}:59
+                    </div>
+                    <div className="text-xs text-gray-600 dark:text-gray-400">n={h.count}</div>
+                  </div>
+                  <div className="mt-2 text-sm text-gray-700 dark:text-gray-300">
+                    <div>
+                      <span className="font-medium">TIR</span>: {h.inRangePct.toFixed(1)}% · <span className="font-medium text-red-700 dark:text-red-300">Low</span>: {h.lowPct.toFixed(1)}% · <span className="font-medium text-orange-700 dark:text-orange-300">High</span>: {h.highPct.toFixed(1)}%
+                    </div>
+                    <div className="mt-1 text-xs text-gray-600 dark:text-gray-400">
+                      {h.avgSgvMgdl != null ? `avg ${formatGlucoseValue(h.avgSgvMgdl, 'mgdl', true)}` : 'avg —'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SMB Setup Suggestions + Tiered Presets */}
+      {openapsAnalysis && (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div className="flex items-center mb-4">
+            <Settings className="h-6 w-6 text-blue-600 dark:text-blue-400 mr-2" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">SMB Setup Suggestions (Data-Driven)</h3>
+            <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Confidence: {smbSetupSummary.confidence}</span>
+          </div>
+
+          <div className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-4 rounded-lg">
+            <p className="text-blue-900 dark:text-blue-100 font-medium">
+              Suggested starting tier for SMB behavior: <span className="font-bold">{smbSetupSummary.recommendedTier}</span>
+            </p>
+            {smbSetupSummary.reasons.length > 0 && (
+              <ul className="mt-2 space-y-1 text-sm text-blue-800 dark:text-blue-200">
+                {smbSetupSummary.reasons.slice(0, 4).map((r, idx) => (
+                  <li key={idx}>• {r}</li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-3 text-xs text-blue-700 dark:text-blue-300">
+              These are conservative starting points based on your Nightscout data. Always apply changes cautiously and validate with your clinical team.
+            </p>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="border border-red-200 dark:border-red-800 rounded-lg p-4 bg-red-50 dark:bg-red-900/10">
+              <div className="flex items-center mb-2">
+                <Shield className="h-5 w-5 text-red-600 dark:text-red-400 mr-2" />
+                <h4 className="font-medium text-red-900 dark:text-red-100">Emergency-Safe</h4>
+              </div>
+              <div className="text-sm text-red-800 dark:text-red-200 space-y-1">
+                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.emergency.smbMaxMinutes}</span></div>
+                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.emergency.smbDeliveryRatio * 100)}%</span></div>
+                <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.emergency.carbsReqThreshold} g</span></div>
+                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBAlways ? 'On' : 'Off'}</span></div>
+              </div>
+            </div>
+
+            <div className="border border-yellow-200 dark:border-yellow-800 rounded-lg p-4 bg-yellow-50 dark:bg-yellow-900/10">
+              <div className="flex items-center mb-2">
+                <CheckCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mr-2" />
+                <h4 className="font-medium text-yellow-900 dark:text-yellow-100">Conservative</h4>
+              </div>
+              <div className="text-sm text-yellow-800 dark:text-yellow-200 space-y-1">
+                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.conservative.smbMaxMinutes}</span></div>
+                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.conservative.smbDeliveryRatio * 100)}%</span></div>
+                <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.conservative.carbsReqThreshold} g</span></div>
+                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBAlways ? 'On' : 'Off'}</span></div>
+              </div>
+            </div>
+
+            <div className="border border-green-200 dark:border-green-800 rounded-lg p-4 bg-green-50 dark:bg-green-900/10">
+              <div className="flex items-center mb-2">
+                <Target className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
+                <h4 className="font-medium text-green-900 dark:text-green-100">Standard</h4>
+              </div>
+              <div className="text-sm text-green-800 dark:text-green-200 space-y-1">
+                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.standard.smbMaxMinutes}</span></div>
+                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.standard.smbDeliveryRatio * 100)}%</span></div>
+                <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.standard.carbsReqThreshold} g</span></div>
+                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBAlways ? 'On' : 'Off'}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 text-xs text-gray-600 dark:text-gray-400">
+            Guidance intent: reduce hypoglycemia risk first, then address persistent hyperglycemia. If you see significant lows in specific hours, keep SMB aggression limited in those windows.
+          </div>
+        </div>
+      )}
+
+      {/* SMB Effectiveness + Risk by Hour */}
+      {filteredData?.entries?.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+          <div className="flex items-center mb-4">
+            <Activity className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">SMB Outcomes by Hour</h3>
+            <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Min SMBs/hour: {smbOutcomesByHour.minCount}</span>
+          </div>
+
+          {smbEvents.length === 0 ? (
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              No SMB events detected in the selected period.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                “Effective” = average BG in ~2h after SMB drops by ≥5 mg/dL. “Post-SMB low” = any reading below target minimum within 3h.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {smbOutcomesByHour.outcomes.map((h) => {
+                  const eligible = h.count >= smbOutcomesByHour.minCount;
+                  const bg = !eligible
+                    ? 'bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-700'
+                    : h.postSmbLowPct >= 15
+                      ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                      : h.effectivePct >= 60
+                        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                        : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800';
+
+                  return (
+                    <div
+                      key={h.hour}
+                      className={`border rounded-lg p-3 transition-colors duration-200 ${bg}`}
+                      title={eligible ? undefined : `Low SMB sample count for this hour (n=${h.count}).`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium text-gray-900 dark:text-gray-100">
+                          {h.hour.toString().padStart(2, '0')}:00–{h.hour.toString().padStart(2, '0')}:59
+                        </div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">n={h.count}</div>
+                      </div>
+                      <div className="mt-2 text-sm text-gray-700 dark:text-gray-300 space-y-1">
+                        <div>
+                          <span className="font-medium">Effective</span>: {h.effectivePct.toFixed(1)}% · <span className="font-medium text-red-700 dark:text-red-300">Post-SMB low</span>: {h.postSmbLowPct.toFixed(1)}%
+                        </div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">
+                          {h.avgDrop2hMgdl != null ? `Avg drop ~2h: ${h.avgDrop2hMgdl.toFixed(0)} mg/dL` : 'Avg drop ~2h: —'}
+                          {h.avgUnits != null ? ` · Avg SMB: ${h.avgUnits.toFixed(2)}U` : ''}
+                        </div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">
+                          {h.avgStartBgMgdl != null ? `Avg start BG: ${formatGlucoseValue(h.avgStartBgMgdl, 'mgdl', true)}` : 'Avg start BG: —'}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {(smbOutcomesByHour.worstHypo[0] || smbOutcomesByHour.worstEffectiveness[0]) && (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {smbOutcomesByHour.worstHypo[0] && (
+                    <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-lg">
+                      <p className="text-sm text-red-800 dark:text-red-200">
+                        <strong>Highest post-SMB low risk:</strong> {smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:00–{smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:59 ({smbOutcomesByHour.worstHypo[0].postSmbLowPct.toFixed(1)}%).
+                        Consider keeping SMB behavior more conservative around this time.
+                      </p>
+                    </div>
+                  )}
+                  {smbOutcomesByHour.worstEffectiveness[0] && (
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500 p-4 rounded-lg">
+                      <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                        <strong>Lowest SMB effectiveness:</strong> {smbOutcomesByHour.worstEffectiveness[0].hour.toString().padStart(2, '0')}:00–{smbOutcomesByHour.worstEffectiveness[0].hour.toString().padStart(2, '0')}:59 ({smbOutcomesByHour.worstEffectiveness[0].effectivePct.toFixed(1)}%).
+                        If highs persist here, consider focusing on basal/ISF/timing rather than simply increasing SMB aggression.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

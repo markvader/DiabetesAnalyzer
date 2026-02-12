@@ -33,8 +33,12 @@ class NightscoutTreatmentParser {
   /**
    * Parse Nightscout treatments data into structured events for predictions
    */
-  parseTreatments(treatments: NightscoutTreatment[], hoursBack: number = 12): ParsedNightscoutData {
-    const cutoffTime = Date.now() - (hoursBack * 60 * 60 * 1000);
+  parseTreatments(
+    treatments: NightscoutTreatment[],
+    hoursBack: number = 12,
+    referenceEndMs: number = Date.now()
+  ): ParsedNightscoutData {
+    const cutoffTime = referenceEndMs - (hoursBack * 60 * 60 * 1000);
     
     const meals: MealEvent[] = [];
     const insulin: InsulinEvent[] = [];
