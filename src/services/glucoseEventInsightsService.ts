@@ -64,6 +64,7 @@ export interface GlucoseEventInsights {
   aiSummary: {
     confidence: number;
     headline: string;
+    riskLevel: 'low' | 'moderate' | 'high';
   };
 }
 
@@ -140,6 +141,32 @@ function buildHourlyRisk(readings: NightscoutEntry[], events: GlucoseEvent[]): H
   }));
 }
 
+function classifyRiskLevel(params: {
+  lowPct: number;
+  highPct: number;
+  severeHypo: number;
+  prolongedHyper: number;
+  hypoEvents: number;
+  hyperEvents: number;
+}): 'low' | 'moderate' | 'high' {
+  const highRisk =
+    params.severeHypo > 0 ||
+    params.lowPct >= 4 ||
+    params.prolongedHyper >= 3 ||
+    params.highPct >= 40;
+
+  if (highRisk) return 'high';
+
+  const moderateRisk =
+    params.hypoEvents >= 4 ||
+    params.hyperEvents >= 5 ||
+    params.lowPct >= 2 ||
+    params.highPct >= 30 ||
+    params.prolongedHyper >= 1;
+
+  return moderateRisk ? 'moderate' : 'low';
+}
+
 export function analyzeGlucoseEventInsights(
   readingsInput: NightscoutEntry[],
   treatmentsInput: NightscoutTreatment[],
@@ -199,7 +226,8 @@ export function analyzeGlucoseEventInsights(
       },
       aiSummary: {
         confidence: 0,
-        headline: 'Insufficient data for event-level analysis.'
+        headline: 'Insufficient data for event-level analysis.',
+        riskLevel: 'low'
       }
     };
   }
@@ -335,13 +363,13 @@ export function analyzeGlucoseEventInsights(
 
   const safetyAlerts: string[] = [];
   if ((lowCount / values.length) * 100 >= 4 || eventCounts.severeHypo > 0) {
-    safetyAlerts.push('Critical hypoglycemia burden detected in selected period. Prioritize safety reductions before any aggressive changes.');
+    safetyAlerts.push('High risk: critical hypoglycemia burden detected. Prioritize safety reductions before aggressive changes.');
   } else if ((lowCount / values.length) * 100 >= 2 || eventCounts.hypo >= 4) {
-    safetyAlerts.push('Elevated hypoglycemia burden detected. Apply conservative insulin adjustments and monitor closely.');
+    safetyAlerts.push('Moderate risk: elevated hypoglycemia burden detected. Use conservative insulin adjustments and monitor closely.');
   }
 
   if ((highCount / values.length) * 100 >= 35 || eventCounts.prolongedHyper >= 3) {
-    safetyAlerts.push('Persistent hyperglycemia burden detected. Consider structured increases in correction and meal coverage.');
+    safetyAlerts.push('Moderate-to-high risk: persistent hyperglycemia burden detected. Consider structured increases in correction and meal coverage.');
   }
 
   if (eventCounts.postMealHypo >= 2 && eventCounts.postMealHyper >= 2) {
@@ -405,6 +433,15 @@ export function analyzeGlucoseEventInsights(
           ? 'Mixed post-meal excursions: focus on meal-window CR and SMB targeting.'
           : 'Balanced risk profile: optimize by dominant hourly clusters and treatment context.';
 
+  const riskLevel = classifyRiskLevel({
+    lowPct: values.length ? (lowCount / values.length) * 100 : 0,
+    highPct: values.length ? (highCount / values.length) * 100 : 0,
+    severeHypo: eventCounts.severeHypo,
+    prolongedHyper: eventCounts.prolongedHyper,
+    hypoEvents: eventCounts.hypo,
+    hyperEvents: eventCounts.hyper
+  });
+
   return {
     period: {
       startMs: firstMs,
@@ -429,7 +466,8 @@ export function analyzeGlucoseEventInsights(
     recommendations,
     aiSummary: {
       confidence,
-      headline
+      headline,
+      riskLevel
     }
   };
 }

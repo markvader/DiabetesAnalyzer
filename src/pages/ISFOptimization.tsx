@@ -235,9 +235,9 @@ const ISFOptimization = () => {
           </p>
         </div>
         
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full sm:w-auto">
           {/* Time Period Selection */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <Clock className="w-4 h-4 text-gray-500 dark:text-gray-400" />
             <select
               value={isCustomRange ? 'custom' : timeWindow}
@@ -248,7 +248,7 @@ const ISFOptimization = () => {
                   handleTimeWindowChange(Number(e.target.value));
                 }
               }}
-              className="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded px-3 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2 text-sm bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
             >
               {timeWindowOptions.map(option => (
                 <option key={option.value} value={option.value}>
@@ -261,7 +261,7 @@ const ISFOptimization = () => {
 
           <button 
             onClick={handleRefreshAI}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center justify-center transition-colors duration-200"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh AI Analysis
@@ -309,16 +309,16 @@ const ISFOptimization = () => {
               </div>
             </div>
             
-            <div className="flex gap-3 mt-6">
+            <div className="flex flex-col sm:flex-row gap-3 mt-6">
               <button
                 onClick={() => setShowCalendar(false)}
-                className="flex-1 px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors duration-200"
+                className="flex-1 min-h-[44px] px-4 py-2.5 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors duration-200"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCustomRangeSubmit}
-                className="flex-1 px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
+                className="flex-1 min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
               >
                 Apply Range
               </button>
@@ -357,7 +357,7 @@ const ISFOptimization = () => {
         <GlucoseEventInsightsPanel
           insights={eventInsights}
           focus="isf"
-          title="Advanced ISF Event Intelligence"
+          title="Event Intelligence • ISF"
         />
       )}
 

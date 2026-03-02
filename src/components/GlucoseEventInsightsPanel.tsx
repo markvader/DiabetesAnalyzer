@@ -25,47 +25,58 @@ const GlucoseEventInsightsPanel: React.FC<GlucoseEventInsightsPanelProps> = ({ i
   const primaryHyperHour = insights.topHyperHours[0];
 
   const sectionTitle = title ?? 'Advanced Event Intelligence';
+  const riskBadgeClass =
+    insights.aiSummary.riskLevel === 'high'
+      ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200'
+      : insights.aiSummary.riskLevel === 'moderate'
+        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
+        : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200';
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+    <div className="w-full bg-white dark:bg-gray-800 p-4 sm:p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4 sm:space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 pb-1">
+        <div className="flex items-center gap-2 min-w-0">
           <Brain className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">{sectionTitle}</h3>
+          <h3 className="text-base sm:text-lg font-medium text-gray-900 dark:text-gray-100 truncate">{sectionTitle}</h3>
         </div>
-        <span className="text-xs text-gray-500 dark:text-gray-400">Confidence {insights.aiSummary.confidence}%</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-[11px] sm:text-xs px-2 py-1 rounded-full font-medium ${riskBadgeClass}`}>
+            Risk {insights.aiSummary.riskLevel}
+          </span>
+          <span className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400">Confidence {insights.aiSummary.confidence}%</span>
+        </div>
       </div>
 
-      <p className="text-sm text-gray-700 dark:text-gray-300">{insights.aiSummary.headline}</p>
+      <p className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 leading-relaxed">{insights.aiSummary.headline}</p>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3">
-          <div className="text-xs text-red-700 dark:text-red-300">Hypo events</div>
-          <div className="text-xl font-semibold text-red-800 dark:text-red-200">{insights.eventCounts.hypo}</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-4 min-h-[88px]">
+          <div className="text-[11px] uppercase tracking-wide text-red-700 dark:text-red-300">Hypo events</div>
+          <div className="text-lg sm:text-xl font-semibold text-red-800 dark:text-red-200">{insights.eventCounts.hypo}</div>
         </div>
-        <div className="rounded-lg border border-orange-200 dark:border-orange-900/40 bg-orange-50 dark:bg-orange-900/20 p-3">
-          <div className="text-xs text-orange-700 dark:text-orange-300">Hyper events</div>
-          <div className="text-xl font-semibold text-orange-800 dark:text-orange-200">{insights.eventCounts.hyper}</div>
+        <div className="rounded-xl border border-orange-200 dark:border-orange-900/40 bg-orange-50 dark:bg-orange-900/20 p-4 min-h-[88px]">
+          <div className="text-[11px] uppercase tracking-wide text-orange-700 dark:text-orange-300">Hyper events</div>
+          <div className="text-lg sm:text-xl font-semibold text-orange-800 dark:text-orange-200">{insights.eventCounts.hyper}</div>
         </div>
-        <div className="rounded-lg border border-blue-200 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 p-3">
-          <div className="text-xs text-blue-700 dark:text-blue-300">Avg glucose</div>
-          <div className="text-xl font-semibold text-blue-800 dark:text-blue-200">
+        <div className="rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50 dark:bg-blue-900/20 p-4 min-h-[88px]">
+          <div className="text-[11px] uppercase tracking-wide text-blue-700 dark:text-blue-300">Avg glucose</div>
+          <div className="text-lg sm:text-xl font-semibold text-blue-800 dark:text-blue-200">
             {formatGlucoseValue(insights.metrics.avgGlucoseMgdl, 'mgdl', false)}
           </div>
         </div>
-        <div className="rounded-lg border border-green-200 dark:border-green-900/40 bg-green-50 dark:bg-green-900/20 p-3">
-          <div className="text-xs text-green-700 dark:text-green-300">TIR</div>
-          <div className="text-xl font-semibold text-green-800 dark:text-green-200">{insights.metrics.timeInRangePct.toFixed(1)}%</div>
+        <div className="rounded-xl border border-green-200 dark:border-green-900/40 bg-green-50 dark:bg-green-900/20 p-4 min-h-[88px]">
+          <div className="text-[11px] uppercase tracking-wide text-green-700 dark:text-green-300">TIR</div>
+          <div className="text-lg sm:text-xl font-semibold text-green-800 dark:text-green-200">{insights.metrics.timeInRangePct.toFixed(1)}%</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs sm:text-sm">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/20 p-4">
           <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
             <TrendingDown className="h-4 w-4 text-red-500" />
-            Low-risk hotspot
+            Hypoglycemia hotspot
           </div>
-          <p className="mt-1 text-gray-700 dark:text-gray-300">
+          <p className="mt-1 text-gray-700 dark:text-gray-300 leading-relaxed">
             {primaryHypoHour
               ? `${primaryHypoHour.hour.toString().padStart(2, '0')}:00-${primaryHypoHour.hour
                   .toString()
@@ -74,12 +85,12 @@ const GlucoseEventInsightsPanel: React.FC<GlucoseEventInsightsPanelProps> = ({ i
           </p>
         </div>
 
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/20 p-4">
           <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
             <TrendingUp className="h-4 w-4 text-orange-500" />
-            High-risk hotspot
+            Hyperglycemia hotspot
           </div>
-          <p className="mt-1 text-gray-700 dark:text-gray-300">
+          <p className="mt-1 text-gray-700 dark:text-gray-300 leading-relaxed">
             {primaryHyperHour
               ? `${primaryHyperHour.hour.toString().padStart(2, '0')}:00-${primaryHyperHour.hour
                   .toString()
@@ -92,12 +103,12 @@ const GlucoseEventInsightsPanel: React.FC<GlucoseEventInsightsPanelProps> = ({ i
       {(insights.safetyAlerts.length > 0 || focusRecommendations.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {insights.safetyAlerts.length > 0 && (
-            <div className="rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3">
+            <div className="rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-4">
               <div className="flex items-center gap-2 font-medium text-red-800 dark:text-red-200">
                 <AlertTriangle className="h-4 w-4" />
-                Safety alerts
+                Safety Alerts
               </div>
-              <ul className="mt-2 space-y-1 text-sm text-red-700 dark:text-red-300">
+              <ul className="mt-2 space-y-1.5 text-xs sm:text-sm leading-relaxed text-red-700 dark:text-red-300">
                 {insights.safetyAlerts.slice(0, 3).map((warning, index) => (
                   <li key={index}>• {warning}</li>
                 ))}
@@ -106,9 +117,9 @@ const GlucoseEventInsightsPanel: React.FC<GlucoseEventInsightsPanelProps> = ({ i
           )}
 
           {focusRecommendations.length > 0 && (
-            <div className="rounded-lg border border-purple-200 dark:border-purple-900/40 bg-purple-50 dark:bg-purple-900/20 p-3">
-              <div className="font-medium text-purple-900 dark:text-purple-100">Targeted recommendations</div>
-              <ul className="mt-2 space-y-1 text-sm text-purple-800 dark:text-purple-200">
+            <div className="rounded-xl border border-purple-200 dark:border-purple-900/40 bg-purple-50 dark:bg-purple-900/20 p-4">
+              <div className="font-medium text-purple-900 dark:text-purple-100">Focused Recommendations</div>
+              <ul className="mt-2 space-y-1.5 text-xs sm:text-sm leading-relaxed text-purple-800 dark:text-purple-200">
                 {focusRecommendations.slice(0, 3).map((recommendation, index) => (
                   <li key={index}>• {recommendation}</li>
                 ))}

@@ -6,10 +6,13 @@ import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Brain, Calendar, Clock, RefreshCw, Cpu, Sparkles } from 'lucide-react';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { toMmol } from '../utils/glucoseUtils';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
 
 const AIInsights = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
@@ -34,6 +37,11 @@ const AIInsights = () => {
     return [...data.entries].sort((a, b) => a.date - b.date);
   }, [data?.entries]);
 
+  const treatmentsSortedAsc = React.useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments]);
+
   const selectedRange = React.useMemo(() => {
     if (isCustomRange) {
       return {
@@ -55,6 +63,18 @@ const AIInsights = () => {
 
     return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
   }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+
+  const filteredTreatments = React.useMemo(() => {
+    if (!treatmentsSortedAsc.length) {
+      return [];
+    }
+
+    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
+  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+
+  const eventInsights = React.useMemo(() => {
+    return analyzeGlucoseEventInsights(filteredReadings, filteredTreatments, selectedRange);
+  }, [filteredReadings, filteredTreatments, selectedRange]);
 
   // Calculate time in range for filtered readings
   const filteredStats = React.useMemo(() => {
@@ -220,18 +240,18 @@ const AIInsights = () => {
         transition={{ duration: 0.6 }}
       >
         <div>
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
             <h2 className={
               isPremium 
-                ? "text-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent" 
-                : "text-2xl font-bold text-gray-900 dark:text-gray-100"
+                ? "text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 dark:from-purple-400 dark:to-indigo-400 bg-clip-text text-transparent" 
+                : "text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100"
             }>
-              {isPremium && <Sparkles className="inline-block w-6 h-6 mr-2 text-purple-500 animate-pulse" />}
+              {isPremium && <Sparkles className="inline-block w-5 h-5 sm:w-6 sm:h-6 mr-2 text-purple-500 animate-pulse" />}
               AI-Powered Insights
             </h2>
             {tensorFlowEnabled && (
               <motion.div 
-                className={`flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                className={`flex items-center px-2.5 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-medium ${
                   tensorFlowReady 
                     ? isPremium
                       ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-lg'
@@ -248,10 +268,10 @@ const AIInsights = () => {
               </motion.div>
             )}
           </div>
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 leading-relaxed">
             Advanced analysis for {getDisplayLabel()} ({filteredStats?.totalReadings || 0} readings)
             {tensorFlowEnabled && tensorFlowReady && (
-              <span className="ml-2 text-blue-600 dark:text-blue-400">
+              <span className="block sm:inline sm:ml-2 text-blue-600 dark:text-blue-400">
                 • Private & Fast AI Processing
               </span>
             )}
@@ -269,11 +289,11 @@ const AIInsights = () => {
         </div>
         
         {/* Time Selection Controls */}
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mt-4 sm:mt-0">
+        <div className="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-0 w-full sm:w-auto">
           <select
             value={isCustomRange ? 'custom' : timeWindow.toString()}
             onChange={(e) => handleTimeWindowChange(e.target.value)}
-            className="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2 text-sm rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
           >
             {getAllTimeWindows().map(option => (
               <option key={option.value} value={option.value}>
@@ -287,8 +307,8 @@ const AIInsights = () => {
             onClick={() => setShowCalendar(!showCalendar)}
             className={
               isPremium
-                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
-                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+                ? "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center justify-center transition-all duration-200 shadow-lg"
+                : "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded flex items-center justify-center hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
             }
             whileHover={isPremium ? { scale: 1.05 } : {}}
             whileTap={isPremium ? { scale: 0.95 } : {}}
@@ -308,8 +328,8 @@ const AIInsights = () => {
             }}
             className={
               isPremium
-                ? "px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 flex items-center transition-all duration-200 shadow-lg"
-                : "px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+                ? "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 flex items-center justify-center transition-all duration-200 shadow-lg"
+                : "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded flex items-center justify-center hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
             }
             whileHover={isPremium ? { scale: 1.05 } : {}}
             whileTap={isPremium ? { scale: 0.95 } : {}}
@@ -322,8 +342,8 @@ const AIInsights = () => {
             onClick={handleRefreshAI}
             className={
               isPremium
-                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
-                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+                ? "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center justify-center transition-all duration-200 shadow-lg"
+                : "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded flex items-center justify-center hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
             }
             whileHover={isPremium ? { scale: 1.05 } : {}}
             whileTap={isPremium ? { scale: 0.95 } : {}}
@@ -371,10 +391,10 @@ const AIInsights = () => {
               Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
             </p>
           )}
-          <div className="flex space-x-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={handleCustomDateSubmit}
-              className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
             >
               Apply Range
             </button>
@@ -385,7 +405,7 @@ const AIInsights = () => {
                   setIsCustomRange(false);
                 }
               }}
-              className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
             >
               Cancel
             </button>
@@ -395,32 +415,32 @@ const AIInsights = () => {
 
       {/* AI Insights */}
       <div className="space-y-6">
-        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-6 rounded-lg shadow-md text-white">
-          <div className="flex items-center mb-4">
-            <Brain className="h-7 w-7 mr-3" />
-            <h3 className="text-xl font-bold">AI-Powered Glucose Analysis</h3>
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 p-4 sm:p-6 rounded-xl shadow-md text-white">
+          <div className="flex items-center mb-3 sm:mb-4">
+            <Brain className="h-6 w-6 sm:h-7 sm:w-7 mr-2 sm:mr-3" />
+            <h3 className="text-lg sm:text-xl font-bold">AI-Powered Glucose Analysis</h3>
           </div>
-          <p className="mb-4">
+          <p className="mb-4 text-sm sm:text-base leading-relaxed">
             Our advanced AI analyzes your glucose patterns to provide personalized insights and recommendations. 
             The analysis considers your time in range, variability, and specific patterns to help you optimize 
-            your diabetes management.
+            your diabetes management, including event-driven safety recommendations for SMB, carb ratio, ISF, and basal settings.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-            <div className="bg-white/10 p-4 rounded-lg">
-              <h4 className="font-medium mb-2">Pattern Recognition</h4>
-              <p className="text-sm">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mt-5 sm:mt-6">
+            <div className="bg-white/10 p-3 sm:p-4 rounded-lg">
+              <h4 className="font-medium mb-1.5 sm:mb-2 text-sm sm:text-base">Pattern Recognition</h4>
+              <p className="text-xs sm:text-sm leading-relaxed">
                 Identifies recurring patterns in your glucose data and correlates them with time of day, meals, and activities
               </p>
             </div>
-            <div className="bg-white/10 p-4 rounded-lg">
-              <h4 className="font-medium mb-2">Personalized Insights</h4>
-              <p className="text-sm">
+            <div className="bg-white/10 p-3 sm:p-4 rounded-lg">
+              <h4 className="font-medium mb-1.5 sm:mb-2 text-sm sm:text-base">Personalized Insights</h4>
+              <p className="text-xs sm:text-sm leading-relaxed">
                 Provides tailored observations based on your unique glucose trends and management style
               </p>
             </div>
-            <div className="bg-white/10 p-4 rounded-lg">
-              <h4 className="font-medium mb-2">Actionable Recommendations</h4>
-              <p className="text-sm">
+            <div className="bg-white/10 p-3 sm:p-4 rounded-lg">
+              <h4 className="font-medium mb-1.5 sm:mb-2 text-sm sm:text-base">Actionable Recommendations</h4>
+              <p className="text-xs sm:text-sm leading-relaxed">
                 Suggests specific, practical steps you can take to improve your diabetes management
               </p>
             </div>
@@ -445,6 +465,14 @@ const AIInsights = () => {
               Please select a time period with glucose data to generate AI insights.
             </p>
           </div>
+        )}
+
+        {eventInsights.period.totalReadings > 0 && (
+          <GlucoseEventInsightsPanel
+            insights={eventInsights}
+            focus="openaps"
+            title="Event Intelligence • Selected Period"
+          />
         )}
       </div>
 

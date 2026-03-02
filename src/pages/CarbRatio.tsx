@@ -499,11 +499,11 @@ const CarbRatio = () => {
         </div>
         
         {/* Time Selection and Refresh Controls */}
-        <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mt-4 sm:mt-0">
+        <div className="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-0 w-full sm:w-auto">
           <select
             value={isCustomRange ? 'custom' : timeWindow.toString()}
             onChange={(e) => handleTimeWindowChange(e.target.value)}
-            className="rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2 text-sm rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 dark:focus:border-blue-400 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-colors duration-200"
           >
             {getAllTimeWindows().map(option => (
               <option key={option.value} value={option.value}>
@@ -517,8 +517,8 @@ const CarbRatio = () => {
             onClick={() => setShowCalendar(!showCalendar)}
             className={
               isPremium
-                ? "px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center transition-all duration-200 shadow-lg"
-                : "px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+                ? "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-lg hover:from-purple-700 hover:to-pink-700 flex items-center justify-center transition-all duration-200 shadow-lg"
+                : "w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded flex items-center justify-center hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
             }
             whileHover={isPremium ? { scale: 1.05 } : {}}
             whileTap={isPremium ? { scale: 0.95 } : {}}
@@ -536,7 +536,7 @@ const CarbRatio = () => {
                 runSafeAsync(() => fetchDataForDays(Math.max(daysNeeded, analysisPeriod)), { label: 'CarbRatio refresh fetch data' });
               }
             }}
-            className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded flex items-center justify-center hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
           >
             <Clock className="w-4 h-4 mr-2" />
             Refresh Data
@@ -544,7 +544,7 @@ const CarbRatio = () => {
           
           <button 
             onClick={handleRefreshAI}
-            className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+            className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded flex items-center justify-center hover:bg-purple-700 dark:hover:bg-purple-600 transition-colors duration-200"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh AI
@@ -589,10 +589,10 @@ const CarbRatio = () => {
               Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
             </p>
           )}
-          <div className="flex space-x-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={handleCustomDateSubmit}
-              className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
             >
               Apply Range
             </button>
@@ -600,7 +600,7 @@ const CarbRatio = () => {
               onClick={() => {
                 setShowCalendar(false);
               }}
-              className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
             >
               Cancel
             </button>
@@ -612,7 +612,7 @@ const CarbRatio = () => {
         <GlucoseEventInsightsPanel
           insights={analysisResults.eventInsights}
           focus="carb"
-          title="Advanced Carb Ratio Event Intelligence"
+          title="Event Intelligence • Carb Ratio"
         />
       )}
 

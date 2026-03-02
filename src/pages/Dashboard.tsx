@@ -29,7 +29,9 @@ import { debugError, debugLog } from '../utils/logger';
 import EnhancedAIInsightsPanel from '../components/EnhancedAIInsightsPanel';
 import TensorFlowStatus from '../components/TensorFlowStatus';
 import AIManagementPlan from '../components/AIManagementPlan';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { analyzeData } from '../services/analysisService';
+import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
 import { getDateRangeString } from '../utils/dateUtils';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useSubscription } from '../contexts/SubscriptionContext';
@@ -450,12 +452,6 @@ const Dashboard = () => {
   const [timeWindow, setTimeWindow] = useState(24);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showRefreshSettings, setShowRefreshSettings] = useState(false);
-  const chartTreatments = useMemo(() => {
-    if (!data?.treatments?.length) return [];
-    const now = Date.now();
-    const cutoffTime = now - timeWindow * 60 * 60 * 1000;
-    return data.treatments.filter((t) => getTreatmentMs(t) >= cutoffTime);
-  }, [data?.treatments, timeWindow]);
   const [customDateRange, setCustomDateRange] = useState<{
     startDate: string;
     endDate: string;
@@ -467,6 +463,27 @@ const Dashboard = () => {
   const [manualAIRefresh, setManualAIRefresh] = useState(false);
   const [lastTimeWindow, setLastTimeWindow] = useState<number | null>(null);
   const [lastCustomRange, setLastCustomRange] = useState<{startDate: string, endDate: string} | null>(null);
+
+  const selectedRange = useMemo(() => {
+    if (isCustomRange) {
+      return {
+        startMs: startOfDay(new Date(customDateRange.startDate)).getTime(),
+        endMs: endOfDay(new Date(customDateRange.endDate)).getTime()
+      };
+    }
+
+    const endMs = Date.now();
+    const startMs = endMs - timeWindow * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [isCustomRange, customDateRange.startDate, customDateRange.endDate, timeWindow]);
+
+  const chartTreatments = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return data.treatments.filter((t) => {
+      const treatmentMs = getTreatmentMs(t);
+      return treatmentMs >= selectedRange.startMs && treatmentMs <= selectedRange.endMs;
+    });
+  }, [data?.treatments, selectedRange.endMs, selectedRange.startMs]);
   
   // Fast initial fetch: load just enough data to render the dashboard quickly.
   // Then prefetch the full analysis range in the background.
@@ -816,6 +833,10 @@ const Dashboard = () => {
 
     return result;
   }, [filteredReadings, convertToCurrentUnit, currentRanges]);
+
+  const eventInsights = useMemo(() => {
+    return analyzeGlucoseEventInsights(filteredReadings, chartTreatments, selectedRange);
+  }, [filteredReadings, chartTreatments, selectedRange]);
 
   const handleAlertSettingsSave = (settings: unknown) => {
     console.log('Alert settings saved:', settings);
@@ -1289,16 +1310,16 @@ const Dashboard = () => {
                 <li>Nightscout server configuration issue</li>
               </ul>
             </div>
-            <div className="mt-4 space-x-2">
+            <div className="mt-4 flex flex-col sm:flex-row gap-2">
               <button
                 onClick={() => navigate('/settings')}
-                className="px-4 py-2 bg-yellow-600 dark:bg-yellow-500 text-white rounded hover:bg-yellow-700 dark:hover:bg-yellow-600 transition-colors duration-200"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-yellow-600 dark:bg-yellow-500 text-white rounded hover:bg-yellow-700 dark:hover:bg-yellow-600 transition-colors duration-200"
               >
                 Check Settings
               </button>
               <button
                 onClick={() => runSafeAsync(() => fetchDataForDays(7), { label: 'Dashboard retry fetch' })}
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
               >
                 Retry Fetch
               </button>
@@ -1531,7 +1552,7 @@ const Dashboard = () => {
         <p className="text-gray-600 dark:text-gray-400">Please configure your Nightscout URL in settings to get started.</p>
         <button
           onClick={() => navigate('/settings')}
-          className="mt-4 px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+          className="mt-4 min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
         >
           Go to Settings
         </button>
@@ -1763,11 +1784,11 @@ const Dashboard = () => {
                 </p>
               )}
             </div>
-            <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-3 mt-6 sm:mt-0">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-6 sm:mt-0 w-full sm:w-auto">
               <select
                 value={isCustomRange ? 'custom' : timeWindow.toString()}
                 onChange={(e) => handleTimeWindowChange(e.target.value)}
-                className="rounded-xl border-gray-300 dark:border-gray-600 shadow-lg focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-all duration-200 px-4 py-2"
+                className="w-full sm:w-auto min-h-[44px] rounded-xl border-gray-300 dark:border-gray-600 shadow-lg focus:border-blue-500 dark:focus:border-blue-400 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 transition-all duration-200 px-4 py-2"
               >
                 {getAllTimeWindows().map(option => (
                   <option key={option.value} value={option.value}>
@@ -1779,7 +1800,7 @@ const Dashboard = () => {
               
               <button
                 onClick={() => setShowCalendar(!showCalendar)}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600 text-white rounded-xl hover:from-purple-700 hover:to-purple-800 dark:hover:from-purple-600 dark:hover:to-purple-700 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-700 dark:from-purple-500 dark:to-purple-600 text-white rounded-xl hover:from-purple-700 hover:to-purple-800 dark:hover:from-purple-600 dark:hover:to-purple-700 flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
               >
                 <Calendar className="w-4 h-4 mr-2" />
                 Calendar
@@ -1787,7 +1808,7 @@ const Dashboard = () => {
               
               <button 
                 onClick={refreshNow}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-500 dark:to-blue-600 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 dark:hover:from-blue-600 dark:hover:to-blue-700 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-500 dark:to-blue-600 text-white rounded-xl hover:from-blue-700 hover:to-blue-800 dark:hover:from-blue-600 dark:hover:to-blue-700 flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Refresh Now
@@ -1795,7 +1816,7 @@ const Dashboard = () => {
               
               <button
                 onClick={() => setShowRefreshSettings(!showRefreshSettings)}
-                className="px-4 py-2 bg-gradient-to-r from-gray-600 to-gray-700 dark:from-gray-700 dark:to-gray-800 text-white rounded-xl hover:from-gray-700 hover:to-gray-800 dark:hover:from-gray-800 dark:hover:to-gray-900 flex items-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gradient-to-r from-gray-600 to-gray-700 dark:from-gray-700 dark:to-gray-800 text-white rounded-xl hover:from-gray-700 hover:to-gray-800 dark:hover:from-gray-800 dark:hover:to-gray-900 flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
               >
                 <Clock className="w-4 h-4 mr-2" />
                 Auto-Refresh
@@ -2003,7 +2024,7 @@ const Dashboard = () => {
                 <select
                   value={autoRefreshInterval}
                   onChange={(e) => setAutoRefreshInterval(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
+                  className="w-full min-h-[44px] px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
                   disabled={!autoRefreshEnabled}
                 >
                   <option value={10000}>10 seconds</option>
@@ -2024,7 +2045,7 @@ const Dashboard = () => {
               <div className="flex justify-end">
                 <button
                   onClick={() => setShowRefreshSettings(false)}
-                  className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                  className="min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
                 >
                   Close
                 </button>
@@ -2271,10 +2292,10 @@ const Dashboard = () => {
                 Available data: {format(dataSpanInfo.oldestDate, 'dd.MM.yyyy')} - {format(dataSpanInfo.newestDate, 'dd.MM.yyyy')}
               </p>
             )}
-            <div className="flex space-x-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={handleCustomDateSubmit}
-                className="px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-blue-600 dark:bg-blue-500 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200"
               >
                 Apply Range
               </button>
@@ -2282,7 +2303,7 @@ const Dashboard = () => {
                 onClick={() => {
                   setShowCalendar(false);
                 }}
-                className="px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
+                className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-gray-600 dark:bg-gray-700 text-white rounded hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors duration-200"
               >
                 Cancel
               </button>
@@ -3137,9 +3158,16 @@ const Dashboard = () => {
                 }}
               />
               
-              <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Box
+                display="flex"
+                flexDirection={{ xs: 'column', sm: 'row' }}
+                justifyContent="space-between"
+                alignItems={{ xs: 'flex-start', sm: 'center' }}
+                gap={{ xs: 2, sm: 1 }}
+              >
                 <Typography variant="h5" sx={{ 
                   fontWeight: 700,
+                  fontSize: { xs: '1.1rem', sm: '1.5rem' },
                   background: `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.secondary.main} 100%)`,
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
@@ -3157,6 +3185,7 @@ const Dashboard = () => {
                     startIcon={<Brain size={18} />}
                     variant="contained"
                     sx={{
+                      width: { xs: '100%', sm: 'auto' },
                       background: `linear-gradient(135deg, ${theme.palette.secondary.main} 0%, ${theme.palette.secondary.dark} 100%)`,
                       color: '#ffffff',
                       borderRadius: 3,
@@ -3178,11 +3207,11 @@ const Dashboard = () => {
             </Paper>
           </motion.div>
         ) : (
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
             <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">AI-Powered Analysis</h3>
             <button
               onClick={handleRefreshAI}
-              className="px-4 py-2 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center transition-colors duration-200"
+              className="w-full sm:w-auto min-h-[44px] px-4 py-2.5 bg-purple-600 dark:bg-purple-500 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 flex items-center justify-center transition-colors duration-200"
             >
               <Brain className="w-4 h-4 mr-2" />
               Refresh AI Analysis
@@ -3222,6 +3251,16 @@ const Dashboard = () => {
               />
             );
           })()}
+        </div>
+      )}
+
+      {eventInsights.period.totalReadings > 0 && (
+        <div className="mb-6">
+          <GlucoseEventInsightsPanel
+            insights={eventInsights}
+            focus="openaps"
+            title="Event Intelligence • Dashboard Period"
+          />
         </div>
       )}
 

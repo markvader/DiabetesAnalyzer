@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { monitoringService } from '../services/monitoringService';
 import { Activity, AlertTriangle, Clock, TrendingUp, Download, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
+import { useNightscout } from '../contexts/NightscoutContext';
+import { runSafeAsync } from '../utils/safeAsync';
+import { getTreatmentMs } from '../utils/nightscoutTime';
+import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
+import GlucoseEventInsightsPanel from './GlucoseEventInsightsPanel';
 
 interface MonitoringFinding {
   category: string;
@@ -50,6 +55,7 @@ interface MonitoringReport {
 }
 
 const MonitoringDashboard: React.FC = () => {
+  const { data, fetchDataForDays } = useNightscout();
   const [report, setReport] = useState<MonitoringReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState(7);
@@ -69,6 +75,37 @@ const MonitoringDashboard: React.FC = () => {
   useEffect(() => {
     generateReport();
   }, [generateReport]);
+
+  useEffect(() => {
+    runSafeAsync(() => fetchDataForDays(Math.max(7, selectedPeriod)), { label: 'MonitoringDashboard fetch clinical data' });
+  }, [fetchDataForDays, selectedPeriod]);
+
+  const selectedRange = useMemo(() => {
+    const endMs = Date.now();
+    const startMs = endMs - selectedPeriod * 24 * 60 * 60 * 1000;
+    return { startMs, endMs };
+  }, [selectedPeriod]);
+
+  const filteredReadings = useMemo(() => {
+    if (!data?.entries?.length) return [];
+    return data.entries
+      .filter((entry) => entry.date >= selectedRange.startMs && entry.date <= selectedRange.endMs)
+      .sort((a, b) => a.date - b.date);
+  }, [data?.entries, selectedRange.endMs, selectedRange.startMs]);
+
+  const filteredTreatments = useMemo(() => {
+    if (!data?.treatments?.length) return [];
+    return data.treatments
+      .filter((treatment) => {
+        const treatmentMs = getTreatmentMs(treatment);
+        return treatmentMs >= selectedRange.startMs && treatmentMs <= selectedRange.endMs;
+      })
+      .sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
+  }, [data?.treatments, selectedRange.endMs, selectedRange.startMs]);
+
+  const eventInsights = useMemo(() => {
+    return analyzeGlucoseEventInsights(filteredReadings, filteredTreatments, selectedRange);
+  }, [filteredReadings, filteredTreatments, selectedRange]);
 
   const exportReport = () => {
     if (!report) return;
@@ -197,6 +234,14 @@ const MonitoringDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {eventInsights.period.totalReadings > 0 && (
+        <GlucoseEventInsightsPanel
+          insights={eventInsights}
+          focus="openaps"
+          title="Event Intelligence • Monitoring Snapshot"
+        />
+      )}
 
       {/* Detailed Findings */}
       <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
