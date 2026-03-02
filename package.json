@@ -38,7 +38,7 @@
     "esbuild": "^0.25.10",
     "framer-motion": "^12.23.22",
     "howler": "^2.2.4",
-    "jspdf": "^3.0.4",
+    "jspdf": "^4.2.0",
     "lucide-react": "^0.344.0",
     "ml-kmeans": "^6.0.0",
     "ml-matrix": "^6.11.0",
