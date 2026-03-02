@@ -5,11 +5,13 @@ import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { Brain, Calendar, Clock, AlertTriangle, Thermometer, Calculator, RefreshCw } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { aiService } from '../services/aiService';
 import { formatCostEstimate, getModelById } from '../constants/openaiModels';
 import { runSafeAsync } from '../utils/safeAsync';
 import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
 import { getTreatmentMs } from '../utils/nightscoutTime';
+import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
 
 type ISFOptimizationResult = Awaited<ReturnType<typeof aiService.optimizeInsulinSensitivity>>;
 
@@ -156,6 +158,10 @@ const ISFOptimization = () => {
       calculatedISFs: convertISFArray(isfAnalysis.calculatedISFs)
     };
   }, [isfAnalysis, unit]);
+
+  const eventInsights = React.useMemo(() => {
+    return analyzeGlucoseEventInsights(filteredReadings, filteredTreatments, selectedRange);
+  }, [filteredReadings, filteredTreatments, selectedRange]);
 
   // Helper functions
   const getUsageLabel = () => {
@@ -345,6 +351,14 @@ const ISFOptimization = () => {
             <p className="text-red-700 dark:text-red-400">{aiError}</p>
           </div>
         </div>
+      )}
+
+      {eventInsights.period.totalReadings > 0 && (
+        <GlucoseEventInsightsPanel
+          insights={eventInsights}
+          focus="isf"
+          title="Advanced ISF Event Intelligence"
+        />
       )}
 
       {/* ISF Optimization Overview */}

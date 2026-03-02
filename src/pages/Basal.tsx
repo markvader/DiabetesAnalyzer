@@ -5,6 +5,7 @@ import { useDesignMode } from '../contexts/DesignModeContext';
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
@@ -513,6 +514,16 @@ const Basal = () => {
               </Fade>
             </Modal>
 
+            {analysisResults?.eventInsights && (
+              <Box sx={{ mb: 3 }}>
+                <GlucoseEventInsightsPanel
+                  insights={analysisResults.eventInsights}
+                  focus="basal"
+                  title="Advanced Basal Event Intelligence"
+                />
+              </Box>
+            )}
+
             {/* Show empty state with manual refresh option when no analysis results */}
             {!analysisResults && !analyzing && (
               <Card elevation={0} sx={{ textAlign: 'center', py: 4, backgroundColor: alpha(theme.palette.info.main, 0.05) }}>
@@ -937,6 +948,14 @@ const Basal = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {analysisResults?.eventInsights && (
+        <GlucoseEventInsightsPanel
+          insights={analysisResults.eventInsights}
+          focus="basal"
+          title="Advanced Basal Event Intelligence"
+        />
       )}
 
       {/* Show empty state with manual refresh option when no analysis results */}

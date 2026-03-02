@@ -6,6 +6,7 @@ import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { analyzeData } from '../services/analysisService';
 import SuggestionTable from '../components/SuggestionTable';
 import LoadingSpinner from '../components/LoadingSpinner';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock, Sparkles } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
@@ -605,6 +606,14 @@ const CarbRatio = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {analysisResults?.eventInsights && (
+        <GlucoseEventInsightsPanel
+          insights={analysisResults.eventInsights}
+          focus="carb"
+          title="Advanced Carb Ratio Event Intelligence"
+        />
       )}
 
       {/* Show empty state with manual refresh option when no analysis results */}

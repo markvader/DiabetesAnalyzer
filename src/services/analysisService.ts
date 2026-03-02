@@ -6,6 +6,7 @@ import type { NightscoutEntry, NightscoutProfile, NightscoutTreatment } from '..
 import { getTreatmentMs } from '../utils/nightscoutTime';
 import { computeIsfCrTuning } from './isfCrTuningService';
 import { computeIsfDriftModel } from './isfDriftModelService';
+import { analyzeGlucoseEventInsights, type GlucoseEventInsights } from './glucoseEventInsightsService';
 
 // Define types for analysis
 type BGReading = Pick<NightscoutEntry, 'sgv' | 'date' | 'dateString'>;
@@ -47,6 +48,7 @@ interface AnalysisResults {
   aiEnhanced?: unknown;
   safetyWarnings: string[];
   pumpProfile?: InsulinPumpProfile | null;
+  eventInsights?: GlucoseEventInsights;
 }
 
 type CarbPattern = {
@@ -568,6 +570,7 @@ export async function analyzeData(
   const readings = data.entries as BGReading[];
   const treatments = data.treatments as Treatment[];
   const safetyWarnings: string[] = [];
+  const eventInsights = analyzeGlucoseEventInsights(data.entries, data.treatments);
   
   // Add pump-specific warnings
   if (pumpProfile) {
@@ -588,6 +591,10 @@ export async function analyzeData(
     safetyWarnings.push('CRITICAL: More than 4% time below range detected. Consider reducing all insulin doses.');
   } else if (timeInRangeStats.low > 2) {
     safetyWarnings.push('WARNING: Elevated hypoglycemia risk detected. Use extreme caution with any changes.');
+  }
+
+  if (eventInsights.safetyAlerts.length > 0) {
+    safetyWarnings.push(...eventInsights.safetyAlerts);
   }
   
   // Get AI-enhanced analysis
@@ -636,7 +643,8 @@ export async function analyzeData(
         carbPatterns: [],
         aiEnhanced,
         safetyWarnings: [...safetyWarnings, ...aiEnhanced.aiInsights.safetyWarnings],
-        pumpProfile
+        pumpProfile,
+        eventInsights
       };
     }
   } catch (error) {
@@ -667,6 +675,7 @@ export async function analyzeData(
     carbPatterns,
     aiEnhanced,
     safetyWarnings,
-    pumpProfile
+    pumpProfile,
+    eventInsights
   };
 }

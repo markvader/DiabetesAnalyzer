@@ -4,6 +4,7 @@ import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { Zap, Activity, TrendingUp, AlertTriangle, Clock, Target, CheckCircle, Settings, Shield, Brain, Cookie, RefreshCw, Calendar } from 'lucide-react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import AIOpenAPSOptimizer from '../components/AIOpenAPSOptimizer';
+import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { analyzeUltraSafeOpenAPS } from '../services/ultraSafeOpenAPSAnalysis';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
@@ -14,6 +15,7 @@ import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
 import { toMmol } from '../utils/glucoseUtils';
 import { GLUCOSE_RANGES } from '../constants/glucoseRanges';
 import { nightscoutTreatmentParser } from '../services/nightscoutTreatmentParser';
+import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
 
 type UltraSafeOpenAPSResult = Awaited<ReturnType<typeof analyzeUltraSafeOpenAPS>>;
 
@@ -283,6 +285,12 @@ const OpenAPSSMB = () => {
     return { emergency, conservative, standard };
   }, [aiOptimization?.optimizedSettings, openapsAnalysis?.hypoglycemiaRiskScore, overallTir.inRangePct, overallTir.lowPct]);
 
+  const eventInsights = React.useMemo(() => {
+    const entries = filteredData?.entries ?? [];
+    const treatments = filteredData?.treatments ?? [];
+    return analyzeGlucoseEventInsights(entries, treatments, selectedRange);
+  }, [filteredData?.entries, filteredData?.treatments, selectedRange]);
+
   const smbOutcomesByHour = React.useMemo(() => {
     const readingsAsc = filteredData?.entries ?? [];
     if (!smbEvents.length || readingsAsc.length === 0) {
@@ -399,6 +407,12 @@ const OpenAPSSMB = () => {
       }
     }
 
+    if (eventInsights.period.totalReadings > 0) {
+      reasons.push(
+        `Event burden: ${eventInsights.eventCounts.hypo} hypo / ${eventInsights.eventCounts.hyper} hyper (${eventInsights.eventCounts.severeHypo} severe lows)`
+      );
+    }
+
     if (hourlyStatsSummary.worstTir[0]) {
       const h = hourlyStatsSummary.worstTir[0];
       reasons.push(`Worst hour TIR: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.inRangePct.toFixed(1)}% TIR)`);
@@ -429,7 +443,7 @@ const OpenAPSSMB = () => {
       confidence: openapsAnalysis?.safetyChecks?.dataQuality === 'high' ? 'higher' : openapsAnalysis ? 'medium' : 'low',
       reasons
     };
-  }, [formatGlucoseValue, hourlyStatsSummary.topHigh, hourlyStatsSummary.topLow, hourlyStatsSummary.worstTir, openapsAnalysis, overallTir.avgSgvMgdl, overallTir.count, overallTir.highPct, overallTir.inRangePct, overallTir.lowPct, smbOutcomesByHour.worstEffectiveness, smbOutcomesByHour.worstHypo]);
+  }, [eventInsights.eventCounts.hypo, eventInsights.eventCounts.hyper, eventInsights.eventCounts.severeHypo, eventInsights.period.totalReadings, formatGlucoseValue, hourlyStatsSummary.topHigh, hourlyStatsSummary.topLow, hourlyStatsSummary.worstTir, openapsAnalysis, overallTir.avgSgvMgdl, overallTir.count, overallTir.highPct, overallTir.inRangePct, overallTir.lowPct, smbOutcomesByHour.worstEffectiveness, smbOutcomesByHour.worstHypo]);
 
    
   const analyzeSMBEvents = useCallback(() => {
@@ -781,6 +795,14 @@ const OpenAPSSMB = () => {
           </p>
         </div>
       </div>
+
+      {eventInsights.period.totalReadings > 0 && (
+        <GlucoseEventInsightsPanel
+          insights={eventInsights}
+          focus="openaps"
+          title="Advanced OpenAPS Event Intelligence"
+        />
+      )}
 
       {/* Critical Safety Alert */}
       <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-6 rounded-lg">

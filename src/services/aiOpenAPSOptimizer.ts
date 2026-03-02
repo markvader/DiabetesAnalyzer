@@ -5,6 +5,7 @@
 import { subDays } from 'date-fns';
 import { roundToDecimal } from '../utils/mathUtils';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { analyzeGlucoseEventInsights } from './glucoseEventInsightsService';
 
 interface OptimizationPeriod {
   days: number;
@@ -195,7 +196,8 @@ class AIOpenAPSOptimizer {
     _patterns: GlucosePattern[],
     effectiveness: TreatmentEffectiveness,
     currentPerformance: AIOpenAPSRecommendations['currentPerformance'],
-    analysisPeriod: OptimizationPeriod
+    analysisPeriod: OptimizationPeriod,
+    eventBurden: { severeHypo: number; prolongedHypo: number; prolongedHyper: number }
   ): AIOpenAPSRecommendations['optimizedSettings'] {
     // More realistic base settings that match real-world usage
     const baseMaxTempBasal = 4.5; // Increased from 3.0
@@ -214,6 +216,13 @@ class AIOpenAPSOptimizer {
     if (currentPerformance.timeBelow70 > 8) safetyMultiplier = 0.75; // Only reduce significantly for high hypo rates
     else if (currentPerformance.timeBelow70 > 5) safetyMultiplier = 0.85; // Less reduction
     else if (currentPerformance.timeBelow70 > 2) safetyMultiplier = 0.95; // Minimal reduction
+
+    if (eventBurden.severeHypo > 0) safetyMultiplier *= 0.75;
+    else if (eventBurden.prolongedHypo > 1) safetyMultiplier *= 0.85;
+
+    if (eventBurden.prolongedHyper >= 3 && eventBurden.severeHypo === 0) {
+      safetyMultiplier *= 1.08;
+    }
     
     // Confidence-based adjustments - less conservative
     let confidenceMultiplier = 1.0;
@@ -240,12 +249,16 @@ class AIOpenAPSOptimizer {
       maxTempBasal: roundToDecimal(Math.min(8.0, baseMaxTempBasal * finalMultiplier), 2), // Increased max from 6.0
       maximumIOB: roundToDecimal(Math.min(15.0, baseMaxIOB * finalMultiplier), 1), // Increased max from 10.0
       dynamicISFFactor,
-      smbMaxMinutes: currentPerformance.timeBelow70 > 5 ? 30 : 60, // Less restrictive
-      smbDeliveryRatio: currentPerformance.timeBelow70 > 5 ? 0.3 : 0.5, // Less restrictive
-      enableSMBWithCOB: currentPerformance.timeBelow70 < 8, // More permissive
+      smbMaxMinutes: currentPerformance.timeBelow70 > 5 || eventBurden.severeHypo > 0 ? 30 : 60,
+      smbDeliveryRatio: currentPerformance.timeBelow70 > 5 || eventBurden.severeHypo > 0 ? 0.3 : 0.5,
+      enableSMBWithCOB: currentPerformance.timeBelow70 < 8 && eventBurden.severeHypo === 0,
       enableSMBWithTemptarget: true,
-      enableSMBAlways: currentPerformance.timeBelow70 < 5 && currentPerformance.timeInRange > 60, // More permissive
-      carbsReqThreshold: currentPerformance.timeBelow70 > 5 ? 8 : 4, // Less restrictive
+      enableSMBAlways:
+        currentPerformance.timeBelow70 < 5 &&
+        currentPerformance.timeInRange > 60 &&
+        eventBurden.severeHypo === 0 &&
+        eventBurden.prolongedHypo === 0,
+      carbsReqThreshold: currentPerformance.timeBelow70 > 5 || eventBurden.prolongedHypo > 0 ? 8 : 4,
       highTemptargetRaisesSensitivity: true,
       lowTemptargetLowersSensitivity: true
     };
@@ -300,7 +313,8 @@ class AIOpenAPSOptimizer {
     currentPerformance: AIOpenAPSRecommendations['currentPerformance'],
     _optimizedSettings: AIOpenAPSRecommendations['optimizedSettings'],
     riskAssessment: AIOpenAPSRecommendations['riskAssessment'],
-    patterns: GlucosePattern[]
+    patterns: GlucosePattern[],
+    eventInsights: ReturnType<typeof analyzeGlucoseEventInsights>
   ): AIOpenAPSRecommendations['recommendations'] {
     const immediate: string[] = [];
     const shortTerm: string[] = [];
@@ -317,6 +331,14 @@ class AIOpenAPSOptimizer {
       immediate.push("Increase maximum temporary basal rate to improve glucose control");
       immediate.push("Enable SMB with COB for better meal coverage");
     }
+
+    if (eventInsights.eventCounts.severeHypo > 0) {
+      immediate.push('Severe low events detected: reduce SMB aggressiveness immediately and re-evaluate after 48-72h');
+    }
+
+    if (eventInsights.eventCounts.prolongedHyper >= 2 && eventInsights.eventCounts.severeHypo === 0) {
+      immediate.push('Prolonged highs detected: consider a cautious increase in SMB coverage and correction aggressiveness');
+    }
     
     if (currentPerformance.timeAbove180 > 25) {
       immediate.push("Implement more aggressive Dynamic ISF factor");
@@ -329,6 +351,20 @@ class AIOpenAPSOptimizer {
     
     if (patterns.some(p => p.trendDirection === 'rising' && p.hourOfDay >= 4 && p.hourOfDay <= 8)) {
       shortTerm.push("Consider dawn phenomenon treatment with scheduled temp targets");
+    }
+
+    const topLowHour = eventInsights.topHypoHours[0];
+    if (topLowHour) {
+      shortTerm.push(
+        `Limit SMB aggressiveness around ${topLowHour.hour.toString().padStart(2, '0')}:00 where low-risk burden is highest`
+      );
+    }
+
+    const topHighHour = eventInsights.topHyperHours[0];
+    if (topHighHour) {
+      shortTerm.push(
+        `Prioritize correction and basal review around ${topHighHour.hour.toString().padStart(2, '0')}:00 for recurrent highs`
+      );
     }
     
     // Long-term recommendations
@@ -347,6 +383,10 @@ class AIOpenAPSOptimizer {
     if (currentPerformance.timeBelow70 > 5) {
       warnings.push("HYPOGLYCEMIA RISK: Current settings may be too aggressive");
     }
+
+    if (eventInsights.safetyAlerts.length > 0) {
+      warnings.push(...eventInsights.safetyAlerts.slice(0, 2));
+    }
     
     return { immediate, shortTerm, longTerm, warnings };
   }
@@ -361,12 +401,16 @@ class AIOpenAPSOptimizer {
     const cutoffDate = subDays(new Date(), analysisDays);
     const filteredReadings = readings.filter(r => new Date(r.date) >= cutoffDate);
     const filteredTreatments = treatments.filter(t => new Date(t.created_at) >= cutoffDate);
+
+    const startMs = cutoffDate.getTime();
+    const endMs = Date.now();
+    const eventInsights = analyzeGlucoseEventInsights(filteredReadings, filteredTreatments, { startMs, endMs });
     
     // Calculate analysis period
     const analysisPeriod = this.calculateOptimizationPeriod(analysisDays, filteredReadings.length);
     
     // Calculate current performance
-    const totalReadings = filteredReadings.length;
+    const totalReadings = Math.max(1, filteredReadings.length);
     const inRange = filteredReadings.filter(r => r.sgv >= 70 && r.sgv <= 180).length;
     const below70 = filteredReadings.filter(r => r.sgv < 70).length;
     const above180 = filteredReadings.filter(r => r.sgv > 180).length;
@@ -382,12 +426,8 @@ class AIOpenAPSOptimizer {
       timeAbove180: Math.round((above180 / totalReadings) * 100),
       avgGlucose: Math.round(avgGlucose),
       glucoseVariability: Math.round(glucoseVariability),
-      hypoglycemiaEvents: filteredReadings.filter((r, i) => 
-        r.sgv < 70 && (i === 0 || filteredReadings[i-1].sgv >= 70)
-      ).length,
-      hyperglycemiaEvents: filteredReadings.filter((r, i) => 
-        r.sgv > 250 && (i === 0 || filteredReadings[i-1].sgv <= 250)
-      ).length
+      hypoglycemiaEvents: eventInsights.eventCounts.hypo,
+      hyperglycemiaEvents: eventInsights.eventCounts.hyper
     };
     
     // Analyze patterns and effectiveness
@@ -396,7 +436,15 @@ class AIOpenAPSOptimizer {
     
     // Calculate optimized settings
     const optimizedSettings = this.calculateOptimizedSettings(
-      patterns, effectiveness, currentPerformance, analysisPeriod
+      patterns,
+      effectiveness,
+      currentPerformance,
+      analysisPeriod,
+      {
+        severeHypo: eventInsights.eventCounts.severeHypo,
+        prolongedHypo: eventInsights.eventCounts.prolongedHypo,
+        prolongedHyper: eventInsights.eventCounts.prolongedHyper
+      }
     );
     
     // Calculate safety constraints - updated for more aggressive settings
@@ -405,8 +453,8 @@ class AIOpenAPSOptimizer {
       maxSafeTempBasal: Math.min(optimizedSettings.maxTempBasal, 7.0), // Increased from 5.0
       conservativeMode: currentPerformance.timeBelow70 > 5, // Less restrictive
       emergencyThresholds: {
-        suspendBelowGlucose: currentPerformance.timeBelow70 > 8 ? 75 : 65, // Less restrictive
-        resumeAboveGlucose: currentPerformance.timeBelow70 > 8 ? 85 : 80 // Less restrictive
+        suspendBelowGlucose: currentPerformance.timeBelow70 > 8 || eventInsights.eventCounts.severeHypo > 0 ? 75 : 65,
+        resumeAboveGlucose: currentPerformance.timeBelow70 > 8 || eventInsights.eventCounts.severeHypo > 0 ? 85 : 80
       }
     };
     
@@ -428,7 +476,11 @@ class AIOpenAPSOptimizer {
     
     // Generate recommendations
     const recommendations = this.generateRecommendations(
-      currentPerformance, optimizedSettings, riskAssessment, patterns
+      currentPerformance,
+      optimizedSettings,
+      riskAssessment,
+      patterns,
+      eventInsights
     );
     
     // Calculate expected outcomes
