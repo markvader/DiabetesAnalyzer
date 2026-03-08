@@ -519,9 +519,9 @@ export const calculateEstimatedCost = (
 export const formatCostEstimate = (cost: number | null): string => {
   if (cost == null || Number.isNaN(cost)) return '—';
   if (cost < 0.001) {
-    return `$${(cost * 1000).toFixed(1)}‰`; // per mille symbol for very small costs
+    return `${(cost * 100).toFixed(3)}¢`;
   } else if (cost < 0.01) {
-    return `$${(cost * 100).toFixed(1)}¢`;
+    return `${(cost * 100).toFixed(2)}¢`;
   } else if (cost < 1.00) {
     return `$${cost.toFixed(3)}`;
   } else {
