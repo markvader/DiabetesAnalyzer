@@ -11,6 +11,10 @@ import {
   getModelsByCategory, 
   getModelsByProvider,
   getModelById, 
+  getCheapestEstimatedModel,
+  getCheapestEstimatedModelByProvider,
+  getLatestPricingAsOf,
+  getPricingAgeDays,
   calculateEstimatedCost, 
   formatCostEstimate, 
   DEFAULT_OPENAI_MODEL,
@@ -319,6 +323,85 @@ const Settings = () => {
     // Test the keys
     testApiKeys();
   };
+
+  const selectedModelInfo = getModelById(selectedModel);
+  const selectedModelEstimatedCost = selectedModelInfo
+    ? calculateEstimatedCost(selectedModelInfo, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output)
+    : null;
+
+  const connectedProviders: Array<'openai' | 'google' | 'anthropic' | 'deepseek'> = [
+    ...(openaiKey ? ['openai' as const] : []),
+    ...(geminiKey ? ['google' as const] : []),
+    ...(anthropicKey ? ['anthropic' as const] : []),
+    ...(deepseekKey ? ['deepseek' as const] : [])
+  ];
+
+  const providerDisplayName: Record<'openai' | 'google' | 'anthropic' | 'deepseek', string> = {
+    openai: 'OpenAI',
+    google: 'Google Gemini',
+    anthropic: 'Anthropic Claude',
+    deepseek: 'DeepSeek'
+  };
+
+  const cheapestByConnectedProviders = connectedProviders
+    .map(provider => {
+      const model = getCheapestEstimatedModelByProvider(
+        provider,
+        DIABETES_ANALYSIS_TOKENS.input,
+        DIABETES_ANALYSIS_TOKENS.output
+      );
+      return {
+        provider,
+        model,
+        cost: model
+          ? calculateEstimatedCost(model, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output)
+          : null
+      };
+    })
+    .filter(item => item.model && item.cost != null);
+
+  const bestConnectedProviderOption = cheapestByConnectedProviders.reduce<null | {
+    provider: 'openai' | 'google' | 'anthropic' | 'deepseek';
+    modelId: string;
+    modelName: string;
+    cost: number;
+  }>((best, current) => {
+    if (!current.model || current.cost == null) return best;
+    if (!best || current.cost < best.cost) {
+      return {
+        provider: current.provider,
+        modelId: current.model.id,
+        modelName: current.model.name,
+        cost: current.cost
+      };
+    }
+    return best;
+  }, null);
+
+  const cheapestOverallModel = getCheapestEstimatedModel(
+    DIABETES_ANALYSIS_TOKENS.input,
+    DIABETES_ANALYSIS_TOKENS.output
+  );
+  const cheapestOverallCost = cheapestOverallModel
+    ? calculateEstimatedCost(cheapestOverallModel, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output)
+    : null;
+
+  const latestPricingAsOf = getLatestPricingAsOf();
+  const pricingAgeDays = getPricingAgeDays(latestPricingAsOf);
+  const pricingFreshnessLabel =
+    pricingAgeDays == null
+      ? 'Unknown'
+      : pricingAgeDays <= 14
+        ? 'Fresh'
+        : pricingAgeDays <= 45
+          ? 'Aging'
+          : 'Stale';
+  const pricingFreshnessClasses =
+    pricingFreshnessLabel === 'Fresh'
+      ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+      : pricingFreshnessLabel === 'Aging'
+        ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
+        : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
   
   return (
     <motion.div
@@ -376,6 +459,22 @@ const Settings = () => {
           <p className="text-gray-600 dark:text-gray-400 mb-4">
             Enter your API keys for AI providers to enable advanced analysis features. Your keys are stored securely in your browser's local storage and are never sent to our servers.
           </p>
+
+          <div className="mb-4 p-3 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium text-indigo-900 dark:text-indigo-100">Pricing Sync Status</div>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${pricingFreshnessClasses}`}>
+                {pricingFreshnessLabel}
+              </span>
+            </div>
+            <p className="text-xs text-indigo-800 dark:text-indigo-200 mt-1">
+              Last synced pricing date: {latestPricingAsOf ?? 'unknown'}
+              {pricingAgeDays == null ? '' : ` (${pricingAgeDays} day${pricingAgeDays === 1 ? '' : 's'} ago)`}.
+            </p>
+            <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
+              Run <span className="font-semibold">npm run sync:ai-pricing</span> to refresh model prices from official provider pages.
+            </p>
+          </div>
           
           <div className="space-y-4">
             {/* OpenAI API Key */}
@@ -478,10 +577,9 @@ const Settings = () => {
 
               {/* Selected Model Info */}
               {(() => {
-                const selectedModelInfo = getModelById(selectedModel);
                 if (!selectedModelInfo) return null;
                 
-                const estimatedCost = calculateEstimatedCost(selectedModelInfo, DIABETES_ANALYSIS_TOKENS.input, DIABETES_ANALYSIS_TOKENS.output);
+                const estimatedCost = selectedModelEstimatedCost;
 
                 const providerLabel =
                   selectedModelInfo.provider === 'openai'
@@ -525,11 +623,67 @@ const Settings = () => {
                             Output: {selectedModelInfo.outputCostPer1M == null ? '—' : `$${selectedModelInfo.outputCostPer1M}`}/1M tokens
                           </div>
                         </div>
+                        {(selectedModelInfo.pricingUrl || selectedModelInfo.pricingAsOf) && (
+                          <div className="mt-2 text-xs text-blue-700 dark:text-blue-300">
+                            Pricing source:{' '}
+                            {selectedModelInfo.pricingUrl ? (
+                              <a
+                                href={selectedModelInfo.pricingUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-700 dark:text-blue-300 underline hover:text-blue-800 dark:hover:text-blue-200"
+                              >
+                                official provider pricing
+                              </a>
+                            ) : (
+                              <span>official provider pricing</span>
+                            )}
+                            {selectedModelInfo.pricingAsOf ? ` (as of ${selectedModelInfo.pricingAsOf})` : ''}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 );
               })()}
+
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-3">
+                <h4 className="text-sm font-medium text-amber-900 dark:text-amber-100">Analysis Cost Calculator</h4>
+                <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+                  Uses approximately {DIABETES_ANALYSIS_TOKENS.input} input + {DIABETES_ANALYSIS_TOKENS.output} output tokens per analysis.
+                </p>
+
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-amber-800 dark:text-amber-200">
+                  <div className="bg-white/60 dark:bg-gray-800/40 rounded p-2">
+                    Selected model / analysis:{' '}
+                    <span className="font-semibold">{formatCostEstimate(selectedModelEstimatedCost)}</span>
+                  </div>
+                  <div className="bg-white/60 dark:bg-gray-800/40 rounded p-2">
+                    Selected model / 100 analyses:{' '}
+                    <span className="font-semibold">
+                      {selectedModelEstimatedCost == null ? '—' : formatCostEstimate(selectedModelEstimatedCost * 100)}
+                    </span>
+                  </div>
+                </div>
+
+                {bestConnectedProviderOption ? (
+                  <p className="mt-2 text-xs text-amber-900 dark:text-amber-100">
+                    Best on your configured API keys: <span className="font-semibold">{bestConnectedProviderOption.modelName}</span>
+                    {' '}({providerDisplayName[bestConnectedProviderOption.provider]}) at approximately{' '}
+                    <span className="font-semibold">{formatCostEstimate(bestConnectedProviderOption.cost)}</span> per analysis.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-amber-900 dark:text-amber-100">
+                    Add at least one API key to compare best-cost models among your active providers.
+                  </p>
+                )}
+
+                {cheapestOverallModel && (
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                    Lowest model in full catalog: {cheapestOverallModel.name} ({providerDisplayName[cheapestOverallModel.provider]}) at {formatCostEstimate(cheapestOverallCost)} per analysis.
+                  </p>
+                )}
+              </div>
 
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Get your API key from the <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenAI dashboard</a>. Costs are estimated based on ~{DIABETES_ANALYSIS_TOKENS.input} input and ~{DIABETES_ANALYSIS_TOKENS.output} output tokens per analysis.
@@ -880,7 +1034,7 @@ const Settings = () => {
             </div>
             
             <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded">
-              <span className="text-gray-700 dark:text-gray-300">OpenAI API (GPT-4o mini)</span>
+              <span className="text-gray-700 dark:text-gray-300">OpenAI API ({selectedOpenAIModel || DEFAULT_OPENAI_MODEL})</span>
               {apiKeyStatus.openai === null ? (
                 <span className="text-gray-500 dark:text-gray-400">Not tested</span>
               ) : apiKeyStatus.openai ? (

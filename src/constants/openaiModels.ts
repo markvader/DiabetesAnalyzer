@@ -30,31 +30,55 @@ export interface OpenAIModel extends AIModel {
 }
 
 export const OPENAI_MODELS: AIModel[] = [
-  // OpenAI (pricing source: https://openai.com/api/pricing/)
+  // OpenAI (pricing source: https://developers.openai.com/api/docs/pricing)
+  {
+    id: 'gpt-5.4',
+    name: 'GPT-5.4',
+    description: 'Newest flagship GPT model for top-quality reasoning and coding',
+    inputCostPer1M: 2.5,
+    outputCostPer1M: 15.0,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    isRecommended: true,
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-5.4-pro',
+    name: 'GPT-5.4 Pro',
+    description: 'Highest-quality GPT-5.4 tier for maximum precision',
+    inputCostPer1M: 30.0,
+    outputCostPer1M: 180.0,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
   {
     id: 'gpt-5.2',
     name: 'GPT-5.2',
-    description: 'Flagship model for coding and agentic tasks',
+    description: 'Strong all-round GPT-5 generation model',
     inputCostPer1M: 1.75,
     outputCostPer1M: 14.0,
     maxTokens: 8192,
     category: 'latest',
     provider: 'openai',
-    isRecommended: true,
-    pricingUrl: 'https://openai.com/api/pricing/',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
-    id: 'gpt-5.2-pro',
-    name: 'GPT-5.2 pro',
-    description: 'Highest-precision model (premium)',
-    inputCostPer1M: 21.0,
-    outputCostPer1M: 168.0,
+    id: 'gpt-5.1',
+    name: 'GPT-5.1',
+    description: 'Previous GPT-5 generation with strong quality/cost balance',
+    inputCostPer1M: 1.25,
+    outputCostPer1M: 10.0,
     maxTokens: 8192,
     category: 'latest',
     provider: 'openai',
-    pricingUrl: 'https://openai.com/api/pricing/',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gpt-5-mini',
@@ -66,45 +90,144 @@ export const OPENAI_MODELS: AIModel[] = [
     category: 'latest',
     provider: 'openai',
     isRecommended: true,
-    pricingUrl: 'https://openai.com/api/pricing/',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-5-nano',
+    name: 'GPT-5 nano',
+    description: 'Smallest GPT-5 tier for minimal token cost',
+    inputCostPer1M: 0.05,
+    outputCostPer1M: 0.4,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-5.2-pro',
+    name: 'GPT-5.2 Pro',
+    description: 'Premium GPT-5.2 tier (higher quality, much higher cost)',
+    inputCostPer1M: 21.0,
+    outputCostPer1M: 168.0,
+    maxTokens: 8192,
+    category: 'latest',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
 
-  // Backwards-compat / legacy OpenAI IDs (pricing not kept up-to-date here)
+  // OpenAI legacy / older families
   {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o mini (legacy id)',
-    description: 'Legacy model id kept for compatibility (pricing may have changed)',
-    inputCostPer1M: null,
-    outputCostPer1M: null,
-    maxTokens: 16384,
+    id: 'gpt-4.1',
+    name: 'GPT-4.1',
+    description: 'Older flagship model family with broad compatibility',
+    inputCostPer1M: 2.0,
+    outputCostPer1M: 8.0,
+    maxTokens: 8192,
     category: 'legacy',
-    provider: 'openai'
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-4.1-mini',
+    name: 'GPT-4.1 mini',
+    description: 'Lower-cost legacy GPT-4.1 variant',
+    inputCostPer1M: 0.4,
+    outputCostPer1M: 1.6,
+    maxTokens: 8192,
+    category: 'legacy',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-4.1-nano',
+    name: 'GPT-4.1 nano',
+    description: 'Oldest actively priced GPT-4.1 tier in this app catalog',
+    inputCostPer1M: 0.1,
+    outputCostPer1M: 0.4,
+    maxTokens: 8192,
+    category: 'legacy',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gpt-4o',
-    name: 'GPT-4o (legacy id)',
-    description: 'Legacy model id kept for compatibility (pricing may have changed)',
-    inputCostPer1M: null,
-    outputCostPer1M: null,
+    name: 'GPT-4o',
+    description: 'Legacy multimodal model (widely supported)',
+    inputCostPer1M: 2.5,
+    outputCostPer1M: 10.0,
     maxTokens: 8192,
     category: 'legacy',
-    provider: 'openai'
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-4o-mini',
+    name: 'GPT-4o mini',
+    description: 'Legacy low-cost GPT-4o variant',
+    inputCostPer1M: 0.15,
+    outputCostPer1M: 0.6,
+    maxTokens: 16384,
+    category: 'legacy',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gpt-3.5-turbo',
+    name: 'GPT-3.5 Turbo (Legacy)',
+    description: 'Old legacy model, kept for compatibility and low-cost use',
+    inputCostPer1M: 0.5,
+    outputCostPer1M: 1.5,
+    maxTokens: 4096,
+    category: 'legacy',
+    provider: 'openai',
+    pricingUrl: 'https://developers.openai.com/api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
 
   // Google Gemini (pricing source: https://ai.google.dev/gemini-api/docs/pricing)
   {
-    id: 'gemini-3-pro-preview',
-    name: 'Gemini 3 Pro (Preview)',
-    description: 'Most powerful Gemini model (preview)',
+    id: 'gemini-3.1-pro-preview',
+    name: 'Gemini 3.1 Pro (Preview)',
+    description: 'Newest top Gemini model family for advanced reasoning and coding',
     inputCostPer1M: 2.0,
     outputCostPer1M: 12.0,
     maxTokens: 1000000,
     category: 'gemini',
     provider: 'google',
-    isRecommended: false,
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gemini-3-flash-preview',
+    name: 'Gemini 3 Flash (Preview)',
+    description: 'Newest fast Gemini 3 model for speed + quality',
+    inputCostPer1M: 0.5,
+    outputCostPer1M: 3.0,
+    maxTokens: 1000000,
+    category: 'gemini',
+    provider: 'google',
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'gemini-3.1-flash-lite-preview',
+    name: 'Gemini 3.1 Flash-Lite (Preview)',
+    description: 'Newest low-cost Gemini model for high-throughput workloads',
+    inputCostPer1M: 0.25,
+    outputCostPer1M: 1.5,
+    maxTokens: 1000000,
+    category: 'gemini',
+    provider: 'google',
+    pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gemini-2.5-pro',
@@ -117,7 +240,7 @@ export const OPENAI_MODELS: AIModel[] = [
     provider: 'google',
     isRecommended: true,
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gemini-2.5-flash',
@@ -130,7 +253,7 @@ export const OPENAI_MODELS: AIModel[] = [
     provider: 'google',
     isRecommended: true,
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gemini-2.5-flash-lite',
@@ -143,7 +266,7 @@ export const OPENAI_MODELS: AIModel[] = [
     provider: 'google',
     isRecommended: true,
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gemini-2.0-flash',
@@ -155,7 +278,7 @@ export const OPENAI_MODELS: AIModel[] = [
     category: 'gemini',
     provider: 'google',
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'gemini-2.0-flash-lite',
@@ -167,10 +290,35 @@ export const OPENAI_MODELS: AIModel[] = [
     category: 'gemini',
     provider: 'google',
     pricingUrl: 'https://ai.google.dev/gemini-api/docs/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
 
-  // Anthropic Claude (pricing source: https://platform.claude.com/docs/en/about-claude/models)
+  // Anthropic Claude (pricing source: https://platform.claude.com/docs/en/about-claude/pricing)
+  {
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
+    description: 'Newest top-tier Claude model for high-complexity tasks',
+    inputCostPer1M: 5.0,
+    outputCostPer1M: 25.0,
+    maxTokens: 128000,
+    category: 'claude',
+    provider: 'anthropic',
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6',
+    description: 'Newest balanced Claude model for agents and coding',
+    inputCostPer1M: 3.0,
+    outputCostPer1M: 15.0,
+    maxTokens: 64000,
+    category: 'claude',
+    provider: 'anthropic',
+    isRecommended: true,
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
+  },
   {
     id: 'claude-sonnet-4-5',
     name: 'Claude Sonnet 4.5',
@@ -181,8 +329,8 @@ export const OPENAI_MODELS: AIModel[] = [
     category: 'claude',
     provider: 'anthropic',
     isRecommended: true,
-    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'claude-haiku-4-5',
@@ -194,20 +342,32 @@ export const OPENAI_MODELS: AIModel[] = [
     category: 'claude',
     provider: 'anthropic',
     isRecommended: true,
-    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
   },
   {
-    id: 'claude-opus-4-5',
-    name: 'Claude Opus 4.5',
-    description: 'Premium Claude model (maximum intelligence)',
-    inputCostPer1M: 5.0,
-    outputCostPer1M: 25.0,
+    id: 'claude-haiku-3-5',
+    name: 'Claude Haiku 3.5',
+    description: 'Older Claude model with lower costs for simple workloads',
+    inputCostPer1M: 0.8,
+    outputCostPer1M: 4.0,
     maxTokens: 200000,
     category: 'claude',
     provider: 'anthropic',
-    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/models',
-    pricingAsOf: '2025-12-16'
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
+  },
+  {
+    id: 'claude-haiku-3',
+    name: 'Claude Haiku 3 (Legacy)',
+    description: 'Oldest low-cost Claude model in this catalog',
+    inputCostPer1M: 0.25,
+    outputCostPer1M: 1.25,
+    maxTokens: 200000,
+    category: 'claude',
+    provider: 'anthropic',
+    pricingUrl: 'https://platform.claude.com/docs/en/about-claude/pricing',
+    pricingAsOf: '2026-03-08'
   },
 
   // DeepSeek (pricing source: https://api-docs.deepseek.com/quick_start/pricing)
@@ -219,11 +379,11 @@ export const OPENAI_MODELS: AIModel[] = [
     // This app does not use prompt caching, so cache-miss is the effective price.
     inputCostPer1M: 0.28,
     outputCostPer1M: 0.42,
-    maxTokens: 8192,
+    maxTokens: 8000,
     category: 'deepseek',
     provider: 'deepseek',
     pricingUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   },
   {
     id: 'deepseek-reasoner',
@@ -231,11 +391,11 @@ export const OPENAI_MODELS: AIModel[] = [
     description: 'DeepSeek-V3.2 (Thinking mode)',
     inputCostPer1M: 0.28,
     outputCostPer1M: 0.42,
-    maxTokens: 8192,
+    maxTokens: 64000,
     category: 'deepseek',
     provider: 'deepseek',
     pricingUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
-    pricingAsOf: '2025-12-16'
+    pricingAsOf: '2026-03-08'
   }
 ];
 
@@ -253,6 +413,75 @@ export const getRecommendedModels = () => {
 
 export const getModelById = (id: string) => {
   return OPENAI_MODELS.find(model => model.id === id);
+};
+
+export const getLatestPricingAsOf = (): string | null => {
+  const validDates = OPENAI_MODELS
+    .map(model => model.pricingAsOf)
+    .filter((date): date is string => !!date)
+    .map(date => ({ raw: date, ms: Date.parse(date) }))
+    .filter(item => !Number.isNaN(item.ms))
+    .sort((a, b) => b.ms - a.ms);
+
+  return validDates[0]?.raw ?? null;
+};
+
+export const getPricingAgeDays = (pricingAsOf: string | null): number | null => {
+  if (!pricingAsOf) return null;
+  const ms = Date.parse(pricingAsOf);
+  if (Number.isNaN(ms)) return null;
+
+  const ageMs = Date.now() - ms;
+  return Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
+};
+
+export const getCheapestEstimatedModel = (
+  estimatedInputTokens: number,
+  estimatedOutputTokens: number
+): AIModel | null => {
+  const priced = OPENAI_MODELS.filter(
+    model => model.inputCostPer1M != null && model.outputCostPer1M != null
+  );
+
+  if (priced.length === 0) return null;
+
+  let cheapest: AIModel | null = null;
+  let cheapestCost = Number.POSITIVE_INFINITY;
+
+  for (const model of priced) {
+    const cost = calculateEstimatedCost(model, estimatedInputTokens, estimatedOutputTokens);
+    if (cost != null && cost < cheapestCost) {
+      cheapestCost = cost;
+      cheapest = model;
+    }
+  }
+
+  return cheapest;
+};
+
+export const getCheapestEstimatedModelByProvider = (
+  provider: AIProvider,
+  estimatedInputTokens: number,
+  estimatedOutputTokens: number
+): AIModel | null => {
+  const models = getModelsByProvider(provider).filter(
+    model => model.inputCostPer1M != null && model.outputCostPer1M != null
+  );
+
+  if (models.length === 0) return null;
+
+  let cheapest: AIModel | null = null;
+  let cheapestCost = Number.POSITIVE_INFINITY;
+
+  for (const model of models) {
+    const cost = calculateEstimatedCost(model, estimatedInputTokens, estimatedOutputTokens);
+    if (cost != null && cost < cheapestCost) {
+      cheapestCost = cost;
+      cheapest = model;
+    }
+  }
+
+  return cheapest;
 };
 
 export type TokenUsage = {
