@@ -593,6 +593,102 @@ export const INSULIN_PUMPS: Record<string, InsulinPumpProfile> = {
     availability: 'limited'
   },
 
+  'diaconn-g8': {
+    id: 'diaconn-g8',
+    name: 'Diaconn G8',
+    manufacturer: 'Diaconn',
+    model: 'G8',
+    category: 'tubed',
+
+    basalIncrements: 0.01,
+    bolusIncrements: 0.01,
+    maxBasalRate: 30.0,
+    maxBolus: 30.0,
+    reservoirCapacity: 300,
+
+    hasOcclusion: true,
+    hasLowReservoir: true,
+    hasBatteryMonitoring: true,
+    hasTempBasal: true,
+    maxTempBasalDuration: 24 * 60,
+    maxTempBasalRate: 30.0,
+
+    aapsSupported: true,
+    aapsDriverName: 'Diaconn G8',
+    communicationType: 'bluetooth',
+
+    deliveryDelay: 35,
+    cannulaChangeInterval: 72,
+    reservoirChangeInterval: 72,
+
+    recommendedMaxIOB: 6.0,
+    recommendedMaxTempBasal: 8.0,
+    recommendedDynamicISF: 95,
+    safetyMultiplier: 0.9,
+
+    features: [
+      'AAPS compatible driver',
+      'Bluetooth communication',
+      'High precision delivery',
+      'Large reservoir'
+    ],
+    limitations: [
+      'Region-limited availability',
+      'Smaller user base than Dana/Omnipod'
+    ],
+
+    approximateCost: '$180-280/month',
+    availability: 'limited'
+  },
+
+  'medtronic-legacy': {
+    id: 'medtronic-legacy',
+    name: 'Medtronic Legacy (x15/x22/x23/x54)',
+    manufacturer: 'Medtronic',
+    model: '515/715, 522/722, 523/723, 554/754',
+    category: 'diy',
+
+    basalIncrements: 0.025,
+    bolusIncrements: 0.05,
+    maxBasalRate: 35.0,
+    maxBolus: 25.0,
+    reservoirCapacity: 300,
+
+    hasOcclusion: true,
+    hasLowReservoir: true,
+    hasBatteryMonitoring: true,
+    hasTempBasal: true,
+    maxTempBasalDuration: 24 * 60,
+    maxTempBasalRate: 35.0,
+
+    aapsSupported: true,
+    aapsDriverName: 'Medtronic (older models)',
+    communicationType: 'rileylink',
+
+    deliveryDelay: 50,
+    cannulaChangeInterval: 72,
+    reservoirChangeInterval: 72,
+
+    recommendedMaxIOB: 6.0,
+    recommendedMaxTempBasal: 8.0,
+    recommendedDynamicISF: 95,
+    safetyMultiplier: 0.9,
+
+    features: [
+      'Supported in AAPS and Loop with compatible bridge device',
+      'Large community documentation',
+      'Firmware-dependent compatibility'
+    ],
+    limitations: [
+      'Older hardware only',
+      'Requires bridge device (RileyLink/OrangeLink class)',
+      'Model and firmware must be validated before use'
+    ],
+
+    approximateCost: 'Used/secondary-market',
+    availability: 'limited'
+  },
+
   // === MEDTRUM PUMPS ===
   'medtrum-nano': {
     id: 'medtrum-nano',
@@ -643,6 +739,100 @@ export const INSULIN_PUMPS: Record<string, InsulinPumpProfile> = {
     ],
     
     approximateCost: '$200-300/month',
+    availability: 'limited'
+  },
+
+  'medtrum-300u': {
+    id: 'medtrum-300u',
+    name: 'Medtrum 300U',
+    manufacturer: 'Medtrum',
+    model: '300U patch',
+    category: 'tubeless',
+
+    basalIncrements: 0.05,
+    bolusIncrements: 0.05,
+    maxBasalRate: 25.0,
+    maxBolus: 25.0,
+    reservoirCapacity: 300,
+
+    hasOcclusion: true,
+    hasLowReservoir: true,
+    hasBatteryMonitoring: false,
+    hasTempBasal: true,
+    maxTempBasalDuration: 720,
+    maxTempBasalRate: 25.0,
+
+    aapsSupported: true,
+    aapsDriverName: 'Medtrum',
+    communicationType: 'medtrum',
+
+    deliveryDelay: 50,
+    cannulaChangeInterval: 72,
+    reservoirChangeInterval: 72,
+
+    recommendedMaxIOB: 5.5,
+    recommendedMaxTempBasal: 6.5,
+    recommendedDynamicISF: 98,
+    safetyMultiplier: 1.0,
+
+    features: [
+      'Tubeless 300U patch option',
+      'AAPS compatible',
+      'Loop experimental branch support'
+    ],
+    limitations: [
+      'Branch-specific support for Loop',
+      'Region-limited availability'
+    ],
+
+    approximateCost: '$220-320/month',
+    availability: 'limited'
+  },
+
+  'equil-5-3': {
+    id: 'equil-5-3',
+    name: 'Equil 5.3',
+    manufacturer: 'MicroTech',
+    model: 'Equil 5.3',
+    category: 'tubeless',
+
+    basalIncrements: 0.05,
+    bolusIncrements: 0.05,
+    maxBasalRate: 25.0,
+    maxBolus: 25.0,
+    reservoirCapacity: 200,
+
+    hasOcclusion: true,
+    hasLowReservoir: true,
+    hasBatteryMonitoring: false,
+    hasTempBasal: true,
+    maxTempBasalDuration: 720,
+    maxTempBasalRate: 25.0,
+
+    aapsSupported: true,
+    aapsDriverName: 'Equil 5.3',
+    communicationType: 'bluetooth',
+
+    deliveryDelay: 50,
+    cannulaChangeInterval: 72,
+    reservoirChangeInterval: 72,
+
+    recommendedMaxIOB: 5.0,
+    recommendedMaxTempBasal: 6.0,
+    recommendedDynamicISF: 100,
+    safetyMultiplier: 1.0,
+
+    features: [
+      'Patch-style pump',
+      'Bluetooth communication',
+      'AAPS compatible'
+    ],
+    limitations: [
+      'Not listed in LoopDocs compatibility',
+      'Region-limited availability'
+    ],
+
+    approximateCost: '$180-280/month',
     availability: 'limited'
   },
 
@@ -786,11 +976,11 @@ export const PUMP_PLATFORM_COMPATIBILITY: Record<string, PumpPlatformCompatibili
     ]
   },
   'medtronic-670g': {
-    aaps: 'experimental',
+    aaps: 'not-supported',
     loop: 'not-supported',
     tidepoolLoop: 'not-supported',
     notes: [
-      'AAPS officially documents support for certain older Medtronic models requiring bridge devices.',
+      'AAPS documentation explicitly references certain older Medtronic models, not 670G.',
       'Loop documentation targets older Medtronic x15/x22/x23/x54 firmware-limited pumps, not 670G as a direct Loop pump.'
     ],
     sources: [
@@ -799,11 +989,11 @@ export const PUMP_PLATFORM_COMPATIBILITY: Record<string, PumpPlatformCompatibili
     ]
   },
   'medtronic-780g': {
-    aaps: 'experimental',
+    aaps: 'not-supported',
     loop: 'not-supported',
     tidepoolLoop: 'not-supported',
     notes: [
-      'AAPS docs describe support centered around older Medtronic compatibility families.',
+      'AAPS docs describe support centered around older Medtronic compatibility families, not 780G.',
       'Loop iOS docs do not list 780G as compatible.'
     ],
     sources: [
@@ -902,6 +1092,58 @@ export const PUMP_PLATFORM_COMPATIBILITY: Record<string, PumpPlatformCompatibili
       'https://loopkit.github.io/loopdocs/build/pump/'
     ]
   },
+  'medtrum-300u': {
+    aaps: 'supported',
+    loop: 'experimental',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Medtrum 300U support.',
+      'LoopDocs Medtrum section indicates 300U support in the experimental Dana/Medtrum branch path.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'diaconn-g8': {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Diaconn G8 as a compatible pump.',
+      'LoopDocs does not list Diaconn G8 support.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'equil-5-3': {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Equil 5.3 as compatible.',
+      'LoopDocs does not list Equil support.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'medtronic-legacy': {
+    aaps: 'supported',
+    loop: 'supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS supports certain older Medtronic pumps via additional communication hardware.',
+      'Loop supports older Medtronic pump families with firmware limits.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
   eopatch: {
     aaps: 'supported',
     loop: 'not-supported',
@@ -918,7 +1160,7 @@ export const PUMP_PLATFORM_COMPATIBILITY: Record<string, PumpPlatformCompatibili
   'diy-loop': {
     aaps: 'not-supported',
     loop: 'supported',
-    tidepoolLoop: 'unknown',
+    tidepoolLoop: 'not-supported',
     notes: [
       'Represents a generic Loop-compatible setup profile, not a single pump model.',
       'Use a specific pump option when possible for better recommendation precision.'
