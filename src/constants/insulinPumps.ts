@@ -1,6 +1,17 @@
 // Comprehensive Insulin Pump Configuration for AAPS Integration
 // Based on AndroidAPS supported insulin pumps
 
+export type TherapyAlgorithm = 'aaps' | 'loop';
+export type CompatibilityLevel = 'supported' | 'experimental' | 'not-supported';
+
+export interface PumpPlatformCompatibility {
+  aaps: CompatibilityLevel;
+  loop: CompatibilityLevel;
+  tidepoolLoop: CompatibilityLevel;
+  notes: string[];
+  sources: string[];
+}
+
 export interface InsulinPumpProfile {
   id: string;
   name: string;
@@ -47,6 +58,14 @@ export interface InsulinPumpProfile {
   approximateCost: string;
   availability: 'worldwide' | 'us-only' | 'eu-only' | 'limited';
 }
+
+const DEFAULT_COMPATIBILITY: PumpPlatformCompatibility = {
+  aaps: 'not-supported',
+  loop: 'not-supported',
+  tidepoolLoop: 'not-supported',
+  notes: [],
+  sources: []
+};
 
 // Complete AAPS-supported insulin pump database
 export const INSULIN_PUMPS: Record<string, InsulinPumpProfile> = {
@@ -734,6 +753,182 @@ export const INSULIN_PUMPS: Record<string, InsulinPumpProfile> = {
   }
 };
 
+// Compatibility model sourced from official docs pages.
+export const PUMP_PLATFORM_COMPATIBILITY: Record<string, PumpPlatformCompatibility> = {
+  'omnipod-dash': {
+    aaps: 'supported',
+    loop: 'supported',
+    tidepoolLoop: 'supported',
+    notes: [
+      'AAPS supports Omnipod DASH over native Bluetooth.',
+      'Loop on iOS supports Omnipod DASH without RileyLink.',
+      'Tidepool Loop ecosystem is commercially deployed as twiist Loop; availability is region and partner dependent.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/',
+      'https://www.tidepool.org/tidepool-loop'
+    ]
+  },
+  'omnipod-eros': {
+    aaps: 'supported',
+    loop: 'supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS supports Omnipod Eros with a compatible bridge device.',
+      'Loop supports Omnipod Eros; bridge hardware is required for command transport.',
+      'Tidepool Loop focuses on regulated commercial pathways and does not publish Eros support as a current option.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/',
+      'https://www.tidepool.org/loop-device-partners'
+    ]
+  },
+  'medtronic-670g': {
+    aaps: 'experimental',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS officially documents support for certain older Medtronic models requiring bridge devices.',
+      'Loop documentation targets older Medtronic x15/x22/x23/x54 firmware-limited pumps, not 670G as a direct Loop pump.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'medtronic-780g': {
+    aaps: 'experimental',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS docs describe support centered around older Medtronic compatibility families.',
+      'Loop iOS docs do not list 780G as compatible.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'tandem-t-slim-x2': {
+    aaps: 'not-supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'Not listed as a current AAPS compatible pump in the official compatibility page.',
+      'Not listed as a current Loop compatible pump in LoopDocs.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'accu-chek-combo': {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Accu-Chek Combo as supported over Bluetooth.',
+      'Loop does not list Accu-Chek Combo as compatible.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'accu-chek-insight': {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Accu-Chek Insight as supported over Bluetooth.',
+      'Loop does not list Accu-Chek Insight as compatible.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'dana-r': {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'DanaR is listed in AAPS compatible pumps.',
+      'LoopDocs only lists Dana-i and DanaRS-v3 in the experimental development branch path.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'dana-rs': {
+    aaps: 'supported',
+    loop: 'experimental',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'DanaRS is listed in AAPS compatible pumps.',
+      'Loop supports DanaRS-v3 in an experimental development branch.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'dana-i': {
+    aaps: 'supported',
+    loop: 'experimental',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'Dana-i is listed in AAPS compatible pumps.',
+      'Loop supports Dana-i in an experimental development branch.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'medtrum-nano': {
+    aaps: 'supported',
+    loop: 'experimental',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists Medtrum Nano and 300U support.',
+      'Loop supports Medtrum Nano in an experimental development branch.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  eopatch: {
+    aaps: 'supported',
+    loop: 'not-supported',
+    tidepoolLoop: 'not-supported',
+    notes: [
+      'AAPS lists EOPatch2 support.',
+      'LoopDocs does not list EOPatch as a compatible Loop pump at this time.'
+    ],
+    sources: [
+      'https://androidaps.readthedocs.io/en/latest/Getting-Started/CompatiblePumps.html',
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  },
+  'diy-loop': {
+    aaps: 'not-supported',
+    loop: 'supported',
+    tidepoolLoop: 'unknown',
+    notes: [
+      'Represents a generic Loop-compatible setup profile, not a single pump model.',
+      'Use a specific pump option when possible for better recommendation precision.'
+    ],
+    sources: [
+      'https://loopkit.github.io/loopdocs/build/pump/'
+    ]
+  }
+};
+
 // Helper functions for pump operations
 export const getPumpById = (pumpId: string): InsulinPumpProfile | null => {
   return INSULIN_PUMPS[pumpId] || null;
@@ -741,6 +936,21 @@ export const getPumpById = (pumpId: string): InsulinPumpProfile | null => {
 
 export const getPumpsByCategory = (category: 'tubeless' | 'tubed' | 'diy'): InsulinPumpProfile[] => {
   return Object.values(INSULIN_PUMPS).filter(pump => pump.category === category);
+};
+
+export const getPumpPlatformCompatibility = (pumpId: string): PumpPlatformCompatibility => {
+  return PUMP_PLATFORM_COMPATIBILITY[pumpId] || DEFAULT_COMPATIBILITY;
+};
+
+export const getPumpsByTherapyAlgorithm = (algorithm: TherapyAlgorithm): InsulinPumpProfile[] => {
+  return Object.values(INSULIN_PUMPS).filter((pump) => {
+    const compatibility = getPumpPlatformCompatibility(pump.id);
+    return compatibility[algorithm] !== 'not-supported';
+  });
+};
+
+export const isPumpCompatibleWithTherapyAlgorithm = (pumpId: string, algorithm: TherapyAlgorithm): boolean => {
+  return getPumpPlatformCompatibility(pumpId)[algorithm] !== 'not-supported';
 };
 
 export const getAAPSSupportedPumps = (): InsulinPumpProfile[] => {

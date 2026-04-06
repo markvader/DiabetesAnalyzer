@@ -1,7 +1,10 @@
 import { createContext, useContext } from 'react';
-import type { InsulinPumpProfile } from '../constants/insulinPumps';
+import type { InsulinPumpProfile, TherapyAlgorithm } from '../constants/insulinPumps';
 
 export interface InsulinPumpContextType {
+  selectedTherapyAlgorithm: TherapyAlgorithm;
+  setSelectedTherapyAlgorithm: (algorithm: TherapyAlgorithm) => void;
+
   selectedPumpId: string;
   selectedPump: InsulinPumpProfile | null;
   setSelectedPumpId: (pumpId: string) => void;

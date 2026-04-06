@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { useInsulinPump } from '../contexts/InsulinPumpContext';
@@ -6,7 +6,15 @@ import { useTimeFormat } from '../contexts/TimeFormatContext';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useDashboardDisplay } from '../contexts/DashboardDisplayContext';
 import { useTimeInRange } from '../contexts/TimeInRangeContext';
-import { getPumpsByCategory } from '../constants/insulinPumps';
+import {
+  getPumpsByCategory,
+  getPumpPlatformCompatibility,
+  getPumpsByTherapyAlgorithm,
+  isPumpCompatibleWithTherapyAlgorithm,
+  type CompatibilityLevel,
+  type TherapyAlgorithm,
+  type InsulinPumpProfile
+} from '../constants/insulinPumps';
 import { 
   getModelsByCategory, 
   getModelsByProvider,
@@ -48,7 +56,13 @@ const Settings = () => {
   } = useNightscout();
   
   const { unit, setUnit, getUnitLabel } = useGlucoseUnits();
-  const { selectedPumpId, selectedPump, setSelectedPumpId } = useInsulinPump();
+  const {
+    selectedTherapyAlgorithm,
+    setSelectedTherapyAlgorithm,
+    selectedPumpId,
+    selectedPump,
+    setSelectedPumpId
+  } = useInsulinPump();
   const { timeFormat, setTimeFormat, formatTime, formatDateTime } = useTimeFormat();
   const { 
     isReady: tensorFlowReady, 
@@ -402,6 +416,60 @@ const Settings = () => {
       : pricingFreshnessLabel === 'Aging'
         ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300'
         : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300';
+
+  const platformLabel: Record<TherapyAlgorithm, string> = {
+    aaps: 'AndroidAPS (AAPS)',
+    loop: 'Loop for iOS'
+  };
+
+  const compatibilityBadgeClasses: Record<CompatibilityLevel, string> = {
+    supported: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+    experimental: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+    'not-supported': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+  };
+
+  const compatibilityLabel: Record<CompatibilityLevel, string> = {
+    supported: 'Supported',
+    experimental: 'Experimental',
+    'not-supported': 'Not Supported'
+  };
+
+  const platformCompatiblePumps = useMemo(
+    () => getPumpsByTherapyAlgorithm(selectedTherapyAlgorithm),
+    [selectedTherapyAlgorithm]
+  );
+
+  const groupedPlatformPumps = useMemo(() => {
+    const allPumps = getPumpsByCategory('tubeless')
+      .concat(getPumpsByCategory('tubed'))
+      .concat(getPumpsByCategory('diy'));
+
+    const buckets: Record<CompatibilityLevel, InsulinPumpProfile[]> = {
+      supported: [],
+      experimental: [],
+      'not-supported': []
+    };
+
+    allPumps.forEach((pump) => {
+      const compatibility = getPumpPlatformCompatibility(pump.id);
+      buckets[compatibility[selectedTherapyAlgorithm]].push(pump);
+    });
+
+    return buckets;
+  }, [selectedTherapyAlgorithm]);
+
+  const selectedPumpCompatibility = selectedPump ? getPumpPlatformCompatibility(selectedPump.id) : null;
+
+  const handleTherapyAlgorithmChange = (algorithm: TherapyAlgorithm) => {
+    setSelectedTherapyAlgorithm(algorithm);
+
+    if (!isPumpCompatibleWithTherapyAlgorithm(selectedPumpId, algorithm)) {
+      const nextPump = getPumpsByTherapyAlgorithm(algorithm)[0];
+      if (nextPump) {
+        setSelectedPumpId(nextPump.id);
+      }
+    }
+  };
   
   return (
     <motion.div
@@ -1183,15 +1251,58 @@ const Settings = () => {
         <div className="p-6">
           <div className="flex items-center mb-4">
             <Activity className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Insulin Pump Configuration</h3>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">Automated Therapy & Pump Configuration</h3>
           </div>
           
           <p className="text-gray-600 dark:text-gray-400 mb-4">
-            Select your insulin pump model to optimize analysis and recommendations. This affects basal rate calculations, 
-            OpenAPS/AAPS settings, and safety recommendations throughout the application.
+            Choose your therapy platform first (AAPS is default), then select a pump to optimize recommendations,
+            safety limits, and setup guidance throughout the application.
           </p>
           
           <div className="space-y-4">
+            <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
+              <h4 className="text-sm font-medium text-indigo-900 dark:text-indigo-100 mb-3">Automated Therapy Platform</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="flex items-start gap-3 p-3 rounded border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="therapy-platform"
+                    value="aaps"
+                    checked={selectedTherapyAlgorithm === 'aaps'}
+                    onChange={() => handleTherapyAlgorithmChange('aaps')}
+                    className="mt-1 h-4 w-4 text-indigo-600"
+                  />
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">AndroidAPS (AAPS)</div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      Default mode. Best for Android-based open-source looping with broad pump support.
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-3 rounded border border-indigo-200 dark:border-indigo-700 bg-white dark:bg-gray-700 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="therapy-platform"
+                    value="loop"
+                    checked={selectedTherapyAlgorithm === 'loop'}
+                    onChange={() => handleTherapyAlgorithmChange('loop')}
+                    className="mt-1 h-4 w-4 text-indigo-600"
+                  />
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Loop for iOS (Tidepool Pathway)</div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      iOS Loop ecosystem with compatibility guidance aligned to LoopDocs and Tidepool commercialization path.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              <div className="mt-3 text-xs text-indigo-800 dark:text-indigo-200">
+                <strong>Current mode:</strong> {platformLabel[selectedTherapyAlgorithm]} • {platformCompatiblePumps.length} compatible or experimental pumps detected.
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Current Insulin Pump
@@ -1201,26 +1312,26 @@ const Settings = () => {
                 onChange={(e) => setSelectedPumpId(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-blue-500 dark:focus:border-blue-400 transition-colors duration-200"
               >
-                <optgroup label="🔄 Tubeless Pumps (Recommended for AAPS)">
-                  {getPumpsByCategory('tubeless').map(pump => (
+                <optgroup label={`✅ ${platformLabel[selectedTherapyAlgorithm]} - Supported`}>
+                  {groupedPlatformPumps.supported.map(pump => (
                     <option key={pump.id} value={pump.id}>
-                      {pump.name} - {pump.manufacturer} {pump.aapsSupported ? '✅ AAPS' : '❌ No AAPS'}
+                      {pump.name} - {pump.manufacturer}
                     </option>
                   ))}
                 </optgroup>
                 
-                <optgroup label="🔗 Tubed Pumps">
-                  {getPumpsByCategory('tubed').map(pump => (
+                <optgroup label={`⚠️ ${platformLabel[selectedTherapyAlgorithm]} - Experimental`}>
+                  {groupedPlatformPumps.experimental.map(pump => (
                     <option key={pump.id} value={pump.id}>
-                      {pump.name} - {pump.manufacturer} {pump.aapsSupported ? '✅ AAPS' : '❌ No AAPS'}
+                      {pump.name} - {pump.manufacturer}
                     </option>
                   ))}
                 </optgroup>
                 
-                <optgroup label="🔬 DIY/Research Pumps">
-                  {getPumpsByCategory('diy').map(pump => (
+                <optgroup label={`❌ ${platformLabel[selectedTherapyAlgorithm]} - Not Supported`}>
+                  {groupedPlatformPumps['not-supported'].map(pump => (
                     <option key={pump.id} value={pump.id}>
-                      {pump.name} - {pump.manufacturer} {pump.aapsSupported ? '✅ AAPS' : '❌ No AAPS'}
+                      {pump.name} - {pump.manufacturer}
                     </option>
                   ))}
                 </optgroup>
@@ -1233,7 +1344,7 @@ const Settings = () => {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h4 className="font-medium text-purple-900 dark:text-purple-100 flex items-center">
-                      {selectedPump.aapsSupported ? (
+                      {selectedPumpCompatibility?.[selectedTherapyAlgorithm] === 'supported' ? (
                         <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-2" />
                       ) : (
                         <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mr-2" />
@@ -1245,13 +1356,34 @@ const Settings = () => {
                     </p>
                   </div>
                   <span className={`px-2 py-1 text-xs rounded-full ${
-                    selectedPump.aapsSupported 
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
-                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+                    compatibilityBadgeClasses[selectedPumpCompatibility?.[selectedTherapyAlgorithm] || 'not-supported']
                   }`}>
-                    {selectedPump.aapsSupported ? 'AAPS Compatible' : 'Limited AAPS Support'}
+                    {platformLabel[selectedTherapyAlgorithm]}: {compatibilityLabel[selectedPumpCompatibility?.[selectedTherapyAlgorithm] || 'not-supported']}
                   </span>
                 </div>
+
+                {selectedPumpCompatibility && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                    <div className="bg-white dark:bg-gray-700 rounded p-2 text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">AAPS</div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${compatibilityBadgeClasses[selectedPumpCompatibility.aaps]}`}>
+                        {compatibilityLabel[selectedPumpCompatibility.aaps]}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-gray-700 rounded p-2 text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Loop (iOS)</div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${compatibilityBadgeClasses[selectedPumpCompatibility.loop]}`}>
+                        {compatibilityLabel[selectedPumpCompatibility.loop]}
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-gray-700 rounded p-2 text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Tidepool Loop Path</div>
+                      <span className={`px-2 py-1 text-xs rounded-full ${compatibilityBadgeClasses[selectedPumpCompatibility.tidepoolLoop]}`}>
+                        {compatibilityLabel[selectedPumpCompatibility.tidepoolLoop]}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                   <div className="bg-white dark:bg-gray-700 p-2 rounded text-center">
@@ -1273,6 +1405,17 @@ const Settings = () => {
                 </div>
                 
                 <div className="space-y-2">
+                  {selectedPumpCompatibility && selectedPumpCompatibility.notes.length > 0 && (
+                    <div className="bg-white dark:bg-gray-700 p-2 rounded">
+                      <h5 className="text-sm font-medium text-purple-900 dark:text-purple-100">Compatibility Notes:</h5>
+                      <ul className="mt-1 list-disc list-inside text-xs text-purple-800 dark:text-purple-200 space-y-1">
+                        {selectedPumpCompatibility.notes.slice(0, 3).map((note, index) => (
+                          <li key={index}>{note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
                   <div>
                     <h5 className="text-sm font-medium text-purple-900 dark:text-purple-100">Key Features:</h5>
                     <div className="flex flex-wrap gap-1 mt-1">
@@ -1293,6 +1436,20 @@ const Settings = () => {
                     <span>Communication: {selectedPump.communicationType}</span>
                     <span>Cost: {selectedPump.approximateCost}</span>
                   </div>
+
+                  {selectedPumpCompatibility && selectedPumpCompatibility.sources.length > 0 && (
+                    <div className="text-xs text-purple-700 dark:text-purple-300">
+                      Sources:{' '}
+                      {selectedPumpCompatibility.sources.map((source, index) => (
+                        <React.Fragment key={source}>
+                          {index > 0 ? ' • ' : ''}
+                          <a href={source} target="_blank" rel="noopener noreferrer" className="underline hover:text-purple-900 dark:hover:text-purple-100">
+                            Reference {index + 1}
+                          </a>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1303,16 +1460,16 @@ const Settings = () => {
                 <div>
                   <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-1">Impact on Analysis</h4>
                   <p className="text-sm text-blue-800 dark:text-blue-200">
-                    Your pump selection affects:
+                    Your platform + pump selection affects:
                   </p>
                   <ul className="mt-1 space-y-1 text-sm text-blue-800 dark:text-blue-200 list-disc list-inside">
                     <li><strong>Basal Rate Calculations:</strong> Recommendations rounded to your pump's increments</li>
-                    <li><strong>OpenAPS/AAPS Settings:</strong> Optimized max IOB, temp basal, and safety settings</li>
+                    <li><strong>AAPS/Loop Tuning:</strong> Platform-aware max IOB, temp basal, and safety guidance</li>
                     <li><strong>Safety Recommendations:</strong> Adjusted based on pump capabilities and limitations</li>
                     <li><strong>Insulin Delivery Analysis:</strong> Considers pump-specific delivery delays and characteristics</li>
                   </ul>
                   <p className="mt-2 text-sm text-blue-800 dark:text-blue-200">
-                    <strong>Note:</strong> AAPS-compatible pumps receive more advanced analysis and recommendations.
+                    <strong>Note:</strong> AAPS remains default. Loop mode is available for users running iOS Loop/Tidepool-aligned workflows.
                   </p>
                 </div>
               </div>

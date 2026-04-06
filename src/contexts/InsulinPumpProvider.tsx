@@ -1,5 +1,13 @@
 import React, { useState, type ReactNode } from 'react';
-import { InsulinPumpProfile, INSULIN_PUMPS, DEFAULT_PUMP_ID, getPumpById } from '../constants/insulinPumps';
+import {
+  InsulinPumpProfile,
+  INSULIN_PUMPS,
+  DEFAULT_PUMP_ID,
+  getPumpById,
+  getPumpsByTherapyAlgorithm,
+  isPumpCompatibleWithTherapyAlgorithm,
+  type TherapyAlgorithm
+} from '../constants/insulinPumps';
 import { InsulinPumpContext, type InsulinPumpContextType } from './InsulinPumpContext';
 
 interface InsulinPumpProviderProps {
@@ -7,6 +15,11 @@ interface InsulinPumpProviderProps {
 }
 
 export const InsulinPumpProvider: React.FC<InsulinPumpProviderProps> = ({ children }) => {
+  const [selectedTherapyAlgorithm, setSelectedTherapyAlgorithmState] = useState<TherapyAlgorithm>(() => {
+    const saved = localStorage.getItem('selected_therapy_algorithm');
+    return saved === 'loop' ? 'loop' : 'aaps';
+  });
+
   const [selectedPumpId, setSelectedPumpIdState] = useState<string>(() => {
     const saved = localStorage.getItem('selected_insulin_pump');
     return saved && INSULIN_PUMPS[saved] ? saved : DEFAULT_PUMP_ID;
@@ -14,8 +27,22 @@ export const InsulinPumpProvider: React.FC<InsulinPumpProviderProps> = ({ childr
 
   const selectedPump: InsulinPumpProfile | null = getPumpById(selectedPumpId);
 
+  const setSelectedTherapyAlgorithm = (algorithm: TherapyAlgorithm) => {
+    setSelectedTherapyAlgorithmState(algorithm);
+    localStorage.setItem('selected_therapy_algorithm', algorithm);
+
+    const currentPumpId = localStorage.getItem('selected_insulin_pump') || selectedPumpId;
+    if (!isPumpCompatibleWithTherapyAlgorithm(currentPumpId, algorithm)) {
+      const firstCompatible = getPumpsByTherapyAlgorithm(algorithm)[0];
+      if (firstCompatible) {
+        setSelectedPumpIdState(firstCompatible.id);
+        localStorage.setItem('selected_insulin_pump', firstCompatible.id);
+      }
+    }
+  };
+
   const setSelectedPumpId = (pumpId: string) => {
-    if (INSULIN_PUMPS[pumpId]) {
+    if (INSULIN_PUMPS[pumpId] && isPumpCompatibleWithTherapyAlgorithm(pumpId, selectedTherapyAlgorithm)) {
       setSelectedPumpIdState(pumpId);
       localStorage.setItem('selected_insulin_pump', pumpId);
       console.log(`🏥 Insulin pump changed to: ${INSULIN_PUMPS[pumpId].name}`);
@@ -71,6 +98,8 @@ export const InsulinPumpProvider: React.FC<InsulinPumpProviderProps> = ({ childr
   };
 
   const contextValue: InsulinPumpContextType = {
+    selectedTherapyAlgorithm,
+    setSelectedTherapyAlgorithm,
     selectedPumpId,
     selectedPump,
     setSelectedPumpId,
