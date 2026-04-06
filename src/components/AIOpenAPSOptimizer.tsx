@@ -3,6 +3,8 @@ import { Brain, Zap, Shield, TrendingUp, AlertTriangle, CheckCircle, Settings, T
 import { aiOpenAPSOptimizer } from '../services/aiOpenAPSOptimizer';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import type { TherapyAlgorithm } from '../constants/insulinPumps';
+import { getTherapyFeaturesLabel, getTherapyPlatformLabel } from '../utils/therapyData';
 
 type OptimizationResult = Awaited<ReturnType<typeof aiOpenAPSOptimizer.optimizeOpenAPSSettings>>;
 
@@ -11,13 +13,23 @@ interface AIOptimizerProps {
   treatments: NightscoutTreatment[];
   analysisDays: number;
   onOptimizationComplete?: (results: OptimizationResult) => void;
+  therapyAlgorithm?: TherapyAlgorithm;
 }
 
-const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, analysisDays, onOptimizationComplete }) => {
+const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({
+  readings,
+  treatments,
+  analysisDays,
+  onOptimizationComplete,
+  therapyAlgorithm = 'aaps'
+}) => {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimization, setOptimization] = useState<OptimizationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { formatGlucoseValue } = useGlucoseFormatting();
+  const platformLabel = getTherapyPlatformLabel(therapyAlgorithm);
+  const dosingModeLabel = getTherapyFeaturesLabel(therapyAlgorithm);
+  const dosingModeShortLabel = therapyAlgorithm === 'loop' ? 'Automated Dosing' : 'SMB';
 
   const runOptimization = async () => {
     setIsOptimizing(true);
@@ -35,7 +47,7 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
         onOptimizationComplete(result);
       }
     } catch (err) {
-      setError('Failed to optimize OpenAPS settings. Please try again.');
+      setError(`Failed to optimize ${platformLabel} settings. Please try again.`);
       console.error('Optimization error:', err);
     } finally {
       setIsOptimizing(false);
@@ -67,10 +79,10 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
           <Brain className="h-8 w-8 text-purple-600" />
           <div>
             <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-              AI OpenAPS SMB Optimizer
+              AI {platformLabel} {dosingModeShortLabel} Optimizer
             </h2>
             <p className="text-sm text-gray-600 dark:text-gray-300">
-              Advanced algorithm to optimize your OpenAPS settings based on {analysisDays} days of data
+              Advanced algorithm to optimize your {platformLabel} settings based on {analysisDays} days of data
             </p>
           </div>
         </div>
@@ -180,7 +192,7 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
           <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center">
               <Settings className="h-5 w-5 mr-2" />
-              Optimized OpenAPS Settings
+              Optimized {platformLabel} Settings
             </h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -206,14 +218,14 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
               </div>
               
               <div className="bg-white dark:bg-gray-600 rounded-lg p-3">
-                <div className="text-sm font-medium text-gray-600 dark:text-gray-300">SMB Max Minutes</div>
+                <div className="text-sm font-medium text-gray-600 dark:text-gray-300">{dosingModeShortLabel} Max Minutes</div>
                 <div className="text-xl font-bold text-gray-900 dark:text-white">
                   {optimization.optimizedSettings.smbMaxMinutes} min
                 </div>
               </div>
               
               <div className="bg-white dark:bg-gray-600 rounded-lg p-3">
-                <div className="text-sm font-medium text-gray-600 dark:text-gray-300">SMB Delivery Ratio</div>
+                <div className="text-sm font-medium text-gray-600 dark:text-gray-300">{dosingModeShortLabel} Delivery Ratio</div>
                 <div className="text-xl font-bold text-gray-900 dark:text-white">
                   {(optimization.optimizedSettings.smbDeliveryRatio * 100).toFixed(0)}%
                 </div>
@@ -227,17 +239,17 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
               </div>
             </div>
             
-            {/* SMB Toggles */}
+            {/* Automated dosing toggles */}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-600 rounded-lg">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SMB with COB</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{dosingModeShortLabel} with COB</span>
                 <div className={`w-8 h-4 rounded-full flex items-center ${optimization.optimizedSettings.enableSMBWithCOB ? 'bg-green-500' : 'bg-gray-300'}`}>
                   <div className={`w-3 h-3 bg-white rounded-full transition-transform ${optimization.optimizedSettings.enableSMBWithCOB ? 'translate-x-4' : 'translate-x-0.5'}`}></div>
                 </div>
               </div>
               
               <div className="flex items-center justify-between p-3 bg-white dark:bg-gray-600 rounded-lg">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SMB Always</span>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{dosingModeShortLabel} Always</span>
                 <div className={`w-8 h-4 rounded-full flex items-center ${optimization.optimizedSettings.enableSMBAlways ? 'bg-green-500' : 'bg-gray-300'}`}>
                   <div className={`w-3 h-3 bg-white rounded-full transition-transform ${optimization.optimizedSettings.enableSMBAlways ? 'translate-x-4' : 'translate-x-0.5'}`}></div>
                 </div>
@@ -355,7 +367,7 @@ const AIOpenAPSOptimizer: React.FC<AIOptimizerProps> = ({ readings, treatments, 
         <div className="text-center py-8">
           <Brain className="h-16 w-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
           <p className="text-gray-600 dark:text-gray-300">
-            Click "Optimize Settings" to analyze your data and get AI-powered OpenAPS recommendations
+            Click "Optimize Settings" to analyze your data and get AI-powered {dosingModeLabel} recommendations
           </p>
         </div>
       )}

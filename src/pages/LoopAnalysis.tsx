@@ -1,8 +1,16 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
 import { lowerBoundByMs, upperBoundByMs } from '../utils/sortedTimeSeries';
+import {
+  extractDeviceStatusMetric,
+  extractTreatmentMetric,
+  getPredictionToleranceMgdl,
+  getTherapyPlatformLabel,
+  isAutomatedDosingTreatment
+} from '../utils/therapyData';
 import { 
   Activity, 
   Clock, 
@@ -79,6 +87,7 @@ interface LoopStats {
 const LoopAnalysis = () => {
   const { data, loading, error } = useNightscout();
   const { formatGlucoseValue } = useGlucoseFormatting();
+  const { selectedTherapyAlgorithm } = useInsulinPump();
   const [loopCycles, setLoopCycles] = useState<LoopCycle[]>([]);
   const [loopStats, setLoopStats] = useState<LoopStats | null>(null);
   const [loopStatus, setLoopStatus] = useState<LoopStatus | null>(null);
@@ -116,7 +125,7 @@ const LoopAnalysis = () => {
 
     console.log('🔍 Recent treatments (last 30min):', recentTreatments.length);
 
-    // Find current IOB and COB - check various AAPS/AndroidAPS data sources
+    // Find current IOB and COB from the selected platform first, then fallback.
     let currentIOB = 0;
     let currentCOB = 0;
     let lastLoop = null;
@@ -127,55 +136,22 @@ const LoopAnalysis = () => {
     console.log('🔍 Checking recent treatments for IOB/COB data...');
     
     for (const treatment of sortedTreatments.slice(0, 100)) { // Check last 100 treatments
-      // Check if treatment has IOB/COB fields directly
-      if (treatment.iob !== undefined && treatment.iob !== null) {
-        currentIOB = treatment.iob;
+      const treatmentIob = extractTreatmentMetric(treatment, 'iob', selectedTherapyAlgorithm);
+      if (treatmentIob !== null) {
+        currentIOB = treatmentIob;
         lastLoop = new Date(treatment.created_at);
         console.log('✅ Found IOB in treatment:', currentIOB, treatment);
         break;
-      }
-      
-      // Check AndroidAPS specific fields
-      if (treatment.AAPS && treatment.AAPS.iob !== undefined) {
-        currentIOB = treatment.AAPS.iob;
-        lastLoop = new Date(treatment.created_at);
-        console.log('✅ Found IOB in AAPS field:', currentIOB);
-        break;
-      }
-      
-      // Check if IOB is in notes
-      if (treatment.notes && typeof treatment.notes === 'string') {
-        const iobMatch = treatment.notes.match(/iob[:\s]*([0-9.-]+)/i);
-        if (iobMatch) {
-          currentIOB = parseFloat(iobMatch[1]);
-          lastLoop = new Date(treatment.created_at);
-          console.log('✅ Parsed IOB from notes:', currentIOB, 'from:', treatment.notes);
-          break;
-        }
       }
     }
 
     // Search for COB similarly
     for (const treatment of sortedTreatments.slice(0, 100)) {
-      if (treatment.cob !== undefined && treatment.cob !== null) {
-        currentCOB = treatment.cob;
+      const treatmentCob = extractTreatmentMetric(treatment, 'cob', selectedTherapyAlgorithm);
+      if (treatmentCob !== null) {
+        currentCOB = treatmentCob;
         console.log('✅ Found COB in treatment:', currentCOB, treatment);
         break;
-      }
-      
-      if (treatment.AAPS && treatment.AAPS.cob !== undefined) {
-        currentCOB = treatment.AAPS.cob;
-        console.log('✅ Found COB in AAPS field:', currentCOB);
-        break;
-      }
-      
-      if (treatment.notes && typeof treatment.notes === 'string') {
-        const cobMatch = treatment.notes.match(/cob[:\s]*([0-9.-]+)/i);
-        if (cobMatch) {
-          currentCOB = parseFloat(cobMatch[1]);
-          console.log('✅ Parsed COB from notes:', currentCOB, 'from:', treatment.notes);
-          break;
-        }
       }
     }
 
@@ -186,31 +162,16 @@ const LoopAnalysis = () => {
 
       console.log('📱 Latest device status:', latestDeviceStatus);
 
-      // Check various paths where AAPS might store IOB/COB
-      if (latestDeviceStatus.openaps?.iob?.iob !== undefined) {
-        currentIOB = latestDeviceStatus.openaps.iob.iob;
-        console.log('✅ Found IOB in deviceStatus.openaps.iob:', currentIOB);
-      }
-      
-      if (latestDeviceStatus.openaps?.suggested?.iob !== undefined) {
-        currentIOB = latestDeviceStatus.openaps.suggested.iob;
-        console.log('✅ Found IOB in deviceStatus.openaps.suggested:', currentIOB);
-      }
-      
-      if (latestDeviceStatus.openaps?.suggested?.cob !== undefined) {
-        currentCOB = latestDeviceStatus.openaps.suggested.cob;
-        console.log('✅ Found COB in deviceStatus.openaps.suggested:', currentCOB);
+      const statusIob = extractDeviceStatusMetric(latestDeviceStatus, 'iob', selectedTherapyAlgorithm);
+      if (statusIob !== null) {
+        currentIOB = statusIob;
+        console.log('✅ Found IOB in device status:', currentIOB);
       }
 
-      // Check for AAPS-specific paths
-      if (latestDeviceStatus.AAPS?.iob !== undefined) {
-        currentIOB = latestDeviceStatus.AAPS.iob;
-        console.log('✅ Found IOB in deviceStatus.AAPS:', currentIOB);
-      }
-      
-      if (latestDeviceStatus.AAPS?.cob !== undefined) {
-        currentCOB = latestDeviceStatus.AAPS.cob;
-        console.log('✅ Found COB in deviceStatus.AAPS:', currentCOB);
+      const statusCob = extractDeviceStatusMetric(latestDeviceStatus, 'cob', selectedTherapyAlgorithm);
+      if (statusCob !== null) {
+        currentCOB = statusCob;
+        console.log('✅ Found COB in device status:', currentCOB);
       }
     }
 
@@ -244,11 +205,11 @@ const LoopAnalysis = () => {
         duration: activeTempBasal.duration || 0,
         started: new Date(activeTempBasal.created_at)
       } : null,
-      pumpBattery: 100, // Default since we can't reliably get this from AAPS
+      pumpBattery: 100, // Default fallback when pump battery is not exposed in uploaded data
       cgmStatus: 'connected', // Default since we have glucose data
-      loopVersion: 'AAPS'
+      loopVersion: getTherapyPlatformLabel(selectedTherapyAlgorithm)
     });
-  }, [data?.deviceStatus, data?.treatments, deviceStatusSortedDesc, treatmentsSortedDesc]);
+  }, [data?.deviceStatus, data?.treatments, deviceStatusSortedDesc, selectedTherapyAlgorithm, treatmentsSortedDesc]);
 
   const analyzeAdvancedLoop = useCallback(() => {
     if (!data?.treatments || !data?.entries) {
@@ -259,27 +220,8 @@ const LoopAnalysis = () => {
 
     console.log('🔍 Analyzing loop treatments...', data.treatments.length);
 
-    // Look for AAPS/AndroidAPS treatments and any loop-related data
-    const loopTreatments = data.treatments.filter(t => {
-      const eventType = (t.eventType || '').toLowerCase();
-      const notes = (t.notes || '').toLowerCase();
-      
-      return (
-        eventType === 'temp basal' || 
-        eventType === 'temporary basal' ||
-        eventType === 'openaps enacted' ||
-        eventType === 'bolus' ||
-        eventType === 'smb' ||
-        notes.includes('loop') || 
-        notes.includes('openaps') ||
-        notes.includes('aaps') ||
-        notes.includes('androidaps') ||
-        t.iob !== undefined || 
-        t.cob !== undefined ||
-        t.rate !== undefined ||
-        t.absolute !== undefined ||
-        (t.insulin && t.insulin > 0)
-      ) && getTreatmentMs(t) > Date.now() - 24 * 60 * 60 * 1000; // Last 24h
+    const loopTreatments = data.treatments.filter((t) => {
+      return isAutomatedDosingTreatment(t, selectedTherapyAlgorithm) && getTreatmentMs(t) > Date.now() - 24 * 60 * 60 * 1000;
     });
 
     console.log('🔍 Found loop treatments:', loopTreatments.length);
@@ -320,7 +262,7 @@ const LoopAnalysis = () => {
         else if (change < -10) trend = 'falling';
       }
 
-      // Determine basal type - improved AAPS detection
+      // Determine basal type from event metadata and insulin amount.
       let basalType: 'regular' | 'temp' | 'smb' = 'regular';
       const eventType = (treatment.eventType || '').toLowerCase();
       const notes = (treatment.notes || '').toLowerCase();
@@ -332,16 +274,8 @@ const LoopAnalysis = () => {
       }
 
       // Extract IOB and COB with better parsing
-      let iob = treatment.iob || 0;
-      let cob = treatment.cob || 0;
-
-      // Try to parse from notes if not in main fields
-      if (treatment.notes) {
-        const iobMatch = treatment.notes.match(/iob[:\s]*([0-9.-]+)/i);
-        const cobMatch = treatment.notes.match(/cob[:\s]*([0-9.-]+)/i);
-        if (iobMatch && !iob) iob = parseFloat(iobMatch[1]);
-        if (cobMatch && !cob) cob = parseFloat(cobMatch[1]);
-      }
+      const iob = extractTreatmentMetric(treatment, 'iob', selectedTherapyAlgorithm) ?? 0;
+      const cob = extractTreatmentMetric(treatment, 'cob', selectedTherapyAlgorithm) ?? 0;
 
       return {
         timestamp,
@@ -354,7 +288,7 @@ const LoopAnalysis = () => {
         actualBasal: treatment.rate || treatment.absolute || treatment.insulin || 0,
         basalType,
         enacted: treatment.enacted !== false,
-        reason: treatment.reason || treatment.notes || treatment.eventType || 'AAPS adjustment',
+        reason: treatment.reason || treatment.notes || treatment.eventType || `${getTherapyPlatformLabel(selectedTherapyAlgorithm)} adjustment`,
         duration: treatment.duration || 30,
         prediction: treatment.predBGs?.[0] || readingForDisplay.sgv,
         minPredBG: treatment.predBGs ? Math.min(...treatment.predBGs) : readingForDisplay.sgv,
@@ -378,9 +312,10 @@ const LoopAnalysis = () => {
       const avgIOB = cycles.reduce((sum, c) => sum + c.iob, 0) / cycles.length;
       const avgCOB = cycles.reduce((sum, c) => sum + c.cob, 0) / cycles.length;
       
-      // Calculate prediction accuracy (less strict for AAPS)
+      const predictionTolerance = getPredictionToleranceMgdl(selectedTherapyAlgorithm);
+
       const accuratePredictions = cycles.filter(c => 
-        Math.abs(c.prediction - c.glucose) <= 30 // More lenient for AAPS
+        Math.abs(c.prediction - c.glucose) <= predictionTolerance
       ).length;
       
       setLoopStats({
@@ -401,7 +336,7 @@ const LoopAnalysis = () => {
     } else {
       setLoopStats(null);
     }
-  }, [data?.entries, data?.treatments, entriesSortedAsc]);
+  }, [data?.entries, data?.treatments, entriesSortedAsc, selectedTherapyAlgorithm]);
 
   useEffect(() => {
     analyzeAdvancedLoop();
@@ -617,7 +552,7 @@ const LoopAnalysis = () => {
                 <p className="mb-2"><strong>Loop data includes:</strong></p>
                 <ul className="list-disc list-inside space-y-1">
                   <li>Temporary basal rate changes</li>
-                  <li>OpenAPS enacted treatments</li>
+                  <li>Automated dosing enacted treatments</li>
                   <li>IOB (Insulin on Board) calculations</li>
                   <li>COB (Carbs on Board) calculations</li>
                   <li>Prediction and recommendation data</li>
@@ -808,7 +743,9 @@ const LoopAnalysis = () => {
               <div className="flex items-start">
                 <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 mr-2 flex-shrink-0" />
                 <p className="text-gray-700 dark:text-gray-300">
-                  {loopStats.smbCycles > 0 ? `${loopStats.smbCycles} SMB deliveries detected` : 'No SMB deliveries in recent data'}
+                  {loopStats.smbCycles > 0
+                    ? `${loopStats.smbCycles} ${selectedTherapyAlgorithm === 'loop' ? 'automated bolus' : 'SMB'} deliveries detected`
+                    : `No ${selectedTherapyAlgorithm === 'loop' ? 'automated bolus' : 'SMB'} deliveries in recent data`}
                 </p>
               </div>
             </div>

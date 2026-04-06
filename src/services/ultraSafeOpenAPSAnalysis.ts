@@ -3,6 +3,7 @@ import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol } from '../utils/glucoseUtils';
 import { aiAnalysisService } from './aiAnalysisService';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import type { TherapyAlgorithm } from '../constants/insulinPumps';
 
 type SafetyChecks = {
   hypoglycemiaHistory: boolean;
@@ -71,7 +72,8 @@ function roundToOmniPodBasal(value: number): number {
 export const analyzeUltraSafeOpenAPS = async (
   readings: NightscoutEntry[], 
   treatments: NightscoutTreatment[], 
-  currentProfile: unknown
+  currentProfile: unknown,
+  therapyAlgorithm: TherapyAlgorithm = 'aaps'
 ): Promise<UltraSafeOpenAPSAnalysis> => {
   
   // Get AI analysis first
@@ -85,19 +87,19 @@ export const analyzeUltraSafeOpenAPS = async (
   // Calculate safety metrics
   const safetyChecks = calculateSafetyChecks(readings, treatments);
   const hypoglycemiaRiskScore = calculateHypoglycemiaRisk(readings, treatments);
-  const criticalWarnings = generateCriticalWarnings(readings, treatments, safetyChecks);
+  const criticalWarnings = generateCriticalWarnings(readings, treatments, safetyChecks, therapyAlgorithm);
   
   // Determine safety level based on risk assessment
   const safetyLevel = determineSafetyLevel(hypoglycemiaRiskScore, safetyChecks);
   
   // Calculate base settings with more aggressive approach for high BG
-  const baseSettings = calculateMoreAggressiveSettings(readings, treatments, currentProfile, safetyLevel);
+  const baseSettings = calculateMoreAggressiveSettings(readings, treatments, currentProfile, safetyLevel, therapyAlgorithm);
   
   // Apply safety multipliers
   const _safetyMultipliers = getSafetyMultipliers(safetyLevel, hypoglycemiaRiskScore);
   
-  // Analyze carb coverage specifically for SMB
-  const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile);
+  // Analyze carb coverage with platform-aware dosing language.
+  const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile, therapyAlgorithm);
   
   // Ensure we have valid numbers for all settings with MUCH MORE REALISTIC CAPS
   const maxTempBasal = Math.min(7.0, isNaN(baseSettings.maxTempBasal) ? 5.0 : Math.max(4.0, baseSettings.maxTempBasal)); // Much higher baseline
@@ -277,7 +279,8 @@ function calculateMoreAggressiveSettings(
   readings: NightscoutEntry[],
   treatments: NightscoutTreatment[],
   currentProfile: unknown,
-  safetyLevel: string
+  safetyLevel: string,
+  therapyAlgorithm: TherapyAlgorithm
 ) {
   // OPTIMIZED: Much more aggressive base values for real-world effectiveness
   let baseMaxTempBasal = 4.5; // Increased from 3.0 for much better effectiveness
@@ -346,7 +349,7 @@ function calculateMoreAggressiveSettings(
   baseDynamicISF = Math.max(60, Math.min(130, baseDynamicISF)); // Range 60-130% (more aggressive)
   
   // Analyze carb coverage needs - more aggressive
-  const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile);
+  const carbCoverage = analyzeCarbCoverage(readings, treatments, currentProfile, therapyAlgorithm);
   if (carbCoverage && carbCoverage.recommendedSMBCoverage > 0) {
     // Adjust IOB limit based on carb coverage needs - much more aggressive for better meal coverage
     const carbBasedIOB = carbCoverage.recommendedSMBCoverage * 4.0; // Increased multiplier further
@@ -395,14 +398,20 @@ function getSafetyMultipliers(safetyLevel: string, _riskScore: number) {
   }
 }
 
-function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: NightscoutTreatment[], _currentProfile: unknown) {
+function analyzeCarbCoverage(
+  readings: NightscoutEntry[],
+  treatments: NightscoutTreatment[],
+  _currentProfile: unknown,
+  therapyAlgorithm: TherapyAlgorithm
+) {
+  const dosingModeLabel = therapyAlgorithm === 'loop' ? 'automated dosing' : 'SMB';
   // Find carb announcements
   const carbAnnouncements = treatments.filter(t => t.carbs && t.carbs > 0);
   
   if (carbAnnouncements.length === 0) {
     return {
       recommendedSMBCoverage: 2.0, // Reasonable default for carb coverage
-      mealPatternAnalysis: "No carb announcements found. Using balanced default values for SMB-based carb coverage.",
+      mealPatternAnalysis: `No carb announcements found. Using balanced default values for ${dosingModeLabel}-based carb coverage.`,
       carbRatioAdjustment: -0.08 // Modest decrease in carb ratio
     };
   }
@@ -448,8 +457,8 @@ function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: Nightscout
     };
   }).filter(p => p !== null);
   
-  // Calculate recommended SMB coverage based on meal patterns
-  let recommendedSMBCoverage = 2.5; // Start with a more aggressive value for SMB-based carb coverage
+  // Calculate recommended dosing coverage based on meal patterns.
+  let recommendedSMBCoverage = 2.5; // Start with a more aggressive value for automated-dosing carb coverage
   let mealPatternAnalysis = "";
   let carbRatioAdjustment = -0.15; // Default to more aggressive carb ratio
   
@@ -465,23 +474,23 @@ function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: Nightscout
     
     // Determine if carb coverage is adequate
     if (hypoRate > 0.2) {
-      // Too many hypos - reduce SMB coverage
-      mealPatternAnalysis = "Frequent post-meal hypoglycemia detected. Reducing SMB coverage.";
+      // Too many hypos - reduce automated dosing coverage.
+      mealPatternAnalysis = `Frequent post-meal hypoglycemia detected. Reducing ${dosingModeLabel} coverage.`;
       recommendedSMBCoverage = 1.2; // Increased from 1.0 but still conservative
       carbRatioAdjustment = 0.1; // Increase carb ratio (less insulin)
     } else if (hyperRate > 0.5 && hypoRate < 0.1) {
       // Many hypers, few hypos - increase coverage
-      mealPatternAnalysis = "Frequent post-meal hyperglycemia with few lows. Increasing SMB coverage.";
+      mealPatternAnalysis = `Frequent post-meal hyperglycemia with few lows. Increasing ${dosingModeLabel} coverage.`;
       recommendedSMBCoverage = 3.0; // More aggressive (increased from 2.5)
       carbRatioAdjustment = -0.2; // Decrease carb ratio (more insulin)
     } else if (avgGlucoseRise > 80 && hypoRate < 0.05) {
       // Large glucose rise with very few hypos
-      mealPatternAnalysis = "Large post-meal glucose rises with minimal hypoglycemia. Higher SMB coverage recommended.";
+      mealPatternAnalysis = `Large post-meal glucose rises with minimal hypoglycemia. Higher ${dosingModeLabel} coverage recommended.`;
       recommendedSMBCoverage = 3.5; // Much more aggressive (increased from 3.0)
       carbRatioAdjustment = -0.25; // More aggressive carb ratio (increased from -0.2)
     } else {
       // Balanced pattern
-      mealPatternAnalysis = "Balanced post-meal patterns. Moderate SMB coverage recommended.";
+      mealPatternAnalysis = `Balanced post-meal patterns. Moderate ${dosingModeLabel} coverage recommended.`;
       recommendedSMBCoverage = 2.5; // Increased from 2.0
       carbRatioAdjustment = -0.15; // Increased from -0.1
     }
@@ -491,10 +500,10 @@ function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: Nightscout
       recommendedSMBCoverage += 1.0; // Higher for larger meals (increased from 0.8)
     }
   } else {
-    mealPatternAnalysis = "Insufficient meal data for analysis. Using more aggressive default values for SMB-based carb coverage.";
+    mealPatternAnalysis = `Insufficient meal data for analysis. Using more aggressive default values for ${dosingModeLabel}-based carb coverage.`;
   }
   
-  // Safety cap - never recommend more than 6.0U for SMB coverage (increased from 5.0)
+  // Safety cap - never recommend more than 6.0U for automated dosing coverage (increased from 5.0)
   recommendedSMBCoverage = Math.min(recommendedSMBCoverage, 6.0);
   
   return {
@@ -504,9 +513,15 @@ function analyzeCarbCoverage(readings: NightscoutEntry[], treatments: Nightscout
   };
 }
 
-function generateCriticalWarnings(readings: NightscoutEntry[], treatments: NightscoutTreatment[], safetyChecks: SafetyChecks): string[] {
+function generateCriticalWarnings(
+  readings: NightscoutEntry[],
+  treatments: NightscoutTreatment[],
+  safetyChecks: SafetyChecks,
+  therapyAlgorithm: TherapyAlgorithm
+): string[] {
   const warnings = [];
   const timeInRange = calculateTimeInRange(readings);
+  const dosingModeLabel = therapyAlgorithm === 'loop' ? 'automated dosing' : 'SMB';
   
   // SAFETY FIRST: Always start with the most important warning
   warnings.push('🚨 SAFETY REMINDER: Always start with Emergency-Safe settings and monitor closely for 72+ hours before making any adjustments.');
@@ -541,13 +556,13 @@ function generateCriticalWarnings(readings: NightscoutEntry[], treatments: Night
   // Check for post-meal hypoglycemia specifically
   const postMealHypos = countPostMealHypoglycemia(readings, treatments);
   if (postMealHypos > 0 && !possibleNewSensor) {
-    warnings.push(`⚠️ POST-MEAL HYPOGLYCEMIA: ${postMealHypos} episodes detected. Carb ratios need adjustment BEFORE using SMB for meal coverage.`);
+    warnings.push(`⚠️ POST-MEAL HYPOGLYCEMIA: ${postMealHypos} episodes detected. Carb ratios need adjustment BEFORE using ${dosingModeLabel} for meal coverage.`);
   }
   
-  // Add SMB-specific safety warnings
+  // Add automated dosing safety warnings
   const carbAnnouncements = treatments.filter(t => t.carbs && t.carbs > 0);
   if (carbAnnouncements.length > 0) {
-    warnings.push('⚠️ MEAL COVERAGE WARNING: SMB for carb coverage increases hypoglycemia risk. Monitor post-meal patterns for 3+ hours after each meal.');
+    warnings.push(`⚠️ MEAL COVERAGE WARNING: ${dosingModeLabel} for carb coverage increases hypoglycemia risk. Monitor post-meal patterns for 3+ hours after each meal.`);
   }
   
   // Add general safety reminder

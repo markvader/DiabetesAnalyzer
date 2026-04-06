@@ -61,7 +61,7 @@ type HourlySmbOutcome = {
 
 const OpenAPSSMB = () => {
   const { data, loading, error } = useNightscout();
-  const { selectedPump } = useInsulinPump();
+  const { selectedTherapyAlgorithm } = useInsulinPump();
   const { formatGlucoseValue, convertToCurrentUnit } = useGlucoseFormatting();
   const [smbEvents, setSmbEvents] = useState<SMBEvent[]>([]);
   const [_smbStats, setSmbStats] = useState<SMBStats | null>(null);
@@ -428,11 +428,11 @@ const OpenAPSSMB = () => {
 
     if (smbOutcomesByHour.worstHypo[0]) {
       const h = smbOutcomesByHour.worstHypo[0];
-      reasons.push(`Post-SMB lows highest: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.postSmbLowPct.toFixed(1)}% of SMBs followed by a low in 3h)`);
+      reasons.push(`Post-${dosingModeLowerLabel} lows highest: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.postSmbLowPct.toFixed(1)}% of ${dosingModeLowerLabel} events followed by a low in 3h)`);
     }
     if (smbOutcomesByHour.worstEffectiveness[0] && smbOutcomesByHour.worstEffectiveness[0].count > 0) {
       const h = smbOutcomesByHour.worstEffectiveness[0];
-      reasons.push(`SMBs least effective: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.effectivePct.toFixed(1)}% show a ≥5 mg/dL drop over ~2h)`);
+      reasons.push(`${dosingModeLabel} least effective: ${h.hour.toString().padStart(2, '0')}:00–${h.hour.toString().padStart(2, '0')}:59 (${h.effectivePct.toFixed(1)}% show a ≥5 mg/dL drop over ~2h)`);
     }
 
     const hardSafety = overallTir.lowPct >= 2.0 || (openapsAnalysis?.hypoglycemiaRiskScore ?? 0) >= 40;
@@ -443,7 +443,7 @@ const OpenAPSSMB = () => {
       confidence: openapsAnalysis?.safetyChecks?.dataQuality === 'high' ? 'higher' : openapsAnalysis ? 'medium' : 'low',
       reasons
     };
-  }, [eventInsights.eventCounts.hypo, eventInsights.eventCounts.hyper, eventInsights.eventCounts.severeHypo, eventInsights.period.totalReadings, formatGlucoseValue, hourlyStatsSummary.topHigh, hourlyStatsSummary.topLow, hourlyStatsSummary.worstTir, openapsAnalysis, overallTir.avgSgvMgdl, overallTir.count, overallTir.highPct, overallTir.inRangePct, overallTir.lowPct, smbOutcomesByHour.worstEffectiveness, smbOutcomesByHour.worstHypo]);
+  }, [dosingModeLabel, dosingModeLowerLabel, eventInsights.eventCounts.hypo, eventInsights.eventCounts.hyper, eventInsights.eventCounts.severeHypo, eventInsights.period.totalReadings, formatGlucoseValue, hourlyStatsSummary.topHigh, hourlyStatsSummary.topLow, hourlyStatsSummary.worstTir, openapsAnalysis, overallTir.avgSgvMgdl, overallTir.count, overallTir.highPct, overallTir.inRangePct, overallTir.lowPct, smbOutcomesByHour.worstEffectiveness, smbOutcomesByHour.worstHypo]);
 
    
   const analyzeSMBEvents = useCallback(() => {
@@ -539,10 +539,10 @@ const OpenAPSSMB = () => {
         }
         if (count === 0) return false;
         const avgFutureGlucose = sum / count;
-        return avgFutureGlucose < e.glucose; // SMB was effective if glucose decreased
+        return avgFutureGlucose < e.glucose; // Automated dosing was effective if glucose decreased
       });
 
-      // Analyze carb-related SMBs
+      // Analyze carb-related automated dosing events
       const carbRelatedSMBs = events.filter(e => e.cob > 0);
       const avgCarbSMB = carbRelatedSMBs.length > 0 
         ? carbRelatedSMBs.reduce((sum, e) => sum + e.smbDelivered, 0) / carbRelatedSMBs.length 
@@ -586,15 +586,15 @@ const OpenAPSSMB = () => {
         filteredData.entries, 
         filteredData.treatments, 
         currentProfile,
-        selectedPump?.id
+        selectedTherapyAlgorithm
       );
       setOpenapsAnalysis(analysis);
     } catch (error) {
-      console.error('OpenAPS analysis failed:', error);
+      console.error(`${selectedTherapyAlgorithm === 'loop' ? 'Loop' : 'AAPS'} analysis failed:`, error);
     } finally {
       setAiAnalysisLoading(false);
     }
-  }, [data?.profile, filteredData, selectedPump?.id]);
+  }, [data?.profile, filteredData, selectedTherapyAlgorithm]);
 
   useEffect(() => {
     // Run automatically on initial load (default 2 weeks) or when manual refresh is triggered
@@ -635,6 +635,10 @@ const OpenAPSSMB = () => {
     { value: 2160, label: '3 Months' }
   ];
 
+  const platformLabel = selectedTherapyAlgorithm === 'loop' ? 'Loop' : 'OpenAPS / AAPS';
+  const dosingModeLabel = selectedTherapyAlgorithm === 'loop' ? 'Automated Dosing' : 'SMB';
+  const dosingModeLowerLabel = selectedTherapyAlgorithm === 'loop' ? 'automated dosing' : 'SMB';
+
   const handleTimeWindowChange = (hours: number) => {
     setTimeWindow(hours);
     setIsCustomRange(false);
@@ -650,7 +654,7 @@ const OpenAPSSMB = () => {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pb-4 border-b border-gray-200 dark:border-gray-700">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ultra-Safe OpenAPS SMB Analysis</h2>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ultra-Safe {platformLabel} {dosingModeLabel} Analysis</h2>
             <p className="text-gray-600 dark:text-gray-400">
               AI-Enhanced safety-first analysis with pediatric-focused recommendations
             </p>
@@ -660,10 +664,10 @@ const OpenAPSSMB = () => {
         <div className="text-center py-12">
           <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
-            No OpenAPS Data Available
+            No {platformLabel} Data Available
           </h3>
           <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
-            No OpenAPS treatments found for the selected time period. Please check your Nightscout data or try a different time range.
+            No {platformLabel} treatments found for the selected time period. Please check your Nightscout data or try a different time range.
           </p>
           <button 
             onClick={handleRefreshAI}
@@ -681,7 +685,7 @@ const OpenAPSSMB = () => {
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center pb-4 border-b border-gray-200 dark:border-gray-700 gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ultra-Safe OpenAPS SMB Analysis</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Ultra-Safe {platformLabel} {dosingModeLabel} Analysis</h2>
           <p className="text-gray-600 dark:text-gray-400">
             AI-Enhanced safety-first analysis with pediatric-focused recommendations
           </p>
@@ -800,7 +804,7 @@ const OpenAPSSMB = () => {
         <GlucoseEventInsightsPanel
           insights={eventInsights}
           focus="openaps"
-          title="Event Intelligence • OpenAPS SMB"
+          title={`Event Intelligence • ${platformLabel} ${dosingModeLabel}`}
         />
       )}
 
@@ -827,7 +831,7 @@ const OpenAPSSMB = () => {
               <li>Three-tier settings: Emergency-Safe → Conservative → Standard</li>
               <li>Pediatric-specific safety multipliers</li>
               <li>Real-time safety warnings and contraindications</li>
-              <li>Special carbohydrate coverage analysis for SMB</li>
+              <li>Special carbohydrate coverage analysis for {dosingModeLabel}</li>
             </ul>
           </div>
           
@@ -841,7 +845,7 @@ const OpenAPSSMB = () => {
         </div>
       </div>
 
-      {/* AI OpenAPS Optimizer */}
+      {/* AI therapy optimizer */}
       {filteredData && (
         <AIOpenAPSOptimizer 
           readings={filteredData.entries} 
@@ -850,6 +854,7 @@ const OpenAPSSMB = () => {
             Math.max(1, Math.ceil((selectedRange.endMs - selectedRange.startMs) / (1000 * 60 * 60 * 24))) :
             Math.ceil(timeWindow / 24)
           }
+          therapyAlgorithm={selectedTherapyAlgorithm}
           onOptimizationComplete={setAiOptimization}
         />
       )}
@@ -905,7 +910,7 @@ const OpenAPSSMB = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-orange-400 rounded-full mr-3"></div>
-                  <span>Recommended SMB Coverage: {openapsAnalysis.carbCoverage.recommendedSMBCoverage}U</span>
+                  <span>Recommended {dosingModeLabel} Coverage: {openapsAnalysis.carbCoverage.recommendedSMBCoverage}U</span>
                 </div>
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-pink-400 rounded-full mr-3"></div>
@@ -977,18 +982,18 @@ const OpenAPSSMB = () => {
         </div>
       )}
 
-      {/* SMB Setup Suggestions + Tiered Presets */}
+      {/* Automated Dosing Setup Suggestions + Tiered Presets */}
       {openapsAnalysis && (
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
           <div className="flex items-center mb-4">
             <Settings className="h-6 w-6 text-blue-600 dark:text-blue-400 mr-2" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">SMB Setup Suggestions (Data-Driven)</h3>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">{dosingModeLabel} Setup Suggestions (Data-Driven)</h3>
             <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Confidence: {smbSetupSummary.confidence}</span>
           </div>
 
           <div className="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 p-4 rounded-lg">
             <p className="text-blue-900 dark:text-blue-100 font-medium">
-              Suggested starting tier for SMB behavior: <span className="font-bold">{smbSetupSummary.recommendedTier}</span>
+              Suggested starting tier for {dosingModeLabel} behavior: <span className="font-bold">{smbSetupSummary.recommendedTier}</span>
             </p>
             {smbSetupSummary.reasons.length > 0 && (
               <ul className="mt-2 space-y-1 text-sm text-blue-800 dark:text-blue-200">
@@ -1009,12 +1014,12 @@ const OpenAPSSMB = () => {
                 <h4 className="font-medium text-red-900 dark:text-red-100">Emergency-Safe</h4>
               </div>
               <div className="text-sm text-red-800 dark:text-red-200 space-y-1">
-                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.emergency.smbMaxMinutes}</span></div>
-                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.emergency.smbDeliveryRatio * 100)}%</span></div>
+                <div>{dosingModeLabel} max minutes: <span className="font-medium">{smbBehaviorPresets.emergency.smbMaxMinutes}</span></div>
+                <div>{dosingModeLabel} delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.emergency.smbDeliveryRatio * 100)}%</span></div>
                 <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.emergency.carbsReqThreshold} g</span></div>
-                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
-                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
-                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBAlways ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with COB: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with temp targets: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} always: <span className="font-medium">{smbBehaviorPresets.emergency.enableSMBAlways ? 'On' : 'Off'}</span></div>
               </div>
             </div>
 
@@ -1024,12 +1029,12 @@ const OpenAPSSMB = () => {
                 <h4 className="font-medium text-yellow-900 dark:text-yellow-100">Conservative</h4>
               </div>
               <div className="text-sm text-yellow-800 dark:text-yellow-200 space-y-1">
-                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.conservative.smbMaxMinutes}</span></div>
-                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.conservative.smbDeliveryRatio * 100)}%</span></div>
+                <div>{dosingModeLabel} max minutes: <span className="font-medium">{smbBehaviorPresets.conservative.smbMaxMinutes}</span></div>
+                <div>{dosingModeLabel} delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.conservative.smbDeliveryRatio * 100)}%</span></div>
                 <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.conservative.carbsReqThreshold} g</span></div>
-                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
-                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
-                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBAlways ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with COB: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with temp targets: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} always: <span className="font-medium">{smbBehaviorPresets.conservative.enableSMBAlways ? 'On' : 'Off'}</span></div>
               </div>
             </div>
 
@@ -1039,18 +1044,18 @@ const OpenAPSSMB = () => {
                 <h4 className="font-medium text-green-900 dark:text-green-100">Standard</h4>
               </div>
               <div className="text-sm text-green-800 dark:text-green-200 space-y-1">
-                <div>SMB max minutes: <span className="font-medium">{smbBehaviorPresets.standard.smbMaxMinutes}</span></div>
-                <div>SMB delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.standard.smbDeliveryRatio * 100)}%</span></div>
+                <div>{dosingModeLabel} max minutes: <span className="font-medium">{smbBehaviorPresets.standard.smbMaxMinutes}</span></div>
+                <div>{dosingModeLabel} delivery ratio: <span className="font-medium">{Math.round(smbBehaviorPresets.standard.smbDeliveryRatio * 100)}%</span></div>
                 <div>Carbs req threshold: <span className="font-medium">{smbBehaviorPresets.standard.carbsReqThreshold} g</span></div>
-                <div>SMB with COB: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
-                <div>SMB with temp targets: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
-                <div>SMB always: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBAlways ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with COB: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithCOB ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} with temp targets: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBWithTemptarget ? 'On' : 'Off'}</span></div>
+                <div>{dosingModeLabel} always: <span className="font-medium">{smbBehaviorPresets.standard.enableSMBAlways ? 'On' : 'Off'}</span></div>
               </div>
             </div>
           </div>
 
           <div className="mt-4 text-xs text-gray-600 dark:text-gray-400">
-            Guidance intent: reduce hypoglycemia risk first, then address persistent hyperglycemia. If you see significant lows in specific hours, keep SMB aggression limited in those windows.
+            Guidance intent: reduce hypoglycemia risk first, then address persistent hyperglycemia. If you see significant lows in specific hours, keep {dosingModeLowerLabel} aggression limited in those windows.
           </div>
         </div>
       )}
@@ -1060,18 +1065,18 @@ const OpenAPSSMB = () => {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
           <div className="flex items-center mb-4">
             <Activity className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">SMB Outcomes by Hour</h3>
-            <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Min SMBs/hour: {smbOutcomesByHour.minCount}</span>
+            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100">{dosingModeLabel} Outcomes by Hour</h3>
+            <span className="ml-auto text-sm text-gray-500 dark:text-gray-400">Min {dosingModeLowerLabel} events/hour: {smbOutcomesByHour.minCount}</span>
           </div>
 
           {smbEvents.length === 0 ? (
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              No SMB events detected in the selected period.
+              No {dosingModeLowerLabel} events detected in the selected period.
             </p>
           ) : (
             <>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                “Effective” = average BG in ~2h after SMB drops by ≥5 mg/dL. “Post-SMB low” = any reading below target minimum within 3h.
+                {'"Effective" = average BG in ~2h after '} {dosingModeLowerLabel} {' drops by >=5 mg/dL. "Post-'}{dosingModeLabel}{' low" = any reading below target minimum within 3h.'}
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {smbOutcomesByHour.outcomes.map((h) => {
@@ -1088,7 +1093,7 @@ const OpenAPSSMB = () => {
                     <div
                       key={h.hour}
                       className={`border rounded-lg p-3 transition-colors duration-200 ${bg}`}
-                      title={eligible ? undefined : `Low SMB sample count for this hour (n=${h.count}).`}
+                      title={eligible ? undefined : `Low ${dosingModeLowerLabel} sample count for this hour (n=${h.count}).`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="font-medium text-gray-900 dark:text-gray-100">
@@ -1098,11 +1103,11 @@ const OpenAPSSMB = () => {
                       </div>
                       <div className="mt-2 text-sm text-gray-700 dark:text-gray-300 space-y-1">
                         <div>
-                          <span className="font-medium">Effective</span>: {h.effectivePct.toFixed(1)}% · <span className="font-medium text-red-700 dark:text-red-300">Post-SMB low</span>: {h.postSmbLowPct.toFixed(1)}%
+                          <span className="font-medium">Effective</span>: {h.effectivePct.toFixed(1)}% · <span className="font-medium text-red-700 dark:text-red-300">Post-{dosingModeLabel}{' low'}</span>: {h.postSmbLowPct.toFixed(1)}%
                         </div>
                         <div className="text-xs text-gray-600 dark:text-gray-400">
                           {h.avgDrop2hMgdl != null ? `Avg drop ~2h: ${h.avgDrop2hMgdl.toFixed(0)} mg/dL` : 'Avg drop ~2h: —'}
-                          {h.avgUnits != null ? ` · Avg SMB: ${h.avgUnits.toFixed(2)}U` : ''}
+                          {h.avgUnits != null ? ` · Avg ${dosingModeLabel}: ${h.avgUnits.toFixed(2)}U` : ''}
                         </div>
                         <div className="text-xs text-gray-600 dark:text-gray-400">
                           {h.avgStartBgMgdl != null ? `Avg start BG: ${formatGlucoseValue(h.avgStartBgMgdl, 'mgdl', true)}` : 'Avg start BG: —'}
@@ -1118,7 +1123,7 @@ const OpenAPSSMB = () => {
                   {smbOutcomesByHour.worstHypo[0] && (
                     <div className="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 rounded-lg">
                       <p className="text-sm text-red-800 dark:text-red-200">
-                        <strong>Highest post-SMB low risk:</strong> {smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:00–{smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:59 ({smbOutcomesByHour.worstHypo[0].postSmbLowPct.toFixed(1)}%).
+                        <strong>Highest post-{dosingModeLowerLabel}{' low risk:'}</strong> {smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:00–{smbOutcomesByHour.worstHypo[0].hour.toString().padStart(2, '0')}:59 ({smbOutcomesByHour.worstHypo[0].postSmbLowPct.toFixed(1)}%).
                         Consider keeping SMB behavior more conservative around this time.
                       </p>
                     </div>
@@ -1127,7 +1132,7 @@ const OpenAPSSMB = () => {
                     <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500 p-4 rounded-lg">
                       <p className="text-sm text-yellow-800 dark:text-yellow-200">
                         <strong>Lowest SMB effectiveness:</strong> {smbOutcomesByHour.worstEffectiveness[0].hour.toString().padStart(2, '0')}:00–{smbOutcomesByHour.worstEffectiveness[0].hour.toString().padStart(2, '0')}:59 ({smbOutcomesByHour.worstEffectiveness[0].effectivePct.toFixed(1)}%).
-                        If highs persist here, consider focusing on basal/ISF/timing rather than simply increasing SMB aggression.
+                        If highs persist here, consider focusing on basal/ISF/timing rather than simply increasing {dosingModeLowerLabel} aggression.
                       </p>
                     </div>
                   )}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { analyzeData } from '../services/analysisService';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
@@ -43,6 +44,7 @@ import {
 
 const Basal = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
+  const { selectedPump, selectedTherapyAlgorithm } = useInsulinPump();
   const { formatGlucose } = useGlucoseUnits();
   const { isPremium } = useDesignMode();
   const isModern = false;
@@ -214,7 +216,7 @@ const Basal = () => {
       if (!hasInitialLoad || manualRefresh) {
         setAnalyzing(true);
         try {
-          const results = await analyzeData(filteredData);
+          const results = await analyzeData(filteredData, selectedPump?.id, undefined, selectedTherapyAlgorithm);
           setAnalysisResults(results);
           
           // Mark initial load as complete and reset manual refresh flag
@@ -233,7 +235,7 @@ const Basal = () => {
     };
 
     runSafeAsync(() => performAnalysis(), { label: 'Basal performAnalysis effect' });
-  }, [filteredData, manualRefresh, hasInitialLoad]);
+  }, [filteredData, manualRefresh, hasInitialLoad, selectedPump?.id, selectedTherapyAlgorithm]);
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {

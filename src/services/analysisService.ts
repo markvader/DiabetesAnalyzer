@@ -1,7 +1,7 @@
 import { roundToDecimal } from '../utils/mathUtils';
 import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
 import { analyzeWithAI } from './aiEnhancedAnalysisService';
-import { InsulinPumpProfile, getPumpById } from '../constants/insulinPumps';
+import { InsulinPumpProfile, getPumpById, getPumpPlatformCompatibility, type TherapyAlgorithm } from '../constants/insulinPumps';
 import type { NightscoutEntry, NightscoutProfile, NightscoutTreatment } from '../types/nightscout';
 import { getTreatmentMs } from '../utils/nightscoutTime';
 import { computeIsfCrTuning } from './isfCrTuningService';
@@ -553,7 +553,8 @@ function average(numbers: number[]): number {
 export async function analyzeData(
   data: { entries: NightscoutEntry[]; treatments: NightscoutTreatment[]; profile: NightscoutProfile[] }, 
   pumpId?: string, 
-  customGlucoseRanges?: CustomGlucoseRanges
+  customGlucoseRanges?: CustomGlucoseRanges,
+  therapyAlgorithm: TherapyAlgorithm = 'aaps'
 ): Promise<AnalysisResults | null> {
   if (!data || !data.entries || !data.profile || !data.treatments) {
     return null;
@@ -574,8 +575,15 @@ export async function analyzeData(
   
   // Add pump-specific warnings
   if (pumpProfile) {
-    if (!pumpProfile.aapsSupported) {
-      safetyWarnings.push(`WARNING: ${pumpProfile.name} may require manual configuration in AAPS`);
+    const compatibility = getPumpPlatformCompatibility(pumpProfile.id);
+    const compatibilityLevel = compatibility[therapyAlgorithm];
+
+    if (compatibilityLevel === 'not-supported') {
+      const platformLabel = therapyAlgorithm === 'loop' ? 'Loop' : 'AAPS';
+      safetyWarnings.push(`WARNING: ${pumpProfile.name} is not officially supported by ${platformLabel}.`);
+    } else if (compatibilityLevel === 'experimental') {
+      const platformLabel = therapyAlgorithm === 'loop' ? 'Loop (experimental branch)' : 'AAPS (experimental)';
+      safetyWarnings.push(`WARNING: ${pumpProfile.name} uses ${platformLabel} support. Verify settings conservatively.`);
     }
   }
   

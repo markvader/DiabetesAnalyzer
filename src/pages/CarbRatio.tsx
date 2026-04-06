@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { useDesignMode } from '../contexts/DesignModeContext';
 import { useGlucoseUnits } from '../contexts/GlucoseUnitsContext';
 import { analyzeData } from '../services/analysisService';
@@ -18,6 +19,7 @@ import { useFilteredByTimeRange, useFilteredNightscoutData, useTimeSeriesSpanInf
 
 const CarbRatio = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
+  const { selectedPump, selectedTherapyAlgorithm } = useInsulinPump();
   const { isPremium } = useDesignMode();
   const { formatGlucose } = useGlucoseUnits();
   const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
@@ -306,7 +308,7 @@ const CarbRatio = () => {
       if (!hasInitialLoad || manualRefresh) {
         setAnalyzing(true);
         try {
-          const results = await analyzeData(filteredData);
+          const results = await analyzeData(filteredData, selectedPump?.id, undefined, selectedTherapyAlgorithm);
           setAnalysisResults(results);
           
           // Mark initial load as complete and reset manual refresh flag
@@ -325,7 +327,7 @@ const CarbRatio = () => {
     };
 
     runSafeAsync(() => performAnalysis(), { label: 'CarbRatio performAnalysis effect' });
-  }, [filteredData, manualRefresh, hasInitialLoad]);
+  }, [filteredData, manualRefresh, hasInitialLoad, selectedPump?.id, selectedTherapyAlgorithm]);
 
   // Helper functions
   const getTimeWindowLabel = (hours: number) => {

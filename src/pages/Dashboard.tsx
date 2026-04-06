@@ -46,7 +46,7 @@ import { toEpochMs } from '../utils/time';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { selectedPump, roundBasalRate } = useInsulinPump();
+  const { selectedPump, roundBasalRate, selectedTherapyAlgorithm } = useInsulinPump();
   const { formatDateTime } = useTimeFormat();
   const { isPremium } = useDesignMode();
   const theme = useTheme();
@@ -534,7 +534,7 @@ const Dashboard = () => {
     let cancelled = false;
     const run = safeAsync(async () => {
       if (cancelled) return;
-      const results = await analyzeData(data);
+      const results = await analyzeData(data, selectedPump?.id, undefined, selectedTherapyAlgorithm);
       if (!cancelled) {
         setAnalysisResults(results);
       }
@@ -560,7 +560,7 @@ const Dashboard = () => {
       cancelled = true;
       clearTimeout(timeoutId);
     };
-  }, [data, loading]);
+  }, [data, loading, selectedPump?.id, selectedTherapyAlgorithm]);
   
   const recentReading = useMemo(() => {
     if (entriesSortedAsc.length === 0) return null;

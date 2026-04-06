@@ -17,6 +17,7 @@ import AIInsightsPanel from '../components/AIInsightsPanel';
 import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { useSubscription } from '../contexts/SubscriptionContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
+import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
 import { detectGlucoseAnomalies } from '../services/glucoseAnomalyDetection';
 import { analyzeGlucoseEventInsights } from '../services/glucoseEventInsightsService';
@@ -26,6 +27,7 @@ const Analysis = () => {
   const { data, loading, error, fetchDataForDays } = useNightscout();
   const { isPremium } = useDesignMode();
   const { isSubscribed } = useSubscription();
+  const { selectedPump, selectedTherapyAlgorithm } = useInsulinPump();
   const { unit, formatGlucoseValue, convertToCurrentUnit, getUnitLabel } = useGlucoseFormatting();
   const navigate = useNavigate();
   const [patterns, setPatterns] = useState<ReturnType<typeof detectGlucosePatterns> | null>(null);
@@ -267,7 +269,7 @@ const Analysis = () => {
       if (filteredData) {
         setAnalysisLoading(true);
         try {
-          const results = await analyzeData(filteredData);
+          const results = await analyzeData(filteredData, selectedPump?.id, undefined, selectedTherapyAlgorithm);
           setAnalysisResults(results);
         } catch (err) {
           console.error('Error analyzing data:', err);
@@ -281,7 +283,7 @@ const Analysis = () => {
     };
     
     runSafeAsync(() => runAnalysis(), { label: 'Analysis runAnalysis effect' });
-  }, [filteredData]);
+  }, [filteredData, selectedPump?.id, selectedTherapyAlgorithm]);
   
   const currentProfile = analysisResults?.currentProfile;
 

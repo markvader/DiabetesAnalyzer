@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNightscout } from '../contexts/NightscoutContext';
+import { useInsulinPump } from '../contexts/InsulinPumpContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { analyzeData } from '../services/analysisService';
 import SuggestionTable from '../components/SuggestionTable';
@@ -13,6 +14,7 @@ import { computeIsfDriftModel } from '../services/isfDriftModelService';
 
 const ISF = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
+  const { selectedPump, selectedTherapyAlgorithm } = useInsulinPump();
   const { getUnitLabel, unit } = useGlucoseFormatting();
   const [analysisResults, setAnalysisResults] = useState<Awaited<ReturnType<typeof analyzeData>>>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -107,7 +109,7 @@ const ISF = () => {
       if (!hasInitialLoad || manualRefresh) {
         setAnalyzing(true);
         try {
-          const results = await analyzeData(filteredData);
+          const results = await analyzeData(filteredData, selectedPump?.id, undefined, selectedTherapyAlgorithm);
           setAnalysisResults(results);
           
           // Mark initial load as complete and reset manual refresh flag
@@ -126,7 +128,7 @@ const ISF = () => {
     };
 
     runSafeAsync(() => performAnalysis(), { label: 'ISF performAnalysis effect' });
-  }, [filteredData, manualRefresh, hasInitialLoad, unit]);
+  }, [filteredData, manualRefresh, hasInitialLoad, selectedPump?.id, selectedTherapyAlgorithm, unit]);
 
   // Convert ISF values to current unit
   const convertedAnalysisResults = React.useMemo(() => {
