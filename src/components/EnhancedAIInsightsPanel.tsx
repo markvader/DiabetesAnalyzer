@@ -4,6 +4,7 @@ import { aiService } from '../services/aiService';
 import { useTensorFlow } from '../contexts/TensorFlowContext';
 import { useGlucoseFormatting } from '../hooks/useGlucoseFormatting';
 import { useDesignMode } from '../contexts/DesignModeContext';
+import { buildInsightsFingerprint } from '../utils/analysisFingerprint';
 import type { NightscoutEntry } from '../types/nightscout';
 
 interface EnhancedAIInsightsPanelProps {
@@ -99,11 +100,7 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
   }, [formatGlucoseValue, getUnitLabel, readings, safeTimeInRange, tensorFlowEnabled, tensorFlowReady, unit]);
 
   useEffect(() => {
-    // Create a hash of the current data to compare - with safe number handling
-    const safeTimeInRangeValue = typeof safeTimeInRange.timeInRange === 'number' ? safeTimeInRange.timeInRange.toFixed(1) : '0.0';
-    const safeHighPercentage = typeof safeTimeInRange.highPercentage === 'number' ? safeTimeInRange.highPercentage.toFixed(1) : '0.0';
-    const safeLowPercentage = typeof safeTimeInRange.lowPercentage === 'number' ? safeTimeInRange.lowPercentage.toFixed(1) : '0.0';
-    const dataHash = `${readings.length}-${safeTimeInRangeValue}-${safeHighPercentage}-${safeLowPercentage}`;
+    const dataHash = buildInsightsFingerprint(readings, safeTimeInRange);
     
     // Debug logging to catch any objects
     if (typeof safeTimeInRange.timeInRange !== 'number' || typeof safeTimeInRange.highPercentage !== 'number' || typeof safeTimeInRange.lowPercentage !== 'number') {
@@ -119,14 +116,14 @@ const EnhancedAIInsightsPanel: React.FC<EnhancedAIInsightsPanelProps> = ({
     // 2. Manual refresh was requested, OR
     // 3. The data has changed AND we don't have any insights yet
     const shouldFetch = 
-      !initialLoadDone.current || 
-      manualRefresh || 
-      (dataHash !== lastAnalyzedData && insights.length === 0);
+      !initialLoadDone.current ||
+      manualRefresh ||
+      dataHash !== lastAnalyzedData;
     
     if (shouldFetch && readings && readings.length > 0) {
       fetchInsights(dataHash);
     }
-  }, [fetchInsights, insights.length, lastAnalyzedData, manualRefresh, readings, safeTimeInRange]);
+  }, [fetchInsights, lastAnalyzedData, manualRefresh, readings, safeTimeInRange]);
 
   const getRiskColor = () => {
     switch (riskAssessment) {

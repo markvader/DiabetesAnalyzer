@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { buildManagementPlanFingerprint } from '../utils/analysisFingerprint';
 
 interface AIManagementPlanProps {
   readings: NightscoutEntry[];
@@ -61,22 +62,21 @@ const AIManagementPlan: React.FC<AIManagementPlanProps> = ({ readings, treatment
   }, [readings, treatments, unit, formatGlucoseValue, getUnitLabel, getCurrentGlucoseRanges]);
 
   useEffect(() => {
-    // Create a hash of the current data to compare
-    const dataHash = `${readings.length}-${treatments.length}`;
+    const dataHash = buildManagementPlanFingerprint(readings, treatments, unit);
     
     // Only generate plan if:
     // 1. We haven't loaded anything yet, OR
     // 2. Manual refresh was requested, OR
     // 3. The data has changed AND we don't have a plan yet
     const shouldGenerate = 
-      !initialLoadDone.current || 
-      manualRefresh || 
-      (dataHash !== lastAnalyzedData && !plan);
+      !initialLoadDone.current ||
+      manualRefresh ||
+      dataHash !== lastAnalyzedData;
     
     if (shouldGenerate && readings?.length > 0 && treatments?.length > 0) {
       generatePlan(dataHash);
     }
-  }, [readings, treatments, manualRefresh, lastAnalyzedData, plan, generatePlan]);
+  }, [readings, treatments, manualRefresh, lastAnalyzedData, generatePlan, unit]);
 
   const downloadPlan = () => {
     if (!plan) return;

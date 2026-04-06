@@ -6,6 +6,7 @@ import { useDesignMode } from '../contexts/DesignModeContext';
 import { motion } from 'framer-motion';
 import { formatCostEstimate, getModelById } from '../constants/openaiModels';
 import type { NightscoutEntry } from '../types/nightscout';
+import { buildInsightsFingerprint } from '../utils/analysisFingerprint';
 import { 
   Paper, 
   Typography, 
@@ -89,11 +90,7 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
   }, [readings, timeInRange, unit, formatGlucoseValue, getUnitLabel]);
 
   useEffect(() => {
-    // Create a hash of the current data to compare - with safe number handling
-    const safeTimeInRange = typeof timeInRange.timeInRange === 'number' ? timeInRange.timeInRange.toFixed(1) : '0.0';
-    const safeHighPercentage = typeof timeInRange.highPercentage === 'number' ? timeInRange.highPercentage.toFixed(1) : '0.0';
-    const safeLowPercentage = typeof timeInRange.lowPercentage === 'number' ? timeInRange.lowPercentage.toFixed(1) : '0.0';
-    const dataHash = `${readings.length}-${safeTimeInRange}-${safeHighPercentage}-${safeLowPercentage}`;
+    const dataHash = buildInsightsFingerprint(readings, timeInRange);
     
     // Debug logging to catch any objects
     if (typeof timeInRange.timeInRange !== 'number' || typeof timeInRange.highPercentage !== 'number' || typeof timeInRange.lowPercentage !== 'number') {
@@ -109,14 +106,14 @@ const AIInsightsPanel: React.FC<AIInsightsPanelProps> = ({ readings, timeInRange
     // 2. Manual refresh was requested, OR
     // 3. The data has changed AND we don't have any insights yet
     const shouldFetch = 
-      !initialLoadDone.current || 
-      manualRefresh || 
-      (dataHash !== lastAnalyzedData && insights.length === 0);
+      !initialLoadDone.current ||
+      manualRefresh ||
+      dataHash !== lastAnalyzedData;
     
     if (shouldFetch && readings && readings.length > 0) {
       fetchInsights(dataHash);
     }
-  }, [readings, timeInRange, manualRefresh, lastAnalyzedData, insights.length, fetchInsights]);
+  }, [readings, timeInRange, manualRefresh, lastAnalyzedData, fetchInsights]);
 
   const getRiskColor = () => {
     switch (riskAssessment) {

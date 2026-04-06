@@ -18,6 +18,7 @@ import {
   alpha
 } from '@mui/material';
 import type { NightscoutEntry, NightscoutTreatment } from '../types/nightscout';
+import { buildMealAnalysisFingerprint } from '../utils/analysisFingerprint';
 
 interface AIMealAnalysisProps {
   readings: NightscoutEntry[];
@@ -72,22 +73,21 @@ const AIMealAnalysis: React.FC<AIMealAnalysisProps> = ({ readings, treatments, m
   }, [readings, treatments]);
 
   useEffect(() => {
-    // Create a hash of the current data to compare
-    const dataHash = `${readings.length}-${treatments.length}`;
+    const dataHash = buildMealAnalysisFingerprint(readings, treatments);
     
     // Only analyze meals if:
     // 1. We haven't loaded anything yet, OR
     // 2. Manual refresh was requested, OR
     // 3. The data has changed AND we don't have any insights yet
     const shouldAnalyze = 
-      !initialLoadDone || 
-      manualRefresh || 
-      (dataHash !== lastAnalyzedData && insights.length === 0);
+      !initialLoadDone ||
+      manualRefresh ||
+      dataHash !== lastAnalyzedData;
     
     if (shouldAnalyze && readings?.length > 0 && treatments?.length > 0) {
       analyzeMeals(dataHash);
     }
-  }, [readings, treatments, manualRefresh, initialLoadDone, lastAnalyzedData, insights.length, analyzeMeals]);
+  }, [readings, treatments, manualRefresh, initialLoadDone, lastAnalyzedData, analyzeMeals]);
 
   if (loading) {
     // Premium Design with Advanced Effects

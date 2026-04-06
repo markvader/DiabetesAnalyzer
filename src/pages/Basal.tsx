@@ -9,9 +9,9 @@ import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
-import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
-import { getTreatmentMs } from '../utils/nightscoutTime';
+import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
 import { toMmol, GLUCOSE_RANGES } from '../utils/glucoseUtils';
+import { useFilteredNightscoutData, useTimeSeriesSpanInfo } from '../hooks/useFilteredTimeSeriesData';
 import {
   Container,
   Paper,
@@ -66,7 +66,7 @@ const Basal = () => {
 
   const entriesSortedAsc = React.useMemo(() => {
     if (!data?.entries?.length) return [];
-    return [...data.entries].sort((a, b) => a.date - b.date);
+    return [...data.entries].sort((a, b) => getEntryMs(a) - getEntryMs(b));
   }, [data?.entries]);
 
   const treatmentsSortedAsc = React.useMemo(() => {
@@ -103,23 +103,13 @@ const Basal = () => {
     runSafeAsync(() => fetchDataForDays(Math.max(analysisPeriod, 7)), { label: 'Basal initial fetch' });
   }, [analysisPeriod, fetchDataForDays]);
 
-  // Get filtered readings based on time selection
-  const filteredReadings = React.useMemo(() => {
-    if (!entriesSortedAsc.length) {
-      return [];
-    }
-
-    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
-  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
-
-  // Get filtered treatments based on time selection
-  const filteredTreatments = React.useMemo(() => {
-    if (!treatmentsSortedAsc.length) {
-      return [];
-    }
-
-    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
-  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+  const { filteredReadings, filteredTreatments } = useFilteredNightscoutData(
+    entriesSortedAsc,
+    treatmentsSortedAsc,
+    selectedRange,
+    getEntryMs,
+    getTreatmentMs
+  );
 
   // Create filtered data object for analysis
   const filteredData = React.useMemo(() => {
@@ -334,21 +324,7 @@ const Basal = () => {
   };
 
   // Calculate available data span
-  const dataSpanInfo = React.useMemo(() => {
-    if (!data?.entries?.length) return null;
-    
-    const sortedEntries = [...data.entries].sort((a, b) => a.date - b.date);
-    const oldestEntry = sortedEntries[0];
-    const newestEntry = sortedEntries[sortedEntries.length - 1];
-    const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
-    
-    return {
-      oldestDate: new Date(oldestEntry.date),
-      newestDate: new Date(newestEntry.date),
-      spanDays,
-      totalReadings: data.entries.length
-    };
-  }, [data?.entries]);
+  const dataSpanInfo = useTimeSeriesSpanInfo(entriesSortedAsc, getEntryMs);
 
   const handleRefreshAI = () => {
     setManualRefresh(true);

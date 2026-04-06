@@ -10,11 +10,11 @@ import GlucoseEventInsightsPanel from '../components/GlucoseEventInsightsPanel';
 import { AlertTriangle, Brain, Shield, RefreshCw, Calendar, Clock, Sparkles } from 'lucide-react';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { runSafeAsync } from '../utils/safeAsync';
-import { sliceSortedByTimeRange } from '../utils/sortedTimeSeries';
-import { getTreatmentMs } from '../utils/nightscoutTime';
+import { getEntryMs, getTreatmentMs } from '../utils/nightscoutTime';
 import { toMmol } from '../utils/glucoseUtils';
 import { GLUCOSE_RANGES } from '../constants/glucoseRanges';
-import type { NightscoutDeviceStatus, NightscoutTreatment } from '../types/nightscout';
+import type { NightscoutDeviceStatus } from '../types/nightscout';
+import { useFilteredByTimeRange, useFilteredNightscoutData, useTimeSeriesSpanInfo } from '../hooks/useFilteredTimeSeriesData';
 
 const CarbRatio = () => {
   const { data, loading, error, fetchDataForDays, analysisPeriod } = useNightscout();
@@ -39,7 +39,7 @@ const CarbRatio = () => {
 
   const entriesSortedAsc = React.useMemo(() => {
     if (!data?.entries?.length) return [];
-    return [...data.entries].sort((a, b) => a.date - b.date);
+    return [...data.entries].sort((a, b) => getEntryMs(a) - getEntryMs(b));
   }, [data?.entries]);
 
   const treatmentsSortedAsc = React.useMemo(() => {
@@ -47,7 +47,7 @@ const CarbRatio = () => {
     return [...data.treatments].sort((a, b) => getTreatmentMs(a) - getTreatmentMs(b));
   }, [data?.treatments]);
 
-  const getDeviceStatusMs = (status: NightscoutDeviceStatus): number => {
+  const getDeviceStatusMs = React.useCallback((status: NightscoutDeviceStatus): number => {
     const ms = status.mills ?? status.date;
     if (typeof ms === 'number' && Number.isFinite(ms)) return ms;
     if (status.created_at) {
@@ -55,12 +55,12 @@ const CarbRatio = () => {
       if (Number.isFinite(parsed)) return parsed;
     }
     return 0;
-  };
+  }, []);
 
   const deviceStatusSortedAsc = React.useMemo(() => {
     if (!data?.deviceStatus?.length) return [];
     return [...data.deviceStatus].sort((a, b) => getDeviceStatusMs(a) - getDeviceStatusMs(b));
-  }, [data?.deviceStatus]);
+  }, [data?.deviceStatus, getDeviceStatusMs]);
 
   const selectedRange = React.useMemo(() => {
     if (isCustomRange) {
@@ -91,28 +91,15 @@ const CarbRatio = () => {
     runSafeAsync(() => fetchDataForDays(Math.max(analysisPeriod, 7)), { label: 'CarbRatio initial fetch' });
   }, [analysisPeriod, fetchDataForDays]);
 
-  // Get filtered readings based on time selection
-  const filteredReadings = React.useMemo(() => {
-    if (!entriesSortedAsc.length) {
-      return [];
-    }
+  const { filteredReadings, filteredTreatments } = useFilteredNightscoutData(
+    entriesSortedAsc,
+    treatmentsSortedAsc,
+    selectedRange,
+    getEntryMs,
+    getTreatmentMs
+  );
 
-    return sliceSortedByTimeRange(entriesSortedAsc, (reading) => reading.date, selectedRange.startMs, selectedRange.endMs);
-  }, [entriesSortedAsc, selectedRange.startMs, selectedRange.endMs]);
-
-  // Get filtered treatments based on time selection
-  const filteredTreatments = React.useMemo(() => {
-    if (!treatmentsSortedAsc.length) {
-      return [];
-    }
-
-    return sliceSortedByTimeRange(treatmentsSortedAsc, getTreatmentMs, selectedRange.startMs, selectedRange.endMs);
-  }, [treatmentsSortedAsc, selectedRange.startMs, selectedRange.endMs]);
-
-  const filteredDeviceStatus = React.useMemo(() => {
-    if (!deviceStatusSortedAsc.length) return [];
-    return sliceSortedByTimeRange(deviceStatusSortedAsc, getDeviceStatusMs, selectedRange.startMs, selectedRange.endMs);
-  }, [deviceStatusSortedAsc, selectedRange.startMs, selectedRange.endMs]);
+  const filteredDeviceStatus = useFilteredByTimeRange(deviceStatusSortedAsc, getDeviceStatusMs, selectedRange);
 
   // Create filtered data object for analysis
   const filteredData = React.useMemo(() => {
@@ -429,20 +416,7 @@ const CarbRatio = () => {
   };
 
   // Calculate available data span
-  const dataSpanInfo = React.useMemo(() => {
-    if (!entriesSortedAsc.length) return null;
-    
-    const oldestEntry = entriesSortedAsc[0];
-    const newestEntry = entriesSortedAsc[entriesSortedAsc.length - 1];
-    const spanDays = Math.round((newestEntry.date - oldestEntry.date) / (1000 * 60 * 60 * 24));
-    
-    return {
-      oldestDate: new Date(oldestEntry.date),
-      newestDate: new Date(newestEntry.date),
-      spanDays,
-      totalReadings: entriesSortedAsc.length
-    };
-  }, [entriesSortedAsc]);
+  const dataSpanInfo = useTimeSeriesSpanInfo(entriesSortedAsc, getEntryMs);
 
   const handleRefreshAI = () => {
     setManualRefresh(true);
